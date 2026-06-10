@@ -53,6 +53,20 @@ export async function uploadGearImage(gearId, file) {
   return res.json();
 }
 
+export async function resetLedger() {
+  const res = await fetch(`${API}/reset-ledger`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ confirm: 'RESET_ALL_TRANSACTIONS' })
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `清空失败 (${res.status})`);
+  }
+  return res.json();
+}
+
 export async function checkHealth() {
   const res = await fetch(`${API}/health`);
   if (!res.ok) throw new Error('服务不可用');

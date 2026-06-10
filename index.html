@@ -273,10 +273,16 @@
 
       <div class="import-panel" id="importHistoryPanel">
         <h4 style="display:flex;align-items:center;width:100%">
-          <span><i class="ti ti-files"></i> 已上传文件 <span class="panel-sub">按来源分类</span></span>
+          <span><i class="ti ti-files"></i> 已上传文件 <span class="panel-sub">按来源分类 · 每笔账目绑定文件批次</span></span>
           <span class="import-history-count" id="importHistoryCount"></span>
         </h4>
         <div id="importHistoryMain"></div>
+      </div>
+
+      <div class="import-panel import-danger-zone">
+        <h4><i class="ti ti-alert-triangle"></i> 重置账本</h4>
+        <p class="import-danger-desc">清空全部账目和导入记录，分类/来源/规则等设置会保留。清空后请按时间顺序重新导入各来源的账单文件。</p>
+        <button class="btn btn-danger" onclick="resetAllLedger()"><i class="ti ti-trash"></i> 清空全部账目</button>
       </div>
 
       <div class="import-panel" id="importRecordPreview" style="display:none">

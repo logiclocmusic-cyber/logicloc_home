@@ -3,7 +3,11 @@ import {
   DEFAULT_CATS, DEFAULT_EMOJIS, DEFAULT_SOURCES, DEFAULT_SUBCATS, CAT_COLORS,
   MONITOR_CATS, EXCLUDE_CATS, OFFSET_CATS, MONITOR_EMOJIS, INCOME_DATA_CATS
 } from './config.js';
-import { fetchState, saveState, checkHealth } from './api.js';
+import { fetchState, saveState, resetLedger, checkHealth } from './api.js';
+import {
+  createBatchId, stampImportBatch, deriveImportHistory,
+  recordsForBatch as batchRecords, deleteConfirmMessage
+} from './import-manager.js';
 import { API_BASE } from './apiBase.js';
 import { fmtMoney, fmtMoneySigned, fmtCount, fmtChartAxis, chartMoneyTooltip } from './format.js';
 import {
@@ -40,95 +44,8 @@ let stateVersion = 0;
 let pendingImport = null;
 let importHistory = [];
 
-function loadImportHistory() {
-  /* importHistory 随 /api/state 一并加载 */
-}
-
-function saveImportHistory() {
-  persist();
-}
-
-/** 从交易数据的 batch 标记合并导入记录，补全历史/备份恢复后缺失的文件列表 */
 function syncImportHistory() {
-  const saved = [...importHistory];
-  const savedById = {};
-  saved.forEach(h => { if (h.id != null) savedById[h.id] = h; });
-
-  const batchMap = {};
-  allData.forEach(r => {
-    const bid = r._importBatchId;
-    if (!bid) return;
-    if (!batchMap[bid]) {
-      const s = savedById[bid];
-      batchMap[bid] = {
-        id: bid,
-        source: r['来源'] || s?.source || '',
-        fileName: r._importFileName || s?.fileName || '未命名文件',
-        format: r._importFormat || s?.format || '',
-        startMonth: r['日期']?.slice(0, 7) || s?.startMonth || '',
-        endMonth: r['日期']?.slice(0, 7) || s?.endMonth || '',
-        count: 0,
-        importedAt: r._importedAt || s?.importedAt || ''
-      };
-    }
-    const b = batchMap[bid];
-    b.count++;
-    const m = r['日期']?.slice(0, 7);
-    if (m) {
-      if (!b.startMonth || m < b.startMonth) b.startMonth = m;
-      if (!b.endMonth || m > b.endMonth) b.endMonth = m;
-    }
-  });
-
-  const legacyBySrc = {};
-  allData.filter(r => !r._importBatchId).forEach(r => {
-    const src = r['来源'] || '未知来源';
-    const key = 'legacy-' + src;
-    if (!legacyBySrc[key]) {
-      legacyBySrc[key] = {
-        id: key,
-        source: src,
-        fileName: '历史数据（恢复备份/手动录入）',
-        format: 'legacy',
-        startMonth: '',
-        endMonth: '',
-        count: 0,
-        importedAt: ''
-      };
-    }
-    const leg = legacyBySrc[key];
-    leg.count++;
-    const m = r['日期']?.slice(0, 7);
-    if (m) {
-      if (!leg.startMonth || m < leg.startMonth) leg.startMonth = m;
-      if (!leg.endMonth || m > leg.endMonth) leg.endMonth = m;
-    }
-  });
-
-  const merged = [];
-  const seenId = new Set();
-  Object.values(batchMap).forEach(b => { merged.push(b); seenId.add(b.id); });
-
-  // 仅保留仍有账目关联的导入记录，避免已删除批次在列表中“幽灵显示”
-  saved.forEach(h => {
-    if (h.id != null && batchMap[h.id]) return;
-    if (h.id != null && seenId.has(h.id)) return;
-    if (String(h.id).startsWith('legacy-')) return;
-    // 无关联账目的历史导入条目不再展示
-  });
-
-  const sourcesCovered = new Set(merged.map(h => h.source));
-  Object.values(legacyBySrc).forEach(leg => {
-    if (!sourcesCovered.has(leg.source)) merged.push(leg);
-  });
-
-  merged.sort((a, b) => {
-    const da = a.importedAt || a.endMonth || '';
-    const db = b.importedAt || b.endMonth || '';
-    return db.localeCompare(da);
-  });
-
-  importHistory = merged;
+  importHistory = deriveImportHistory(allData, importHistory);
 }
 
 function renderImportHistoryUI() {
@@ -289,6 +206,7 @@ function flash() {
 }
 
 function buildState() {
+  syncImportHistory();
   const gear = getGearState();
   return {
     transactions: allData,
@@ -1548,30 +1466,17 @@ async function handleImportFile(file) {
 function confirmImport() {
   if (!pendingImport || !pendingImport.records.length) return;
 
-  const batchId = Date.now();
+  const batchId = createBatchId();
   const importedAt = new Date().toISOString();
-  pendingImport.records.forEach(r => {
-    r._importBatchId = batchId;
-    r._importFileName = pendingImport.fileName;
-    r._importFormat = pendingImport.format;
-    r._importedAt = importedAt;
+  stampImportBatch(pendingImport.records, {
+    batchId,
+    fileName: pendingImport.fileName,
+    format: pendingImport.format,
+    importedAt
   });
 
   allData.push(...pendingImport.records);
   allData.sort((a, b) => (b['日期'] + b['时间']).localeCompare(a['日期'] + a['时间']));
-
-  importHistory.unshift({
-    id: batchId,
-    source: pendingImport.sourceName,
-    fileName: pendingImport.fileName,
-    format: pendingImport.format,
-    startMonth: pendingImport.startMonth,
-    endMonth: pendingImport.endMonth,
-    count: pendingImport.records.length,
-    importedAt
-  });
-  if (importHistory.length > 100) importHistory = importHistory.slice(0, 100);
-  saveImportHistory();
 
   const count = pendingImport.records.length;
   resetImportPreview();
@@ -1581,17 +1486,8 @@ function confirmImport() {
   renderKPI();
   renderMonitor();
   updatePendingBadge();
-  syncImportHistory();
   renderImportHistoryUI();
   alert(`成功导入 ${count} 笔记录`);
-}
-
-function recordsForBatch(entry) {
-  if (!entry) return [];
-  if (entry.format === 'legacy' || String(entry.id).startsWith('legacy-')) {
-    return allData.filter(r => !r._importBatchId && r['来源'] === entry.source);
-  }
-  return allData.filter(r => String(r._importBatchId) === String(entry.id));
 }
 
 function deleteImportBatch(encodedId) {
@@ -1599,19 +1495,8 @@ function deleteImportBatch(encodedId) {
   const entry = importHistory.find(h => String(h.id) === String(batchId));
   if (!entry) return;
 
-  const toDelete = recordsForBatch(entry);
-  const fname = entry.fileName || '未命名文件';
-  const isLegacy = entry.format === 'legacy' || String(entry.id).startsWith('legacy-');
-
-  let msg;
-  if (toDelete.length === 0) {
-    msg = `「${fname}」当前无关联账目，仅删除这条导入记录。确认？`;
-  } else if (isLegacy) {
-    msg = `⚠️ 将删除来源「${entry.source}」下全部 ${toDelete.length} 笔「历史/备份」账目。\n\n通过其他文件导入的账目不受影响，但无文件标记的旧数据会全部清除。\n\n此操作不可撤销，确认删除？`;
-  } else {
-    msg = `将删除文件「${fname}」及其 ${toDelete.length} 笔关联账目。\n\n此操作不可撤销，确认删除？`;
-  }
-  if (!confirm(msg)) return;
+  const toDelete = batchRecords(allData, entry);
+  if (!confirm(deleteConfirmMessage(entry, toDelete))) return;
 
   const deleteIds = new Set(toDelete.map(r => r.id));
   allData = allData.filter(r => !deleteIds.has(r.id));
@@ -1620,8 +1505,6 @@ function deleteImportBatch(encodedId) {
     excluded.delete(id);
   });
 
-  importHistory = importHistory.filter(h => String(h.id) !== String(batchId));
-  saveImportHistory();
   persist();
   buildSrcChips();
   applyF();
@@ -1630,6 +1513,39 @@ function deleteImportBatch(encodedId) {
   updatePendingBadge();
   renderImportTimelineView();
   renderImportHistoryUI();
+}
+
+async function resetAllLedger() {
+  const n = allData.length;
+  const files = importHistory.length;
+  const msg =
+    `将永久删除全部 ${n} 笔账目和 ${files} 条导入记录。\n\n` +
+    '分类、来源、规则、装备库等设置会保留。\n\n' +
+    '此操作不可撤销。请输入「清空」以确认：';
+  const input = prompt(msg);
+  if (input !== '清空') return;
+
+  try {
+    const res = await resetLedger();
+    if (res?.stateVersion != null) stateVersion = res.stateVersion;
+    allData = [];
+    importHistory = [];
+    refunded = new Set();
+    excluded = new Set();
+    nextId = 1;
+    pendingImport = null;
+    resetImportPreview();
+    buildSrcChips();
+    applyF();
+    renderKPI();
+    renderMonitor();
+    updatePendingBadge();
+    renderImportPage();
+    updateBackendFooter(0);
+    alert('已清空全部账目，请重新导入账单文件。');
+  } catch (err) {
+    alert('清空失败：' + err.message);
+  }
 }
 
 function setupImportHistoryDelete() {
@@ -2109,7 +2025,7 @@ Object.assign(window, {
   openCat, closeCat, addCat, saveCat, delCat, toggleCatSub,
   setQuick, resetF, applyF, changePgSize, filterSrc, setTypeFilter, toggleSortCol,
   toggleSelect, toggleSelectAll, clearSelection, applyBulkCat, applyBulkSubCat, bulkToggleRefund,
-  resetImportPreview, confirmImport, onImportSrcChange,
+  resetImportPreview, confirmImport, onImportSrcChange, resetAllLedger,
   goP, toggleRf, toggleExclude, updCat, updSubCat, updCatDet, showAllDetail, showDetail, showIncomeDetail, closeDetModal, toggleDetSort,
   toggleDetSelect, toggleDetSelectAll, clearDetSelection, applyDetBulkCat, applyDetBulkSubCat, detBulkToggleRefund,
   openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload,

@@ -3,7 +3,7 @@ import cors from 'cors';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { readState, writeState, mergeTransactions, getStats } from './db.js';
+import { readState, writeState, mergeTransactions, resetLedger, getStats } from './db.js';
 import { initAuth, login, logout, getUserFromToken, parseAuthHeader } from './auth.js';
 import { scanInvoiceImage, getAiStatus } from './deepseek.js';
 import {
@@ -123,6 +123,18 @@ app.put('/api/state', requireAuth, (req, res) => {
         currentVersion: err.currentVersion
       });
     }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/reset-ledger', requireAuth, (req, res) => {
+  try {
+    if (req.body?.confirm !== 'RESET_ALL_TRANSACTIONS') {
+      return res.status(400).json({ error: '需要确认参数 confirm: RESET_ALL_TRANSACTIONS' });
+    }
+    const result = resetLedger();
+    res.json(result);
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

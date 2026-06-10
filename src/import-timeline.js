@@ -244,7 +244,7 @@ export const ImportTimeline = (() => {
   }
 
   function formatLabel(fmt) {
-    return { wechat: '微信', alipay: '支付宝', bank: '银行', legacy: '历史' }[fmt] || fmt || '';
+    return { wechat: '微信', alipay: '支付宝', bank: '银行', manual: '手动' }[fmt] || fmt || '';
   }
 
   function renderHistoryItem(h) {
@@ -256,13 +256,12 @@ export const ImportTimeline = (() => {
     const date = (h.importedAt || '').slice(0, 10) || '—';
     const color = typeof srcColor === 'function' ? srcColor(h.source) : '#98a2b3';
     const bid = encodeURIComponent(String(h.id));
-    const isLegacy = h.format === 'legacy' || String(h.id).startsWith('legacy-');
     return `<div class="import-history-item">
       <span class="ih-date">${date}</span>
       <span class="tl-src-dot" style="background:${color};margin-top:4px"></span>
       <div class="ih-main">
         <div class="ih-file" title="${fname}">${fname}</div>
-        <div class="ih-meta">${fmt ? fmt + ' · ' : ''}${range} · ${h.count || 0} 笔${isLegacy ? ' · 含手动录入' : ''}</div>
+        <div class="ih-meta">${fmt ? fmt + ' · ' : ''}${range} · ${h.count || 0} 笔</div>
       </div>
       <button class="ih-del" data-del-batch="${bid}" title="删除此文件及关联账目"><i class="ti ti-trash"></i></button>
     </div>`;
@@ -329,13 +328,12 @@ export const ImportTimeline = (() => {
       const date = (h.importedAt || '').slice(0, 10) || '—';
       const color = typeof srcColor === 'function' ? srcColor(h.source) : '#98a2b3';
       const bid = encodeURIComponent(String(h.id));
-      const isLegacy = h.format === 'legacy' || String(h.id).startsWith('legacy-');
       return `<div class="import-history-item">
         <span class="ih-date">${date}</span>
         <span class="tl-src-dot" style="background:${color};margin-top:4px"></span>
         <div class="ih-main">
           <div class="ih-file" title="${fname}">${fname}</div>
-          <div class="ih-meta">${h.source}${fmt ? ' · ' + fmt : ''} · ${range} · ${h.count || 0} 笔${isLegacy ? ' · 含手动录入' : ''}</div>
+          <div class="ih-meta">${h.source}${fmt ? ' · ' + fmt : ''} · ${range} · ${h.count || 0} 笔</div>
         </div>
         <button class="ih-del" data-del-batch="${bid}" title="删除此文件及关联账目"><i class="ti ti-trash"></i></button>
       </div>`;

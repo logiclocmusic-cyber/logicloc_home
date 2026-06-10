@@ -146,6 +146,31 @@ export function mergeTransactions(newRows) {
   return { added: added.length, total: state.transactions.length, stateVersion };
 }
 
+/** 清空全部账目与导入历史，保留分类/来源/规则/装备库等配置 */
+export function resetLedger() {
+  const verRow = db.prepare("SELECT value FROM meta WHERE key = 'stateVersion'").get();
+  const curVer = verRow ? JSON.parse(verRow.value) : 0;
+  const newVer = curVer + 1;
+
+  db.exec('BEGIN');
+  try {
+    db.prepare('DELETE FROM transactions').run();
+    const upsert = db.prepare(
+      'INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+    );
+    upsert.run('refunded', JSON.stringify([]));
+    upsert.run('excluded', JSON.stringify([]));
+    upsert.run('importHistory', JSON.stringify([]));
+    upsert.run('nextId', JSON.stringify(1));
+    upsert.run('stateVersion', JSON.stringify(newVer));
+    db.exec('COMMIT');
+    return { ok: true, stateVersion: newVer };
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
 export function getStats() {
   const count = db.prepare('SELECT COUNT(*) AS n FROM transactions').get().n;
   return { count, dbPath: DB_PATH };
