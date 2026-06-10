@@ -250,6 +250,8 @@ export const Parsers = (() => {
     };
   }
 
+  const PLATFORM_PREFIX = { wechat: '微信', alipay: '支付宝', bank: '银行', jd: '京东' };
+
   function detectFormat(rows) {
     const sample = rows.slice(0, 50).map(r => r.join(',')).join('\n');
     if (/微信支付账单明细|微信昵称/.test(sample)) return 'wechat';
@@ -258,6 +260,79 @@ export const Parsers = (() => {
     if (/交易时间,交易类型,交易对方/.test(sample)) return 'wechat';
     if (/记账日期|交易日期|摘要|对方户名|借贷/.test(sample)) return 'bank';
     return 'unknown';
+  }
+
+  /** 从账单文件头、文件名提取姓名/昵称等线索 */
+  function extractFileHints(file, rows) {
+    const hints = new Set();
+    const fname = (file?.name || '').replace(/\.[^.]+$/i, '');
+    if (fname) hints.add(fname);
+
+    for (let i = 0; i < Math.min(rows.length, 35); i++) {
+      const row = rows[i];
+      for (let j = 0; j < row.length; j++) {
+        const cell = String(row[j] ?? '').trim();
+        const next = String(row[j + 1] ?? '').trim();
+        if (/微信昵称|^姓名$|支付宝账户|账户名称|户名/.test(cell) && next) hints.add(next);
+        const kv = cell.match(/^(微信昵称|姓名|支付宝账户|账户名称|户名)[：:]\s*(.+)$/);
+        if (kv?.[2]) hints.add(kv[2].trim());
+      }
+      const joined = row.join(',');
+      const inline = joined.match(/微信昵称[：:]\s*([^,]+)/);
+      if (inline?.[1]) hints.add(inline[1].trim());
+    }
+    return [...hints].filter(Boolean);
+  }
+
+  /** 根据文件格式与内容自动匹配 SOURCES 中的账本名称 */
+  function resolveSourceName(file, rows, format, sources) {
+    if (!sources?.length) throw new Error('请先在系统中配置账单来源');
+
+    const prefix = PLATFORM_PREFIX[format] || '';
+    const hints = extractFileHints(file, rows);
+
+    const candidates = prefix
+      ? sources.filter(s => s.name.startsWith(`${prefix}-`) || s.name === prefix)
+      : [...sources];
+
+    let best = null;
+    let bestScore = 0;
+
+    for (const s of candidates) {
+      const person = s.name.includes('-') ? s.name.split('-').slice(1).join('-') : s.name;
+      let score = 0;
+      if (prefix && s.name.startsWith(prefix)) score += 5;
+
+      for (const h of hints) {
+        if (h.includes(s.name)) score += 50;
+        if (s.name.includes(h) && h.length >= 2) score += 30;
+        if (person.length >= 2 && h.includes(person)) score += 40;
+        if (person.length >= 2 && person.includes(h) && h.length >= 2) score += 25;
+      }
+
+      if (format === 'bank') {
+        if (/信用|信用卡/.test(hints.join(' ')) && /信用/.test(s.name)) score += 30;
+        if (/储蓄|借记/.test(hints.join(' ')) && /储蓄/.test(s.name)) score += 30;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = s.name;
+      }
+    }
+
+    if (best && bestScore >= 25) return best;
+    if (candidates.length === 1) return candidates[0].name;
+
+    if (prefix) {
+      const platformOnly = sources.filter(s => s.name.startsWith(`${prefix}-`));
+      if (platformOnly.length === 1) return platformOnly[0].name;
+    }
+
+    const label = prefix || format || '账单';
+    throw new Error(
+      `无法从文件自动识别${label}账本。请确认账单内的姓名/昵称或文件名与已配置来源一致（如「${prefix || '微信'}-陈橙」）。`
+    );
   }
 
   function isNeutralWeChatType(typeRaw) {
@@ -421,7 +496,7 @@ export const Parsers = (() => {
     return out;
   }
 
-  async function parseFile(file, sourceName, formatHint) {
+  async function parseFile(file, sourceName, formatHint, sources) {
     const rows = await readRows(file);
     if (!rows.length) throw new Error('文件为空或无法解析');
 
@@ -430,22 +505,25 @@ export const Parsers = (() => {
         ? 'wechat'
         : detectFormat(rows))
       : formatHint;
+
+    const resolvedSource = sourceName || resolveSourceName(file, rows, format, sources);
     let records;
 
     switch (format) {
-      case 'wechat': records = parseWeChat(rows, sourceName); break;
-      case 'alipay': records = parseAlipay(rows, sourceName); break;
-      case 'bank': records = parseBank(rows, sourceName); break;
+      case 'wechat': records = parseWeChat(rows, resolvedSource); break;
+      case 'alipay': records = parseAlipay(rows, resolvedSource); break;
+      case 'bank': records = parseBank(rows, resolvedSource); break;
       default:
         throw new Error('无法识别账单格式，请手动选择：微信 / 支付宝 / 银行流水');
     }
 
     if (!records.length) throw new Error('未解析到有效交易记录，请检查文件内容');
-    return { format, records };
+    return { format, records, sourceName: resolvedSource };
   }
 
   return {
-    parseFile, detectFormat, txnHash, txnDedupKey, buildDedupSet, addToDedupSet, isDuplicate,
+    parseFile, detectFormat, resolveSourceName, extractFileHints,
+    txnHash, txnDedupKey, buildDedupSet, addToDedupSet, isDuplicate,
     readText, parseCSV, readRows, isExcelFile
   };
 })();

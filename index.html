@@ -238,60 +238,43 @@
 
   <div class="page view" id="view-import">
     <div class="import-layout">
-      <div class="import-top-row">
-        <div class="import-panel">
-          <h4><i class="ti ti-upload"></i> 上传账单</h4>
-          <div class="import-steps">
-            <span class="import-step on" id="impStep1">① 选择账本</span>
-            <span class="import-step" id="impStep2">② 上传文件</span>
-            <span class="import-step" id="impStep3">③ 确认导入</span>
-          </div>
-          <div class="import-step-block">
-            <label class="import-step-label">账单来源（账本）*</label>
-            <div class="import-ledger-picker" id="importLedgerPicker"></div>
-            <div id="imp-new-row" class="import-new-src" style="display:none">
-              <div class="arow">
-                <input type="color" id="imp-new-color" value="#6941c6" style="width:44px;height:36px;border-radius:8px">
-                <input id="imp-new-src" placeholder="如：微信-胡晗" style="flex:1">
-                <button class="btn btn-p" type="button" onclick="confirmNewImportSource()">添加</button>
-                <button class="btn" type="button" onclick="cancelNewImportSource()">取消</button>
-              </div>
-            </div>
-          </div>
-          <div class="import-upload-section disabled" id="importUploadSection">
-            <div class="src-type" id="impFormatTabs">
-              <label class="on"><input type="radio" name="imp-format" value="auto" checked> 自动识别</label>
-              <label><input type="radio" name="imp-format" value="wechat"> 微信</label>
-              <label><input type="radio" name="imp-format" value="alipay"> 支付宝</label>
-              <label><input type="radio" name="imp-format" value="bank"> 银行</label>
-            </div>
-            <div class="drop-zone" id="dropZone">
-              <i class="ti ti-upload"></i>
-              <p id="dropZoneHint">请先选择上方账本</p>
-              <span>支持微信 / 支付宝 / 银行流水（CSV、Excel）</span>
-            </div>
-            <input type="file" id="importBillFile" accept=".csv,.txt,.xlsx,.xls" style="display:none">
-          </div>
-          <div class="import-stats" id="importStats"></div>
-          <div class="import-preview" id="importPreview">选择账本并上传文件后将显示解析摘要</div>
-          <div class="import-dup-panel" id="importDupPanel" style="display:none">
-            <div class="import-dup-head">
-              <h5><i class="ti ti-copy"></i> 重复项目 <span class="panel-sub">默认不导入，可勾选需要导入的项</span></h5>
-              <div class="import-dup-actions">
-                <button type="button" class="btn btn-sm" onclick="toggleAllDupImport(true)">全选</button>
-                <button type="button" class="btn btn-sm" onclick="toggleAllDupImport(false)">全不选</button>
-              </div>
-            </div>
-            <div class="import-dup-list" id="importDupList"></div>
-          </div>
-          <div class="import-actions">
-            <button class="btn" onclick="resetImportPreview()"><i class="ti ti-refresh"></i> 清空预览</button>
-            <button class="btn btn-p" id="importConfirmBtn" disabled onclick="confirmImport()"><i class="ti ti-check"></i> 确认导入</button>
-          </div>
+      <div class="import-panel">
+        <h4><i class="ti ti-upload"></i> 上传账单</h4>
+        <div class="import-steps">
+          <span class="import-step on" id="impStep1">① 上传文件</span>
+          <span class="import-step" id="impStep2">② 确认导入</span>
         </div>
-
-        <div class="tl-card" id="importTimeline"></div>
+        <div class="src-type" id="impFormatTabs">
+          <label class="on"><input type="radio" name="imp-format" value="auto" checked> 自动识别</label>
+          <label><input type="radio" name="imp-format" value="wechat"> 微信</label>
+          <label><input type="radio" name="imp-format" value="alipay"> 支付宝</label>
+          <label><input type="radio" name="imp-format" value="bank"> 银行</label>
+        </div>
+        <div class="drop-zone" id="dropZone">
+          <i class="ti ti-upload"></i>
+          <p id="dropZoneHint">拖入 CSV / Excel 文件，或点击选择</p>
+          <span>上传后自动识别账单格式与账本来源</span>
+        </div>
+        <input type="file" id="importBillFile" accept=".csv,.txt,.xlsx,.xls" style="display:none">
+        <div class="import-stats" id="importStats"></div>
+        <div class="import-preview" id="importPreview">上传文件后将显示解析摘要</div>
+        <div class="import-dup-panel" id="importDupPanel" style="display:none">
+          <div class="import-dup-head">
+            <h5><i class="ti ti-copy"></i> 重复项目 <span class="panel-sub">默认不导入，可勾选需要导入的项</span></h5>
+            <div class="import-dup-actions">
+              <button type="button" class="btn btn-sm" onclick="toggleAllDupImport(true)">全选</button>
+              <button type="button" class="btn btn-sm" onclick="toggleAllDupImport(false)">全不选</button>
+            </div>
+          </div>
+          <div class="import-dup-list" id="importDupList"></div>
+        </div>
+        <div class="import-actions">
+          <button class="btn" onclick="resetImportPreview()"><i class="ti ti-refresh"></i> 清空预览</button>
+          <button class="btn btn-p" id="importConfirmBtn" disabled onclick="confirmImport()"><i class="ti ti-check"></i> 确认导入</button>
+        </div>
       </div>
+
+      <div class="tl-card" id="importTimeline"></div>
 
       <div class="import-panel" id="importHistoryPanel">
         <h4 style="display:flex;align-items:center;width:100%">
