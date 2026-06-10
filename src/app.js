@@ -13,6 +13,12 @@ import {
   renderCompanyCostPage, setupCompanyCost,
   openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload
 } from './company-cost.js';
+import {
+  initSplits, hasSplits, expandRowForStats, rowMatchesCat, rowSearchHaystack,
+  toggleSplitExpand, isSplitExpanded, openSplitEditor, closeSplitEditor, getSplitEditId,
+  addSplitLine, saveSplitEditor, clearSplits, updateSplitItem,
+  parentCatCellHtml, splitSubRowHtml
+} from './splits.js';
 
 let CATS = [...DEFAULT_CATS];
 let EMOJIS = { ...DEFAULT_EMOJIS };
@@ -239,10 +245,18 @@ function isCountedInStats(r) {
 
 function activeData() { return allData.filter(isCountedInStats); }
 
+function activeExpanded() {
+  const out = [];
+  allData.filter(isCountedInStats).forEach(r => out.push(...expandRowForStats(r)));
+  return out;
+}
+
 function statsData() {
-  const normal = allData.filter(r => isCountedInStats(r) && !OFFSET_CATS_SET.has(r['分类']));
+  const expanded = [];
+  allData.filter(isCountedInStats).forEach(r => expanded.push(...expandRowForStats(r)));
+  const normal = expanded.filter(r => !OFFSET_CATS_SET.has(r['分类']));
   const netRows = [];
-  const offsetRows = allData.filter(r => isCountedInStats(r) && OFFSET_CATS_SET.has(r['分类']));
+  const offsetRows = expanded.filter(r => OFFSET_CATS_SET.has(r['分类']));
   const groups = {};
   offsetRows.forEach(r => {
     const key = r['分类'] + '|' + r['日期'].slice(0, 7);
@@ -445,11 +459,7 @@ function buildCatFilter() {
 
 function rowMatchesSearch(row, q) {
   if (!q) return true;
-  const hay = [
-    row['交易对方'], row['商品说明'], row['产品名称'], row['分类'], row['子分类'],
-    row['来源'], row['备注'], row['支付方式']
-  ].join(' ').toLowerCase();
-  return hay.includes(q);
+  return rowSearchHaystack(row).includes(q);
 }
 
 function applyF() {
@@ -463,7 +473,7 @@ function applyF() {
 
   filteredData = allData.filter(r => {
     if (activeSrc !== 'all' && r['来源'] !== activeSrc) return false;
-    if (cat && r['分类'] !== cat) return false;
+    if (cat && !rowMatchesCat(r, cat)) return false;
     if (tp && r['收支'] !== tp) return false;
     if (hideRf && r['退款状态'] === 'refunded') return false;
     if (filterPendingOnly && !Categorizer.isPending(r)) return false;
@@ -491,10 +501,17 @@ function applyF() {
         cmp = ta.localeCompare(tb, 'zh-CN');
         break;
       }
-      case 'c':
-        cmp = (a['分类'] || '').localeCompare(b['分类'] || '', 'zh-CN');
-        if (!cmp) cmp = (a['子分类'] || '').localeCompare(b['子分类'] || '', 'zh-CN');
+      case 'c': {
+        const ca = hasSplits(a) ? (a.splits[0]?.category || '') : (a['分类'] || '');
+        const cb = hasSplits(b) ? (b.splits[0]?.category || '') : (b['分类'] || '');
+        cmp = ca.localeCompare(cb, 'zh-CN');
+        if (!cmp) {
+          const sa = hasSplits(a) ? (a.splits[0]?.subcategory || '') : (a['子分类'] || '');
+          const sb = hasSplits(b) ? (b.splits[0]?.subcategory || '') : (b['子分类'] || '');
+          cmp = sa.localeCompare(sb, 'zh-CN');
+        }
         break;
+      }
       case 't':
         cmp = (a['收支'] || '').localeCompare(b['收支'] || '', 'zh-CN');
         break;
@@ -597,19 +614,27 @@ function renderTable() {
     const isR = row['退款状态'] === 'refunded';
     const isEx = row['统计状态'] === 'excluded';
     const isSel = selectedIds.has(row.id);
-    return `<div class="tr COL ledger-row${isR ? ' refunded' : ''}${isEx ? ' excluded' : ''}${isSel ? ' selected' : ''}" data-id="${row.id}">
+    const split = hasSplits(row);
+    const catCell = split ? parentCatCellHtml(row) : catCellHtml(row);
+    const typeCat = split ? (row.splits[0]?.category || row['分类']) : row['分类'];
+    let html = `<div class="tr COL ledger-row${split ? ' has-splits' : ''}${isR ? ' refunded' : ''}${isEx ? ' excluded' : ''}${isSel ? ' selected' : ''}" data-id="${row.id}">
       <div class="td td-check"><input type="checkbox" class="cb" ${isSel ? 'checked' : ''} onchange="toggleSelect(${row.id},this)"></div>
       ${dateTimeCell(row['日期'], row['时间'])}
       <div class="td no-strike src-cell">${srcBadge(row['来源'])}</div>
       ${peerDescCell(row)}
-      ${catCellHtml(row)}
-      <div class="td no-strike type-cell">${typeBadge(row['收支'], row['退款状态'], row['分类'])}</div>
+      ${catCell}
+      <div class="td no-strike type-cell">${typeBadge(row['收支'], row['退款状态'], typeCat)}</div>
       ${amtCellHtml(row, isR)}
       <div class="td no-strike td-actions">
+        <button type="button" class="icon-act split${split ? ' on' : ''}" title="${split ? '编辑拆分' : '拆分账目'}" onclick="openSplitEditor(${row.id})"><i class="ti ti-arrows-split"></i></button>
         <button type="button" class="icon-act rf ${isR ? 'um' : 'mk'}" title="${isR ? '撤销退款' : '标记退款'}" onclick="toggleRf(${row.id})"><i class="ti ${isR ? 'ti-rotate-clockwise' : 'ti-receipt-refund'}"></i></button>
         <button type="button" class="icon-act ex ${isEx ? 'on' : ''}" title="${isEx ? '恢复计入统计' : '不计入统计'}" onclick="toggleExclude(${row.id})"><i class="ti ti-calculator-off"></i></button>
       </div>
     </div>`;
+    if (split && isSplitExpanded(row.id)) {
+      html += row.splits.map((sp, i) => splitSubRowHtml(row, sp, i)).join('');
+    }
+    return html;
   }).join('');
   renderPager();
 }
@@ -677,6 +702,11 @@ function toggleExclude(id) {
 
 function updCat(id, nc) {
   const row = allData.find(r => r.id === id);
+  if (row && hasSplits(row)) {
+    alert('此记录已拆分，请通过「拆分」按钮编辑子账目分类');
+    renderTable();
+    return;
+  }
   if (!row || row['分类'] === nc) return;
   row['分类'] = nc;
   const subs = subcatsFor(nc);
@@ -694,6 +724,11 @@ function updCat(id, nc) {
 
 function updSubCat(id, sub) {
   const row = allData.find(r => r.id === id);
+  if (row && hasSplits(row)) {
+    alert('此记录已拆分，请通过「拆分」按钮编辑子账目');
+    renderTable();
+    return;
+  }
   if (!row) return;
   row['子分类'] = sub || '';
   persist();
@@ -726,7 +761,7 @@ function showAllDetail(cat) {
   detIsIncome = false;
   detContext = { type: 'expense', cat };
   detSelectedIds.clear();
-  const ad = activeData().filter(r => r['收支'] === '支出' && r['分类'] === cat);
+  const ad = activeExpanded().filter(r => r['收支'] === '支出' && r['分类'] === cat);
   const total = ad.reduce((s, r) => s + r['金额'], 0);
   document.getElementById('detTitle').innerHTML = `<span style="margin-right:6px">${EMOJIS[cat] || '📌'}</span>${cat} · 全部`;
   document.getElementById('detSummary').textContent = `共 ${fmtCount(ad.length)} 笔支出`;
@@ -743,7 +778,7 @@ function showDetail(month, cat) {
   detIsIncome = false;
   detContext = { type: 'expense', month, cat };
   detSelectedIds.clear();
-  const rows = activeData().filter(r => r['收支'] === '支出' && r['日期'].startsWith(month) && r['分类'] === cat);
+  const rows = activeExpanded().filter(r => r['收支'] === '支出' && r['日期'].startsWith(month) && r['分类'] === cat);
   const total = rows.reduce((s, r) => s + r['金额'], 0);
   document.getElementById('detTitle').innerHTML = `<span style="margin-right:6px">${MONITOR_EMOJIS[cat] || EMOJIS[cat] || ''}</span>${cat} · ${month}`;
   document.getElementById('detSummary').textContent = `共 ${fmtCount(rows.length)} 笔支出`;
@@ -789,7 +824,7 @@ function syncDetModalLayout() {
 
 function getDetailRows() {
   if (!detContext) return detRows;
-  const ad = activeData();
+  const ad = activeExpanded();
   if (detContext.type === 'income') {
     const { month, cat } = detContext;
     const match = r => r['分类'] === cat && r['日期'].startsWith(month);
@@ -897,7 +932,7 @@ function renderMonitor() {
   const ad = statsData().filter(r => r['收支'] === '支出');
   const offsetEl = document.getElementById('offsetSummary');
   if (offsetEl && OFFSET_CATS_SET.size > 0) {
-    const offRows = allData.filter(r => isCountedInStats(r) && OFFSET_CATS_SET.has(r['分类']));
+    const offRows = activeExpanded().filter(r => OFFSET_CATS_SET.has(r['分类']));
     if (offRows.length > 0) {
       const cards = [...OFFSET_CATS_SET].map(cat => {
         const rows = offRows.filter(r => r['分类'] === cat);
@@ -1115,7 +1150,7 @@ function incomeCatIsNetted(cat) {
 }
 
 function incomeCatRows(cat) {
-  const rows = activeData().filter(r => r['分类'] === cat);
+  const rows = activeExpanded().filter(r => r['分类'] === cat);
   return incomeCatIsNetted(cat) ? rows : rows.filter(r => r['收支'] === '收入');
 }
 
@@ -1975,9 +2010,55 @@ export function setupImpFormatTabs() {
   });
 }
 
+function onSplitSaved() {
+  renderTable();
+  renderKPI();
+  renderMonitor();
+  refreshDetailModal();
+}
+
+function handleToggleSplitExpand(id) {
+  toggleSplitExpand(id);
+  renderTable();
+}
+
+function handleUpdSplitCat(parentId, idx, cat) {
+  updateSplitItem(parentId, idx, 'category', cat);
+  renderTable();
+  renderKPI();
+  renderMonitor();
+}
+
+function handleUpdSplitSub(parentId, idx, sub) {
+  updateSplitItem(parentId, idx, 'subcategory', sub);
+  renderTable();
+}
+
+function handleSaveSplit() {
+  saveSplitEditor(onSplitSaved);
+}
+
+function handleClearSplit(id) {
+  clearSplits(id, () => {
+    closeSplitEditor();
+    onSplitSaved();
+  });
+}
+
+function clearSplitFromModal() {
+  const id = getSplitEditId();
+  if (id) handleClearSplit(id);
+}
+
 export function initApp() {
   Categorizer.onRulesChange(() => persist());
   initGear({ getAllData: () => allData, onPersist: persist });
+  initSplits({
+    getCats: () => CATS,
+    getSubcatsFor: subcatsFor,
+    getAllData: () => allData,
+    onPersist: persist
+  });
   setupGearUpload();
   setupCompanyCost();
   loadData();
@@ -1996,5 +2077,8 @@ Object.assign(window, {
   toggleDetSelect, toggleDetSelectAll, clearDetSelection, applyDetBulkCat, applyDetBulkSubCat, detBulkToggleRefund,
   openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload,
   openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload,
+  openSplitEditor, closeSplitEditor, addSplitLine, saveSplitEdit: handleSaveSplit,
+  clearSplit: handleClearSplit, clearSplitFromModal, toggleSplitExpand: handleToggleSplitExpand,
+  updSplitCat: handleUpdSplitCat, updSplitSub: handleUpdSplitSub,
   syncSearch, clearSearch, syncAddSubcats, srcColor, catLabel, catColor
 });

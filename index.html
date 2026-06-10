@@ -386,6 +386,24 @@
 </div>
 <input type="file" id="gearFileInp" accept="image/*,.heic,.heif" style="display:none">
 
+<div class="mo hide" id="moSplit">
+  <div class="mbox wide">
+    <div class="mh"><h3><i class="ti ti-arrows-split" style="color:var(--primary);margin-right:6px"></i>拆分账目</h3><button class="mclose" onclick="closeSplitEditor()"><i class="ti ti-x"></i></button></div>
+    <div class="mb split-modal-body">
+      <div class="split-meta" id="splitMeta"></div>
+      <p class="split-hint">将总金额拆分为多行，每行指定金额和分类。保存后默认折叠，点击主记录可展开查看子账目。</p>
+      <div id="splitLines"></div>
+      <button type="button" class="btn btn-sm split-add-btn" onclick="addSplitLine()"><i class="ti ti-plus"></i> 添加一行</button>
+      <div class="split-remainder" id="splitRemainder"></div>
+    </div>
+    <div class="mf">
+      <button type="button" class="btn btn-a" id="splitClearBtn" onclick="clearSplitFromModal()">取消拆分</button>
+      <button type="button" class="btn" onclick="closeSplitEditor()">关闭</button>
+      <button type="button" class="btn btn-p" onclick="saveSplitEdit()"><i class="ti ti-check"></i> 保存拆分</button>
+    </div>
+  </div>
+</div>
+
 <div class="mo hide" id="moInvoice">
   <div class="mbox wide">
     <div class="mh"><h3 id="invModalTitle">新增发票</h3><button class="mclose" onclick="closeInvoiceEdit()"><i class="ti ti-x"></i></button></div>
