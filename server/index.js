@@ -101,8 +101,8 @@ if (isProd && serveStatic) {
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`API server http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`API server http://0.0.0.0:${PORT}`);
   if (isProd && serveStatic) console.log('Serving production build from dist/');
   if (isProd && !serveStatic) console.log('API-only mode (frontend hosted separately)');
 });
