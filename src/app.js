@@ -3,7 +3,8 @@ import {
   DEFAULT_CATS, DEFAULT_EMOJIS, DEFAULT_SOURCES, DEFAULT_SUBCATS, CAT_COLORS,
   MONITOR_CATS, EXCLUDE_CATS, OFFSET_CATS, MONITOR_EMOJIS, INCOME_DATA_CATS
 } from './config.js';
-import { fetchState, saveState } from './api.js';
+import { fetchState, saveState, checkHealth } from './api.js';
+import { API_BASE } from './apiBase.js';
 import { fmtMoney, fmtMoneySigned, fmtCount, fmtChartAxis, chartMoneyTooltip } from './format.js';
 import {
   initGear, loadGearState, getGearState, renderGearPage,
@@ -316,8 +317,31 @@ function persist() {
   }, 300);
 }
 
+async function updateBackendFooter(count) {
+  const title = document.querySelector('#sbFooterText strong');
+  const sub = document.getElementById('sbFooterSub');
+  const footer = document.getElementById('sbFooter');
+  if (!sub) return;
+  if (API_BASE) {
+    let host = API_BASE;
+    try { host = new URL(API_BASE).hostname; } catch { /* keep raw */ }
+    if (title) title.textContent = '云端数据库';
+    sub.textContent = count != null
+      ? `Railway · ${host} · ${count} 笔`
+      : `Railway · ${host}`;
+    footer?.setAttribute('title', `数据保存在 Railway 后端 (${API_BASE})`);
+  } else {
+    if (title) title.textContent = 'SQLite 数据库';
+    sub.textContent = count != null
+      ? `本地开发 · data/ledger.db · ${count} 笔`
+      : '本地开发 · data/ledger.db';
+    footer?.setAttribute('title', '数据保存在本地 data/ledger.db');
+  }
+}
+
 async function loadData() {
   try {
+    const health = await checkHealth().catch(() => null);
     const state = await fetchState();
     refunded = new Set((state.refunded || []).map(id => typeof id === 'string' ? parseInt(id, 10) : id));
     excluded = new Set((state.excluded || []).map(id => typeof id === 'string' ? parseInt(id, 10) : id));
@@ -364,8 +388,10 @@ async function loadData() {
     updatePendingBadge();
     renderImportHistoryUI();
     renderGearPage();
+    await updateBackendFooter(health?.count ?? allData.length);
   } catch (err) {
-    alert('无法加载数据：' + err.message + '\n\n请确认已运行 npm run dev');
+    await updateBackendFooter();
+    alert('无法加载数据：' + err.message + '\n\n' + (API_BASE ? '请检查 Railway 后端与 VITE_API_BASE 配置' : '请确认已运行 npm run dev'));
   }
 }
 

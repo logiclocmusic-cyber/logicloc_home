@@ -135,6 +135,7 @@ body{
 .sb.collapsed .sb-footer-text{opacity:0;width:0;overflow:hidden}
 .sb.collapsed .sb-footer-icon{display:block}
 .sb-footer strong{color:var(--txt);font-weight:600;display:block;font-size:12.5px}
+.sb-footer #sbFooterSub{display:block;font-size:11px;color:var(--txt3);margin-top:2px;line-height:1.35}
 
 /* ── Main ── */
 .main{flex:1;min-width:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;background:var(--bg)}
