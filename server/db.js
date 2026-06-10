@@ -100,7 +100,7 @@ export function writeState(state, opts = {}) {
       sources: state.sources || null,
       rules: state.rules || { peerRules: {}, keywordRules: [] },
       importHistory: state.importHistory || [],
-      nextId: state.nextId || 1,
+      nextId: resolveNextId(state.transactions || [], state.nextId),
       gearLibrary: state.gearLibrary || [],
       nextGearId: state.nextGearId || 1,
       stateVersion: curVer + 1
@@ -116,11 +116,16 @@ export function writeState(state, opts = {}) {
   }
 }
 
+function resolveNextId(transactions, metaNextId) {
+  const maxId = transactions.reduce((m, t) => Math.max(m, Number(t.id) || 0), 0);
+  return Math.max(Number(metaNextId) || 1, maxId + 1);
+}
+
 /** 合并追加交易（脚本/恢复用），不覆盖已有账目 */
 export function mergeTransactions(newRows) {
   const state = readState();
   const keys = new Set(state.transactions.map(txnRowKey));
-  let nextId = state.nextId || 1;
+  let nextId = resolveNextId(state.transactions, state.nextId);
   const added = [];
 
   for (const r of newRows) {

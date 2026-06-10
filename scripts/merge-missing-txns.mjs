@@ -68,7 +68,8 @@ if (!stateRes.ok) throw new Error('加载远程数据失败');
 const state = await stateRes.json();
 
 const keys = new Set((state.transactions || []).map(rowKey));
-let nextId = state.nextId || 1;
+const maxId = (state.transactions || []).reduce((m, t) => Math.max(m, Number(t.id) || 0), 0);
+let nextId = Math.max(Number(state.nextId) || 1, maxId + 1);
 const added = [];
 
 for (const r of local) {

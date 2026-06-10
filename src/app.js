@@ -367,9 +367,10 @@ async function loadData() {
     }
 
     if (state.sources) SOURCES = state.sources;
-    nextId = state.nextId || 1;
     stateVersion = state.stateVersion || 0;
     allData = state.transactions || [];
+    const maxId = allData.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0);
+    nextId = Math.max(Number(state.nextId) || 1, maxId + 1);
     importHistory = state.importHistory || [];
     Categorizer.applyRules(state.rules);
     loadGearState(state);
