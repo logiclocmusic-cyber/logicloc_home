@@ -43,6 +43,7 @@ let nextId = 1;
 let stateVersion = 0;
 let pendingImport = null;
 let importHistory = [];
+let importActiveSource = null;
 
 function syncImportHistory() {
   importHistory = deriveImportHistory(allData, importHistory);
@@ -53,7 +54,8 @@ function renderImportHistoryUI() {
 }
 
 function renderImportPage() {
-  populateImportSources();
+  renderImportLedgerPicker();
+  updateImportUploadState();
   syncImportHistory();
   renderImportHistoryUI();
   renderImportTimelineView();
@@ -66,10 +68,7 @@ function renderImportTimelineView() {
     pendingRecords: pendingImport?.records || [],
     pendingAllRecords: pendingImport?.allRecords || [],
     pendingNewRecords: pendingImport?.records || [],
-    activeSource: pendingImport?.sourceName || ((() => {
-      const v = document.getElementById('imp-src')?.value;
-      return v && v !== '__new__' ? v : '';
-    })()),
+    activeSource: pendingImport?.sourceName || importActiveSource || '',
     fileName: pendingImport?.fileName || ''
   });
 }
@@ -1358,46 +1357,145 @@ function openImport() {
 
 function resetImportPreview() {
   pendingImport = null;
-  document.getElementById('importPreview').innerHTML = '选择文件后将显示解析摘要';
+  document.getElementById('importPreview').innerHTML = '选择账本并上传文件后将显示解析摘要';
   document.getElementById('importStats').innerHTML = '';
   document.getElementById('importConfirmBtn').disabled = true;
   document.getElementById('importRecordPreview').style.display = 'none';
+  document.getElementById('importDupPanel').style.display = 'none';
+  document.getElementById('importDupList').innerHTML = '';
+  updateImportStepUI(1);
   renderImportTimelineView();
 }
 
-function populateImportSources() {
-  const sel = document.getElementById('imp-src');
-  if (!sel) return;
-  sel.innerHTML = SOURCES.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
-  sel.innerHTML += '<option value="__new__">+ 新建来源…</option>';
+function renderImportLedgerPicker() {
+  const el = document.getElementById('importLedgerPicker');
+  if (!el) return;
+  const chips = SOURCES.map(s => {
+    const on = importActiveSource === s.name;
+    const esc = s.name.replace(/'/g, "\\'");
+    return `<button type="button" class="import-ledger-chip${on ? ' on' : ''}" onclick="selectImportLedger('${esc}')">
+      <span class="dot" style="background:${s.color}"></span>${s.name}
+    </button>`;
+  }).join('');
+  el.innerHTML = chips + `<button type="button" class="import-ledger-chip add" onclick="showNewImportSource()"><i class="ti ti-plus"></i> 新建来源</button>`;
+}
+
+function selectImportLedger(name) {
+  importActiveSource = name;
+  document.getElementById('imp-new-row').style.display = 'none';
+  renderImportLedgerPicker();
+  updateImportUploadState();
+  if (pendingImport) {
+    pendingImport.sourceName = name;
+    pendingImport.allRecords?.forEach(r => { r['来源'] = name; });
+    pendingImport.newRecords?.forEach(r => { r['来源'] = name; });
+    pendingImport.duplicateRecords?.forEach(r => { r['来源'] = name; });
+    refreshImportRecords();
+  } else {
+    renderImportTimelineView();
+    updateImportStepUI(1);
+  }
+}
+
+function showNewImportSource() {
+  document.getElementById('imp-new-row').style.display = 'block';
+  document.getElementById('imp-new-src').focus();
+}
+
+function cancelNewImportSource() {
+  document.getElementById('imp-new-row').style.display = 'none';
+  document.getElementById('imp-new-src').value = '';
+}
+
+function confirmNewImportSource() {
+  const name = document.getElementById('imp-new-src').value.trim();
+  if (!name) { alert('请输入来源名称'); return; }
+  if (!SOURCES.find(s => s.name === name)) {
+    SOURCES.push({ name, color: document.getElementById('imp-new-color').value || '#6941c6' });
+    persist();
+  }
+  cancelNewImportSource();
+  selectImportLedger(name);
 }
 
 function getImportSourceName() {
-  const sel = document.getElementById('imp-src');
-  if (sel.value === '__new__') {
-    const name = document.getElementById('imp-new-src').value.trim();
-    if (!name) throw new Error('请输入新来源名称');
-    if (!SOURCES.find(s => s.name === name)) {
-      SOURCES.push({ name, color: document.getElementById('imp-new-color').value || '#6941c6' });
-    }
-    return name;
-  }
-  return sel.value;
+  if (!importActiveSource) throw new Error('请先选择账本');
+  return importActiveSource;
 }
 
-function onImportSrcChange() {
-  document.getElementById('imp-new-row').style.display =
-    document.getElementById('imp-src').value === '__new__' ? 'block' : 'none';
-  if (pendingImport) {
-    try {
-      pendingImport.sourceName = getImportSourceName();
-      pendingImport.allRecords.forEach(r => r['来源'] = pendingImport.sourceName);
-      pendingImport.records.forEach(r => r['来源'] = pendingImport.sourceName);
-      renderImportTimelineView();
-    } catch (e) { /* 新建来源未填名时不更新 */ }
-  } else {
-    renderImportTimelineView();
+function updateImportUploadState() {
+  const section = document.getElementById('importUploadSection');
+  const hint = document.getElementById('dropZoneHint');
+  if (!section) return;
+  const ready = !!importActiveSource;
+  section.classList.toggle('disabled', !ready);
+  if (hint) {
+    hint.textContent = ready ? '拖入 CSV 文件，或点击选择' : '请先选择上方账本';
   }
+  updateImportStepUI(pendingImport ? 3 : (ready ? 2 : 1));
+}
+
+function updateImportStepUI(step) {
+  [1, 2, 3].forEach(n => {
+    document.getElementById(`impStep${n}`)?.classList.toggle('on', n <= step);
+  });
+}
+
+function refreshImportRecords() {
+  if (!pendingImport) return;
+  const selectedDups = (pendingImport.duplicateRecords || []).filter(r => r._dupSelected);
+  pendingImport.records = [...(pendingImport.newRecords || []), ...selectedDups];
+  const pending = pendingImport.records.filter(r => Categorizer.isPending(r)).length;
+  const dupSel = selectedDups.length;
+  document.getElementById('importStats').innerHTML = `
+    <div class="import-stat"><div class="n">${pendingImport.records.length}</div><div class="l">将导入</div></div>
+    <div class="import-stat"><div class="n">${pendingImport.newRecords.length}</div><div class="l">新增</div></div>
+    <div class="import-stat"><div class="n">${pendingImport.dup}</div><div class="l">重复跳过</div></div>
+    <div class="import-stat"><div class="n">${dupSel}</div><div class="l">重复已选</div></div>
+    <div class="import-stat"><div class="n">${pending}</div><div class="l">待确认</div></div>`;
+  document.getElementById('importConfirmBtn').disabled = pendingImport.records.length === 0;
+  renderImportTimelineView();
+  updateImportStepUI(3);
+}
+
+function renderDuplicateReview() {
+  const panel = document.getElementById('importDupPanel');
+  const list = document.getElementById('importDupList');
+  const dups = pendingImport?.duplicateRecords || [];
+  if (!dups.length) {
+    panel.style.display = 'none';
+    list.innerHTML = '';
+    return;
+  }
+  panel.style.display = '';
+  list.innerHTML = dups.map(r => {
+    const peer = (r['交易对方'] || r['商品说明'] || '—').trim();
+    const sign = r['收支'] === '收入' ? '+' : '-';
+    const on = r._dupSelected ? ' on' : '';
+    return `<label class="import-dup-row${on}">
+      <input type="checkbox" ${r._dupSelected ? 'checked' : ''} onchange="toggleDupImport('${r._importUid}', this.checked)">
+      <div class="import-dup-main">
+        <div class="import-dup-title">${peer} · ${sign}¥${Number(r['金额'] || 0).toFixed(2)}</div>
+        <div class="import-dup-meta">${r['日期']} ${r['时间'] || ''} · ${r._dupReason === 'file' ? '文件内重复' : '与已有账目重复'}</div>
+      </div>
+    </label>`;
+  }).join('');
+}
+
+function toggleDupImport(uid, checked) {
+  if (!pendingImport) return;
+  const row = pendingImport.duplicateRecords.find(r => r._importUid === uid);
+  if (!row) return;
+  row._dupSelected = !!checked;
+  renderDuplicateReview();
+  refreshImportRecords();
+}
+
+function toggleAllDupImport(checked) {
+  if (!pendingImport?.duplicateRecords) return;
+  pendingImport.duplicateRecords.forEach(r => { r._dupSelected = !!checked; });
+  renderDuplicateReview();
+  refreshImportRecords();
 }
 
 function getFormatHint() {
@@ -1407,26 +1505,40 @@ function getFormatHint() {
 
 async function handleImportFile(file) {
   if (!file) return;
+  if (!importActiveSource) {
+    alert('请先选择账本（账单来源）');
+    return;
+  }
   try {
     const sourceName = getImportSourceName();
     const { format, records } = await Parsers.parseFile(file, sourceName, getFormatHint());
     const classified = Categorizer.classifyAll(records, CATS);
-    const dedupSet = Parsers.buildDedupSet(allData);
-    const finalAdd = [];
+    const existingDedup = Parsers.buildDedupSet(allData);
+    const fileDedup = new Set(existingDedup);
+    const newRecords = [];
+    const duplicateRecords = [];
     let dup = 0;
 
     classified.forEach(r => {
-      if (Parsers.isDuplicate(r, dedupSet)) { dup++; return; }
+      r._importUid = `improw_${Math.random().toString(36).slice(2, 10)}`;
+      r._dupSelected = false;
+      if (Parsers.isDuplicate(r, fileDedup)) {
+        dup++;
+        r._dupReason = Parsers.isDuplicate(r, existingDedup) ? 'existing' : 'file';
+        duplicateRecords.push(r);
+        return;
+      }
       r._hash = Parsers.txnHash(r);
-      Parsers.addToDedupSet(dedupSet, r);
+      Parsers.addToDedupSet(fileDedup, r);
       r.id = nextId++;
-      finalAdd.push(r);
+      newRecords.push(r);
     });
 
-    const pending = finalAdd.filter(r => Categorizer.isPending(r)).length;
     const range = ImportTimeline.monthRangeFromRecords(classified);
     pendingImport = {
-      records: finalAdd,
+      records: [...newRecords],
+      newRecords,
+      duplicateRecords,
       allRecords: classified,
       format,
       dup,
@@ -1436,21 +1548,24 @@ async function handleImportFile(file) {
       endMonth: range.months[range.months.length - 1] || ''
     };
 
+    const pending = newRecords.filter(r => Categorizer.isPending(r)).length;
     document.getElementById('importPreview').innerHTML =
       `识别格式：<strong>${{ wechat: '微信支付', alipay: '支付宝', bank: '银行流水' }[format] || format}</strong><br>` +
-      `来源：<strong>${sourceName}</strong><br>` +
+      `账本：<strong>${sourceName}</strong><br>` +
       `时间范围：<strong>${range.months[0] ? ImportTimeline.yearMonthLabel(range.months[0]) : '—'}</strong> 至 <strong>${range.months.length ? ImportTimeline.yearMonthLabel(range.months[range.months.length - 1]) : '—'}</strong><br>` +
-      `解析 ${classified.length} 笔 · 新增 ${finalAdd.length} 笔 · 重复 ${dup} 笔 · 待确认 ${pending} 笔`;
+      `解析 ${classified.length} 笔 · 新增 ${newRecords.length} 笔 · 重复 ${dup} 笔${dup ? '（可在下方勾选导入）' : ''} · 待确认 ${pending} 笔`;
 
     document.getElementById('importStats').innerHTML = `
-      <div class="import-stat"><div class="n">${finalAdd.length}</div><div class="l">将导入</div></div>
+      <div class="import-stat"><div class="n">${newRecords.length}</div><div class="l">将导入</div></div>
       <div class="import-stat"><div class="n">${dup}</div><div class="l">重复跳过</div></div>
       <div class="import-stat"><div class="n">${pending}</div><div class="l">待确认</div></div>
       <div class="import-stat"><div class="n">${range.months.length}</div><div class="l">覆盖月份</div></div>`;
 
     renderImportTimelineView();
-    renderImportRecordTable(classified);
-    document.getElementById('importConfirmBtn').disabled = finalAdd.length === 0;
+    renderImportRecordTable(newRecords);
+    renderDuplicateReview();
+    document.getElementById('importConfirmBtn').disabled = pendingImport.records.length === 0;
+    updateImportStepUI(3);
 
     sw('import', document.getElementById('nav-import'));
   } catch (err) {
@@ -1460,11 +1575,24 @@ async function handleImportFile(file) {
     pendingImport = null;
     renderImportTimelineView();
     document.getElementById('importRecordPreview').style.display = 'none';
+    document.getElementById('importDupPanel').style.display = 'none';
   }
 }
 
 function confirmImport() {
-  if (!pendingImport || !pendingImport.records.length) return;
+  if (!pendingImport) return;
+  refreshImportRecords();
+  if (!pendingImport.records.length) {
+    alert('没有可导入的记录');
+    return;
+  }
+
+  pendingImport.records.forEach(r => {
+    if (!r.id) {
+      r.id = nextId++;
+      r._hash = Parsers.txnHash(r);
+    }
+  });
 
   const batchId = createBatchId();
   const importedAt = new Date().toISOString();
@@ -1563,15 +1691,26 @@ function setupImportHistoryDelete() {
 function setupDropZone() {
   const zone = document.getElementById('dropZone');
   const input = document.getElementById('importBillFile');
-  zone.addEventListener('click', () => input.click());
-  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
+  zone.addEventListener('click', () => {
+    if (!importActiveSource) { alert('请先选择账本（账单来源）'); return; }
+    input.click();
+  });
+  zone.addEventListener('dragover', e => {
+    if (!importActiveSource) return;
+    e.preventDefault();
+    zone.classList.add('drag');
+  });
   zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
   zone.addEventListener('drop', e => {
     e.preventDefault();
     zone.classList.remove('drag');
+    if (!importActiveSource) { alert('请先选择账本（账单来源）'); return; }
     if (e.dataTransfer.files[0]) handleImportFile(e.dataTransfer.files[0]);
   });
-  input.addEventListener('change', e => { if (e.target.files[0]) handleImportFile(e.target.files[0]); e.target.value = ''; });
+  input.addEventListener('change', e => {
+    if (e.target.files[0]) handleImportFile(e.target.files[0]);
+    e.target.value = '';
+  });
 }
 
 // ── 手动新增 / 来源 / 分类 ───────────────────────────────────────────────────
@@ -2025,7 +2164,8 @@ Object.assign(window, {
   openCat, closeCat, addCat, saveCat, delCat, toggleCatSub,
   setQuick, resetF, applyF, changePgSize, filterSrc, setTypeFilter, toggleSortCol,
   toggleSelect, toggleSelectAll, clearSelection, applyBulkCat, applyBulkSubCat, bulkToggleRefund,
-  resetImportPreview, confirmImport, onImportSrcChange, resetAllLedger,
+  resetImportPreview, confirmImport, selectImportLedger, showNewImportSource,
+  confirmNewImportSource, cancelNewImportSource, toggleDupImport, toggleAllDupImport, resetAllLedger,
   goP, toggleRf, toggleExclude, updCat, updSubCat, updCatDet, showAllDetail, showDetail, showIncomeDetail, closeDetModal, toggleDetSort,
   toggleDetSelect, toggleDetSelectAll, clearDetSelection, applyDetBulkCat, applyDetBulkSubCat, detBulkToggleRefund,
   openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload,
