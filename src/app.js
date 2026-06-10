@@ -54,6 +54,8 @@ function renderImportHistoryUI() {
 }
 
 function renderImportPage() {
+  populateImportSources();
+  updateImportUploadState();
   syncImportHistory();
   renderImportHistoryUI();
   renderImportTimelineView();
@@ -1355,19 +1357,80 @@ function openImport() {
 
 function resetImportPreview() {
   pendingImport = null;
-  importActiveSource = null;
-  document.getElementById('importPreview').innerHTML = '上传文件后将显示解析摘要';
+  document.getElementById('importPreview').innerHTML = '选择来源并上传文件后将显示解析摘要';
   document.getElementById('importStats').innerHTML = '';
   document.getElementById('importConfirmBtn').disabled = true;
   document.getElementById('importRecordPreview').style.display = 'none';
   document.getElementById('importDupPanel').style.display = 'none';
   document.getElementById('importDupList').innerHTML = '';
-  updateImportStepUI(1);
+  updateImportStepUI(importActiveSource ? 2 : 1);
   renderImportTimelineView();
 }
 
+function populateImportSources() {
+  const sel = document.getElementById('imp-src');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">请选择导入来源</option>'
+    + SOURCES.map(s => `<option value="${s.name}"${importActiveSource === s.name ? ' selected' : ''}>${s.name}</option>`).join('')
+    + '<option value="__new__">+ 新建来源…</option>';
+  if (importActiveSource) sel.value = importActiveSource;
+}
+
+function getImportSourceName() {
+  const sel = document.getElementById('imp-src');
+  if (!sel?.value || sel.value === '') throw new Error('请先选择导入来源');
+  if (sel.value === '__new__') {
+    const name = document.getElementById('imp-new-src').value.trim();
+    if (!name) throw new Error('请输入新来源名称');
+    if (!SOURCES.find(s => s.name === name)) {
+      SOURCES.push({ name, color: document.getElementById('imp-new-color').value || '#6941c6' });
+      persist();
+      populateImportSources();
+      sel.value = name;
+    }
+    importActiveSource = name;
+    return name;
+  }
+  importActiveSource = sel.value;
+  return sel.value;
+}
+
+function onImportSrcChange() {
+  const sel = document.getElementById('imp-src');
+  document.getElementById('imp-new-row').style.display = sel?.value === '__new__' ? 'block' : 'none';
+  if (sel?.value && sel.value !== '__new__') {
+    importActiveSource = sel.value;
+  } else if (sel?.value !== '__new__') {
+    importActiveSource = null;
+  }
+  updateImportUploadState();
+  if (pendingImport && importActiveSource) {
+    pendingImport.sourceName = importActiveSource;
+    pendingImport.allRecords?.forEach(r => { r['来源'] = importActiveSource; });
+    pendingImport.newRecords?.forEach(r => { r['来源'] = importActiveSource; });
+    pendingImport.duplicateRecords?.forEach(r => { r['来源'] = importActiveSource; });
+    refreshImportRecords();
+    document.getElementById('importPreview').innerHTML =
+      document.getElementById('importPreview').innerHTML.replace(
+        /来源：<strong>[^<]+<\/strong>/,
+        `来源：<strong>${importActiveSource}</strong>`
+      );
+  } else {
+    renderImportTimelineView();
+  }
+}
+
+function updateImportUploadState() {
+  const section = document.getElementById('importUploadSection');
+  const hint = document.getElementById('dropZoneHint');
+  const ready = !!importActiveSource;
+  section?.classList.toggle('disabled', !ready);
+  if (hint) hint.textContent = ready ? '拖入 CSV / Excel 文件，或点击选择' : '请先选择导入来源';
+  updateImportStepUI(pendingImport ? 3 : (ready ? 2 : 1));
+}
+
 function updateImportStepUI(step) {
-  [1, 2].forEach(n => {
+  [1, 2, 3].forEach(n => {
     document.getElementById(`impStep${n}`)?.classList.toggle('on', n <= step);
   });
 }
@@ -1386,7 +1449,7 @@ function refreshImportRecords() {
     <div class="import-stat"><div class="n">${pending}</div><div class="l">待确认</div></div>`;
   document.getElementById('importConfirmBtn').disabled = pendingImport.records.length === 0;
   renderImportTimelineView();
-  updateImportStepUI(2);
+  updateImportStepUI(3);
 }
 
 function renderDuplicateReview() {
@@ -1429,16 +1492,15 @@ function toggleAllDupImport(checked) {
   refreshImportRecords();
 }
 
-function getFormatHint() {
-  const el = document.querySelector('input[name="imp-format"]:checked');
-  return el ? el.value : 'auto';
-}
-
 async function handleImportFile(file) {
   if (!file) return;
+  if (!importActiveSource) {
+    alert('请先选择导入来源');
+    return;
+  }
   try {
-    const { format, records, sourceName } = await Parsers.parseFile(file, null, getFormatHint(), SOURCES);
-    importActiveSource = sourceName;
+    const sourceName = getImportSourceName();
+    const { format, records } = await Parsers.parseFile(file, sourceName, 'auto', SOURCES);
     const classified = Categorizer.classifyAll(records, CATS);
     const existingDedup = Parsers.buildDedupSet(allData);
     const fileDedup = new Set(existingDedup);
@@ -1478,7 +1540,7 @@ async function handleImportFile(file) {
     const pending = newRecords.filter(r => Categorizer.isPending(r)).length;
     document.getElementById('importPreview').innerHTML =
       `识别格式：<strong>${{ wechat: '微信支付', alipay: '支付宝', bank: '银行流水' }[format] || format}</strong><br>` +
-      `账本（自动识别）：<strong>${sourceName}</strong><br>` +
+      `来源：<strong>${sourceName}</strong><br>` +
       `时间范围：<strong>${range.months[0] ? ImportTimeline.yearMonthLabel(range.months[0]) : '—'}</strong> 至 <strong>${range.months.length ? ImportTimeline.yearMonthLabel(range.months[range.months.length - 1]) : '—'}</strong><br>` +
       `解析 ${classified.length} 笔 · 新增 ${newRecords.length} 笔 · 重复 ${dup} 笔${dup ? '（可在下方勾选导入）' : ''} · 待确认 ${pending} 笔`;
 
@@ -1492,7 +1554,7 @@ async function handleImportFile(file) {
     renderImportRecordTable(newRecords);
     renderDuplicateReview();
     document.getElementById('importConfirmBtn').disabled = pendingImport.records.length === 0;
-    updateImportStepUI(2);
+    updateImportStepUI(3);
 
     sw('import', document.getElementById('nav-import'));
   } catch (err) {
@@ -1618,12 +1680,20 @@ function setupImportHistoryDelete() {
 function setupDropZone() {
   const zone = document.getElementById('dropZone');
   const input = document.getElementById('importBillFile');
-  zone.addEventListener('click', () => input.click());
-  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
+  zone.addEventListener('click', () => {
+    if (!importActiveSource) { alert('请先选择导入来源'); return; }
+    input.click();
+  });
+  zone.addEventListener('dragover', e => {
+    if (!importActiveSource) return;
+    e.preventDefault();
+    zone.classList.add('drag');
+  });
   zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
   zone.addEventListener('drop', e => {
     e.preventDefault();
     zone.classList.remove('drag');
+    if (!importActiveSource) { alert('请先选择导入来源'); return; }
     if (e.dataTransfer.files[0]) handleImportFile(e.dataTransfer.files[0]);
   });
   input.addEventListener('change', e => {
@@ -2011,16 +2081,6 @@ export function clearSearch() {
   syncSearch('');
 }
 
-export function setupImpFormatTabs() {
-  document.querySelectorAll('#impFormatTabs label, .src-type label').forEach(lbl => {
-    lbl.addEventListener('click', () => {
-      const parent = lbl.closest('.src-type') || lbl.parentElement;
-      parent.querySelectorAll('label').forEach(x => x.classList.remove('on'));
-      lbl.classList.add('on');
-    });
-  });
-}
-
 function onSplitSaved() {
   renderTable();
   renderKPI();
@@ -2083,7 +2143,7 @@ Object.assign(window, {
   openCat, closeCat, addCat, saveCat, delCat, toggleCatSub,
   setQuick, resetF, applyF, changePgSize, filterSrc, setTypeFilter, toggleSortCol,
   toggleSelect, toggleSelectAll, clearSelection, applyBulkCat, applyBulkSubCat, bulkToggleRefund,
-  resetImportPreview, confirmImport, toggleDupImport, toggleAllDupImport, resetAllLedger,
+  resetImportPreview, confirmImport, onImportSrcChange, toggleDupImport, toggleAllDupImport, resetAllLedger,
   goP, toggleRf, toggleExclude, updCat, updSubCat, updCatDet, showAllDetail, showDetail, showIncomeDetail, closeDetModal, toggleDetSort,
   toggleDetSelect, toggleDetSelectAll, clearDetSelection, applyDetBulkCat, applyDetBulkSubCat, detBulkToggleRefund,
   openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload,

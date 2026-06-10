@@ -727,6 +727,8 @@ body{
   .import-stats,.tl-summary{grid-template-columns:1fr 1fr}
   .src-type label{flex:1 1 calc(50% - 6px);justify-content:center}
 }
+.import-upload-section.disabled{opacity:.55;pointer-events:none;user-select:none}
+.import-upload-section.disabled .drop-zone{border-style:dashed}
 .import-steps{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
 .import-step{font-size:12px;padding:6px 12px;border-radius:999px;background:var(--surf2);color:var(--txt3);border:1px solid var(--bdr)}
 .import-step.on{background:var(--primary-bg);color:var(--primary-t);border-color:var(--primary);font-weight:600}
