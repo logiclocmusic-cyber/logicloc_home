@@ -30,10 +30,8 @@ function avatarLetter(name) {
 
 export function updateUserUI() {
   const name = currentUser?.username || '';
-  const hero = document.getElementById('heroUserName');
   const pill = document.getElementById('userDisplayName');
   const av = document.getElementById('userAvatar');
-  if (hero) hero.textContent = name || '用户';
   if (pill) pill.textContent = name || '未登录';
   if (av) av.textContent = avatarLetter(name);
 }

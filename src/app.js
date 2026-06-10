@@ -353,27 +353,13 @@ async function loadData() {
 
 function updateSubtitle() {
   const el = document.getElementById('subtitle');
-  const heroSub = document.getElementById('heroSub');
-  const heroStats = document.getElementById('heroStats');
   if (!allData.length) {
     if (el) el.textContent = '家庭记账 · 导入账单开始使用';
-    if (heroSub) heroSub.textContent = '导入微信、支付宝、银行流水，自动分类后再二次确认。';
-    if (heroStats) heroStats.innerHTML = '';
     return;
   }
   const dates = allData.map(r => r['日期']).filter(Boolean).sort();
   const range = `${dates[0]} 至 ${dates[dates.length - 1]}`;
   if (el) el.textContent = `家庭记账 · ${range} · ${fmtCount(allData.length)} 笔`;
-  if (heroSub) heroSub.textContent = `当前账本覆盖 ${range}，共 ${fmtCount(allData.length)} 笔交易。`;
-  const ad = statsData();
-  const exp = ad.filter(r => r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0);
-  const inc = ad.filter(r => r['收支'] === '收入').reduce((s, r) => s + r['金额'], 0);
-  if (heroStats) {
-    heroStats.innerHTML = `
-      <div class="hero-stat"><div class="n c-red">${fmtMoney(exp, { integer: true })}</div><div class="l">总支出</div></div>
-      <div class="hero-stat"><div class="n c-grn">${fmtMoney(inc, { integer: true })}</div><div class="l">总收入</div></div>
-      <div class="hero-stat"><div class="n">${fmtCount(allData.length)}</div><div class="l">总笔数</div></div>`;
-  }
 }
 
 function kpiCard(label, value, sub, icon, iconCls, valCls) {
