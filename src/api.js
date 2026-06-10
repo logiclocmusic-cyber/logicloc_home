@@ -52,3 +52,65 @@ export async function checkHealth() {
   if (!res.ok) throw new Error('服务不可用');
   return res.json();
 }
+
+export async function fetchInvoices() {
+  const res = await fetch(`${API}/invoices`, { headers: authHeaders() });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) throw new Error(`加载失败 (${res.status})`);
+  return res.json();
+}
+
+export async function scanInvoice(dataUrl, mime, fileName) {
+  const res = await fetch(`${API}/invoices/scan`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ data: dataUrl, mime, fileName })
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `识别失败 (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function createInvoice(payload) {
+  const res = await fetch(`${API}/invoices`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload)
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `保存失败 (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function updateInvoice(id, payload) {
+  const res = await fetch(`${API}/invoices/${id}`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload)
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `更新失败 (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function deleteInvoice(id) {
+  const res = await fetch(`${API}/invoices/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders()
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `删除失败 (${res.status})`);
+  }
+  return res.json();
+}

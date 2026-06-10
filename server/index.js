@@ -5,6 +5,11 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { readState, writeState, getStats } from './db.js';
 import { initAuth, login, logout, getUserFromToken, parseAuthHeader } from './auth.js';
+import { scanInvoiceImage } from './deepseek.js';
+import {
+  listInvoices, getInvoice, createInvoice, updateInvoice, deleteInvoice,
+  saveInvoiceFile, INVOICE_DIR
+} from './invoices.js';
 
 initAuth();
 
@@ -26,6 +31,7 @@ app.use(cors(corsOrigins.length
   : {}));
 app.use(express.json({ limit: '50mb' }));
 app.use('/gear-images', express.static(GEAR_IMG_DIR));
+app.use('/invoice-files', express.static(INVOICE_DIR));
 
 function requireAuth(req, res, next) {
   const token = parseAuthHeader(req);
@@ -70,6 +76,84 @@ app.get('/api/state', requireAuth, (_req, res) => {
 app.put('/api/state', requireAuth, (req, res) => {
   try {
     writeState(req.body);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/invoices', requireAuth, (_req, res) => {
+  try {
+    res.json({ invoices: listInvoices() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/invoices/:id', requireAuth, (req, res) => {
+  const invoice = getInvoice(Number(req.params.id));
+  if (!invoice) return res.status(404).json({ error: '发票不存在' });
+  res.json(invoice);
+});
+
+app.post('/api/invoices/scan', requireAuth, async (req, res) => {
+  try {
+    const { data, mime } = req.body || {};
+    if (!data) return res.status(400).json({ error: '请上传发票图片' });
+    const raw = String(data).replace(/^data:[^;]+;base64,/, '');
+    const result = await scanInvoiceImage(raw, mime || 'image/jpeg');
+    const p = result.parsed;
+    res.json({
+      vendor: p.vendor || '',
+      buyer: p.buyer || '',
+      invoiceNo: p.invoiceNo || p.invoice_no || '',
+      invoiceDate: p.invoiceDate || p.invoice_date || '',
+      amount: p.amount ?? null,
+      taxAmount: p.taxAmount ?? p.tax_amount ?? null,
+      total: p.total ?? null,
+      category: p.category || '其他',
+      items: p.items || [],
+      notes: p.notes || '',
+      rawAi: result.raw
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/invoices', requireAuth, (req, res) => {
+  try {
+    const { data, mime, fileName, rawAi, ...fields } = req.body || {};
+    let invoice = createInvoice({ ...fields, rawAi });
+    if (data) {
+      const saved = saveInvoiceFile(invoice.id, data, mime, fileName);
+      invoice = updateInvoice(invoice.id, {
+        filePath: saved.filename,
+        fileName: fileName || saved.filename,
+        mimeType: saved.mime
+      });
+    }
+    res.json(invoice);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/invoices/:id', requireAuth, (req, res) => {
+  try {
+    const invoice = updateInvoice(Number(req.params.id), req.body || {});
+    if (!invoice) return res.status(404).json({ error: '发票不存在' });
+    res.json(invoice);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/invoices/:id', requireAuth, (req, res) => {
+  try {
+    if (!deleteInvoice(Number(req.params.id))) {
+      return res.status(404).json({ error: '发票不存在' });
+    }
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

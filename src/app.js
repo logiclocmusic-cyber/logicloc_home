@@ -9,6 +9,10 @@ import {
   initGear, loadGearState, getGearState, renderGearPage,
   openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload, setupGearUpload
 } from './gear.js';
+import {
+  renderCompanyCostPage, setupCompanyCost,
+  openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload
+} from './company-cost.js';
 
 let CATS = [...DEFAULT_CATS];
 let EMOJIS = { ...DEFAULT_EMOJIS };
@@ -1323,13 +1327,14 @@ function sw(name, el) {
   document.querySelectorAll('.ni').forEach(n => n.classList.remove('on'));
   document.getElementById('view-' + name).classList.add('on');
   el.classList.add('on');
-  document.getElementById('vt').textContent = { ledger: '明细列表', charts: '统计图表', monitor: '统计监控', gear: '装备库', report: '收支报告', income: '收入数据', refunds: '退款管理', import: '导入预览' }[name];
+  document.getElementById('vt').textContent = { ledger: '明细列表', charts: '统计图表', monitor: '统计监控', gear: '装备库', report: '收支报告', income: '收入数据', company: '公司成本', refunds: '退款管理', import: '导入预览' }[name];
   if (name === 'charts') setTimeout(renderCharts, 60);
   if (name === 'report') setTimeout(renderReport, 60);
   if (name === 'income') setTimeout(renderIncomeData, 60);
   if (name === 'refunds') renderRfView();
   if (name === 'monitor') renderMonitor();
   if (name === 'gear') renderGearPage();
+  if (name === 'company') renderCompanyCostPage();
   if (name === 'import') renderImportPage();
 }
 
@@ -1974,6 +1979,7 @@ export function initApp() {
   Categorizer.onRulesChange(() => persist());
   initGear({ getAllData: () => allData, onPersist: persist });
   setupGearUpload();
+  setupCompanyCost();
   loadData();
   setupDropZone();
   setupImportHistoryDelete();
@@ -1989,5 +1995,6 @@ Object.assign(window, {
   goP, toggleRf, toggleExclude, updCat, updSubCat, updCatDet, showAllDetail, showDetail, showIncomeDetail, closeDetModal, toggleDetSort,
   toggleDetSelect, toggleDetSelectAll, clearDetSelection, applyDetBulkCat, applyDetBulkSubCat, detBulkToggleRefund,
   openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload,
+  openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload,
   syncSearch, clearSearch, syncAddSubcats, srcColor, catLabel, catColor
 });

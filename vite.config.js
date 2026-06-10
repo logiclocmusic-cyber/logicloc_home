@@ -13,6 +13,10 @@ export default defineConfig({
       '/gear-images': {
         target: 'http://localhost:3001',
         changeOrigin: true
+      },
+      '/invoice-files': {
+        target: 'http://localhost:3001',
+        changeOrigin: true
       }
     }
   },

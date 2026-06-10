@@ -39,6 +39,8 @@ git push -u origin main
    | `SERVE_STATIC` | `false` |
    | `DB_PATH` | `/data/ledger.db` |
    | `GEAR_IMG_DIR` | `/data/gear-images` |
+   | `INVOICE_DIR` | `/data/invoices` |
+   | `DEEPSEEK_API_KEY` | DeepSeek API Key（公司成本发票识别） |
    | `FRONTEND_URL` | 先留空，Vercel 部署后再填 |
 
 5. **Volumes** → **Add Volume**：

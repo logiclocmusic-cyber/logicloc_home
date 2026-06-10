@@ -41,6 +41,7 @@
     <button class="ni" onclick="sw('gear',this)" title="装备库"><span class="ni-icon teal"><i class="ti ti-baby-carriage"></i></span><span class="ni-label">装备库</span></button>
     <button class="ni" onclick="sw('report',this)" title="收支报告"><span class="ni-icon green"><i class="ti ti-report-analytics"></i></span><span class="ni-label">收支报告</span></button>
     <button class="ni" onclick="sw('income',this)" title="收入数据"><span class="ni-icon blue"><i class="ti ti-coin"></i></span><span class="ni-label">收入数据</span></button>
+    <button class="ni" onclick="sw('company',this)" title="公司成本"><span class="ni-icon pink"><i class="ti ti-receipt"></i></span><span class="ni-label">公司成本</span></button>
     <button class="ni" id="nav-import" onclick="sw('import',this)" title="导入预览"><span class="ni-icon primary"><i class="ti ti-file-import"></i></span><span class="ni-label">导入预览</span></button>
     <div class="nav-sp"></div>
     <div class="nav-label">工具</div>
@@ -197,6 +198,28 @@
   <div class="page view" id="view-income">
     <p class="report-intro">按分类查看收入月度走势，各柱按子分类堆叠着色；闲置转让、乐极客收入等对冲类按净收入（收入减成本支出）统计，点击月份查看明细。</p>
     <div class="income-grid" id="incomeGrid"></div>
+  </div>
+
+  <div class="page view" id="view-company">
+    <div class="inv-head">
+      <p class="inv-intro">上传公司成本发票，由 DeepSeek AI 自动识别销售方、金额、日期等信息，识别后可手动校对保存。</p>
+      <span class="inv-summary" id="invSummary">上传发票图片，AI 自动识别内容</span>
+    </div>
+    <div class="inv-drop" id="invDropZone">
+      <i class="ti ti-cloud-upload"></i>
+      <p>拖拽发票图片到此处，或点击上传</p>
+      <span>支持 JPG、PNG、PDF，最大 10MB</span>
+    </div>
+    <div class="inv-table-wrap">
+      <table class="inv-table">
+        <thead>
+          <tr>
+            <th>日期</th><th>销售方</th><th>发票号</th><th>类型</th><th>金额</th><th>附件</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="invTableBody"></tbody>
+      </table>
+    </div>
   </div>
 
   <div class="page view" id="view-refunds">
@@ -362,6 +385,23 @@
   </div>
 </div>
 <input type="file" id="gearFileInp" accept="image/*,.heic,.heif" style="display:none">
+
+<div class="mo hide" id="moInvoice">
+  <div class="mbox wide">
+    <div class="mh"><h3 id="invModalTitle">新增发票</h3><button class="mclose" onclick="closeInvoiceEdit()"><i class="ti ti-x"></i></button></div>
+    <div class="mb inv-modal-body">
+      <div class="inv-modal-layout">
+        <div class="inv-preview" id="invPreview"></div>
+        <div id="invForm"></div>
+      </div>
+    </div>
+    <div class="mf">
+      <button class="btn" onclick="closeInvoiceEdit()">取消</button>
+      <button class="btn btn-p" onclick="saveInvoiceEdit()"><i class="ti ti-check"></i> 保存</button>
+    </div>
+  </div>
+</div>
+<input type="file" id="invFileInp" accept="image/*,.pdf" style="display:none">
 
 <script type="module" src="/src/main.js"></script>
 </body>
