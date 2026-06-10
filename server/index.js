@@ -20,14 +20,52 @@ const PORT = Number(process.env.PORT) || 3001;
 const isProd = process.env.NODE_ENV === 'production';
 const serveStatic = process.env.SERVE_STATIC !== 'false';
 
+function normalizeOrigin(url) {
+  if (!url) return '';
+  const s = url.trim().replace(/\/+$/, '');
+  try {
+    return new URL(s.includes('://') ? s : `https://${s}`).origin;
+  } catch {
+    return s;
+  }
+}
+
 const corsOrigins = (process.env.FRONTEND_URL || '')
   .split(',')
-  .map(s => s.trim())
+  .map(normalizeOrigin)
   .filter(Boolean);
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  const o = normalizeOrigin(origin);
+  if (!corsOrigins.length) return true;
+  if (corsOrigins.includes(o)) return true;
+  // 允许同一 Vercel 项目的预览域名（如 logicloc-home-xxx.vercel.app）
+  for (const allowed of corsOrigins) {
+    try {
+      const host = new URL(allowed).hostname;
+      const oh = new URL(o).hostname;
+      if (host.endsWith('.vercel.app') && oh.endsWith('.vercel.app')) {
+        const prefix = host.split('-')[0];
+        if (oh.startsWith(prefix)) return true;
+      }
+    } catch { /* skip */ }
+  }
+  return false;
+}
 
 const app = express();
 app.use(cors(corsOrigins.length
-  ? { origin: corsOrigins, credentials: true }
+  ? {
+    origin(origin, callback) {
+      if (isAllowedOrigin(origin)) callback(null, true);
+      else {
+        console.warn('[cors] blocked origin:', origin, 'allowed:', corsOrigins.join(', '));
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    credentials: true
+  }
   : {}));
 app.use(express.json({ limit: '50mb' }));
 app.use('/gear-images', express.static(GEAR_IMG_DIR));

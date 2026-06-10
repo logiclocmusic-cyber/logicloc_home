@@ -76,13 +76,15 @@ git push -u origin main
 回到 **Railway → Variables**，更新：
 
 ```
-FRONTEND_URL=https://family-ledger.vercel.app
+FRONTEND_URL=https://logicloc-home.vercel.app
 ```
+
+注意：**不要末尾斜杠**，必须含 `https://`。填错会导致登录时浏览器报 `Failed to fetch`。
 
 若有多个域名（含预览域名），用英文逗号分隔：
 
 ```
-FRONTEND_URL=https://family-ledger.vercel.app,https://family-ledger-xxx.vercel.app
+FRONTEND_URL=https://logicloc-home.vercel.app,https://logicloc-home-xxx.vercel.app
 ```
 
 保存后 Railway 会自动重新部署。
