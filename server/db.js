@@ -71,6 +71,17 @@ export function writeState(state, opts = {}) {
     throw err;
   }
 
+  if (!skipVersionCheck) {
+    const curCount = db.prepare('SELECT COUNT(*) AS n FROM transactions').get().n;
+    const incoming = state.transactions?.length || 0;
+    if (incoming < curCount) {
+      const err = new Error('保存会丢失云端账目，请先刷新页面');
+      err.code = 'STATE_CONFLICT';
+      err.currentVersion = curVer;
+      throw err;
+    }
+  }
+
   db.exec('BEGIN');
   try {
     db.prepare('DELETE FROM transactions').run();
