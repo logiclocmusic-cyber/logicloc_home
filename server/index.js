@@ -3,7 +3,7 @@ import cors from 'cors';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { readState, writeState, getStats } from './db.js';
+import { readState, writeState, mergeTransactions, getStats } from './db.js';
 import { initAuth, login, logout, getUserFromToken, parseAuthHeader } from './auth.js';
 import { scanInvoiceImage, getAiStatus } from './deepseek.js';
 import {
@@ -113,8 +113,28 @@ app.get('/api/state', requireAuth, (_req, res) => {
 
 app.put('/api/state', requireAuth, (req, res) => {
   try {
-    writeState(req.body);
-    res.json({ ok: true });
+    const expectedVersion = req.body.stateVersion;
+    const stateVersion = writeState(req.body, { expectedVersion });
+    res.json({ ok: true, stateVersion });
+  } catch (err) {
+    if (err.code === 'STATE_CONFLICT') {
+      return res.status(409).json({
+        error: '数据已被其他设备更新，请刷新后重试',
+        currentVersion: err.currentVersion
+      });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/merge-transactions', requireAuth, (req, res) => {
+  try {
+    const rows = req.body?.transactions;
+    if (!Array.isArray(rows)) {
+      return res.status(400).json({ error: 'transactions 必须为数组' });
+    }
+    const result = mergeTransactions(rows);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

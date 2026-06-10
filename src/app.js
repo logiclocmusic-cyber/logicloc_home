@@ -36,6 +36,7 @@ let detIsIncome = false;
 let detContext = null;
 let detSelectedIds = new Set();
 let nextId = 1;
+let stateVersion = 0;
 let pendingImport = null;
 let importHistory = [];
 
@@ -108,11 +109,12 @@ function syncImportHistory() {
   const seenId = new Set();
   Object.values(batchMap).forEach(b => { merged.push(b); seenId.add(b.id); });
 
+  // 仅保留仍有账目关联的导入记录，避免已删除批次在列表中“幽灵显示”
   saved.forEach(h => {
     if (h.id != null && batchMap[h.id]) return;
     if (h.id != null && seenId.has(h.id)) return;
-    merged.push(h);
-    if (h.id != null) seenId.add(h.id);
+    if (String(h.id).startsWith('legacy-')) return;
+    // 无关联账目的历史导入条目不再展示
   });
 
   const sourcesCovered = new Set(merged.map(h => h.source));
@@ -297,6 +299,7 @@ function buildState() {
     rules: { peerRules: Categorizer.peerRules, keywordRules: Categorizer.keywordRules },
     importHistory,
     nextId,
+    stateVersion,
     gearLibrary: gear.gearLibrary,
     nextGearId: gear.nextGearId
   };
@@ -310,8 +313,14 @@ function persist() {
   clearTimeout(persistTimer);
   persistTimer = setTimeout(async () => {
     try {
-      await saveState(buildState());
+      const res = await saveState(buildState());
+      if (res?.stateVersion != null) stateVersion = res.stateVersion;
     } catch (err) {
+      if (err.code === 'STATE_CONFLICT') {
+        await loadData();
+        alert('检测到云端有更新，已自动同步最新数据');
+        return;
+      }
       alert('保存失败：' + err.message);
     }
   }, 300);
@@ -359,6 +368,7 @@ async function loadData() {
 
     if (state.sources) SOURCES = state.sources;
     nextId = state.nextId || 1;
+    stateVersion = state.stateVersion || 0;
     allData = state.transactions || [];
     importHistory = state.importHistory || [];
     Categorizer.applyRules(state.rules);
@@ -1596,7 +1606,7 @@ function deleteImportBatch(encodedId) {
   if (toDelete.length === 0) {
     msg = `「${fname}」当前无关联账目，仅删除这条导入记录。确认？`;
   } else if (isLegacy) {
-    msg = `将删除来源「${entry.source}」下 ${toDelete.length} 笔无文件标记的账目（含恢复备份/手动录入）。\n\n此操作不可撤销，确认删除？`;
+    msg = `⚠️ 将删除来源「${entry.source}」下全部 ${toDelete.length} 笔「历史/备份」账目。\n\n通过其他文件导入的账目不受影响，但无文件标记的旧数据会全部清除。\n\n此操作不可撤销，确认删除？`;
   } else {
     msg = `将删除文件「${fname}」及其 ${toDelete.length} 笔关联账目。\n\n此操作不可撤销，确认删除？`;
   }

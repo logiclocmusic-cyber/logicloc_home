@@ -23,7 +23,19 @@ db.exec(`
   );
 `);
 
-const META_KEYS = ['refunded', 'excluded', 'categories', 'sources', 'rules', 'importHistory', 'nextId', 'gearLibrary', 'nextGearId'];
+const META_KEYS = ['refunded', 'excluded', 'categories', 'sources', 'rules', 'importHistory', 'nextId', 'gearLibrary', 'nextGearId', 'stateVersion'];
+
+function txnRowKey(row) {
+  const oid = String(row['交易单号'] || '').trim();
+  if (oid) return `oid:${oid}`;
+  const t = String(row['时间'] || '00:00').trim().split(':');
+  const time = `${(t[0] || '0').padStart(2, '0')}:${(t[1] || '0').padStart(2, '0')}`;
+  return [
+    row['日期'], time, row['来源'],
+    (row['交易对方'] || '').trim(), row['收支'],
+    Number(row['金额'] || 0).toFixed(2)
+  ].join('|');
+}
 
 export function readState() {
   const transactions = db.prepare('SELECT body FROM transactions ORDER BY id').all()
@@ -41,12 +53,24 @@ export function readState() {
     sources: meta.sources || null,
     rules: meta.rules || { peerRules: {}, keywordRules: [] },
     importHistory: meta.importHistory || [],
+    nextId: meta.nextId || 1,
     gearLibrary: meta.gearLibrary || [],
-    nextGearId: meta.nextGearId || 1
+    nextGearId: meta.nextGearId || 1,
+    stateVersion: meta.stateVersion || 0
   };
 }
 
-export function writeState(state) {
+export function writeState(state, opts = {}) {
+  const { expectedVersion, skipVersionCheck } = opts;
+  const verRow = db.prepare("SELECT value FROM meta WHERE key = 'stateVersion'").get();
+  const curVer = verRow ? JSON.parse(verRow.value) : 0;
+  if (!skipVersionCheck && expectedVersion !== undefined && expectedVersion !== curVer) {
+    const err = new Error('数据已被其他设备更新');
+    err.code = 'STATE_CONFLICT';
+    err.currentVersion = curVer;
+    throw err;
+  }
+
   db.exec('BEGIN');
   try {
     db.prepare('DELETE FROM transactions').run();
@@ -67,16 +91,43 @@ export function writeState(state) {
       importHistory: state.importHistory || [],
       nextId: state.nextId || 1,
       gearLibrary: state.gearLibrary || [],
-      nextGearId: state.nextGearId || 1
+      nextGearId: state.nextGearId || 1,
+      stateVersion: curVer + 1
     };
     for (const key of META_KEYS) {
       upsert.run(key, JSON.stringify(values[key]));
     }
     db.exec('COMMIT');
+    return curVer + 1;
   } catch (err) {
     db.exec('ROLLBACK');
     throw err;
   }
+}
+
+/** 合并追加交易（脚本/恢复用），不覆盖已有账目 */
+export function mergeTransactions(newRows) {
+  const state = readState();
+  const keys = new Set(state.transactions.map(txnRowKey));
+  let nextId = state.nextId || 1;
+  const added = [];
+
+  for (const r of newRows) {
+    if (keys.has(txnRowKey(r))) continue;
+    const row = { ...r, id: nextId++ };
+    keys.add(txnRowKey(row));
+    added.push(row);
+  }
+
+  if (!added.length) {
+    return { added: 0, total: state.transactions.length, stateVersion: state.stateVersion };
+  }
+
+  state.transactions = [...state.transactions, ...added];
+  state.transactions.sort((a, b) => (b['日期'] + b['时间']).localeCompare(a['日期'] + a['时间']));
+  state.nextId = nextId;
+  const stateVersion = writeState(state, { skipVersionCheck: true });
+  return { added: added.length, total: state.transactions.length, stateVersion };
 }
 
 export function getStats() {

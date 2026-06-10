@@ -21,10 +21,16 @@ export async function saveState(state) {
     body: JSON.stringify(state)
   });
   if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (res.status === 409) {
+    const err = new Error('数据已被其他设备更新，请刷新后重试');
+    err.code = 'STATE_CONFLICT';
+    throw err;
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `保存失败 (${res.status})`);
   }
+  return res.json();
 }
 
 export async function uploadGearImage(gearId, file) {
