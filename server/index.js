@@ -5,7 +5,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { readState, writeState, getStats } from './db.js';
 import { initAuth, login, logout, getUserFromToken, parseAuthHeader } from './auth.js';
-import { scanInvoiceImage } from './deepseek.js';
+import { scanInvoiceImage, getAiStatus } from './deepseek.js';
 import {
   listInvoices, getInvoice, createInvoice, updateInvoice, deleteInvoice,
   saveInvoiceFile, INVOICE_DIR
@@ -88,6 +88,10 @@ app.get('/api/invoices', requireAuth, (_req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+app.get('/api/invoices/ai-status', requireAuth, (_req, res) => {
+  res.json(getAiStatus());
 });
 
 app.get('/api/invoices/:id', requireAuth, (req, res) => {

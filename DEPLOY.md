@@ -40,7 +40,7 @@ git push -u origin main
    | `DB_PATH` | `/data/ledger.db` |
    | `GEAR_IMG_DIR` | `/data/gear-images` |
    | `INVOICE_DIR` | `/data/invoices` |
-   | `DEEPSEEK_API_KEY` | DeepSeek API Key（公司成本发票识别） |
+   | `DEEPSEEK_API_KEY` | **必填**。DeepSeek API Key（[platform.deepseek.com](https://platform.deepseek.com) 获取），用于发票 OCR+AI 解析 |
    | `FRONTEND_URL` | 先留空，Vercel 部署后再填 |
 
 5. **Volumes** → **Add Volume**：

@@ -53,6 +53,13 @@ export async function checkHealth() {
   return res.json();
 }
 
+export async function fetchInvoiceAiStatus() {
+  const res = await fetch(`${API}/invoices/ai-status`, { headers: authHeaders() });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) return { configured: false, mode: 'disabled' };
+  return res.json();
+}
+
 export async function fetchInvoices() {
   const res = await fetch(`${API}/invoices`, { headers: authHeaders() });
   if (res.status === 401) throw new Error('登录已过期，请重新登录');

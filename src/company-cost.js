@@ -1,7 +1,7 @@
 import { fmtMoney } from './format.js';
 import { assetUrl } from './apiBase.js';
 import {
-  fetchInvoices, scanInvoice, createInvoice, updateInvoice, deleteInvoice
+  fetchInvoices, fetchInvoiceAiStatus, scanInvoice, createInvoice, updateInvoice, deleteInvoice
 } from './api.js';
 
 const CATEGORIES = ['办公用品', '差旅', '餐饮', '设备', '服务', '租金', '其他'];
@@ -99,9 +99,26 @@ async function loadInvoices() {
   renderTable();
 }
 
+async function updateAiStatusBanner() {
+  const intro = document.querySelector('.inv-intro');
+  if (!intro) return;
+  try {
+    const st = await fetchInvoiceAiStatus();
+    if (!st.configured) {
+      intro.innerHTML = '上传公司成本发票进行管理。<span class="inv-ai-warn">AI 识别未启用：请在 Railway 配置 <code>DEEPSEEK_API_KEY</code> 后重新部署。</span>';
+    } else if (st.mode === 'vision') {
+      intro.textContent = '上传发票图片，由视觉模型 + DeepSeek 自动识别销售方、金额、日期等信息，识别后可手动校对保存。';
+    } else {
+      intro.textContent = '上传发票图片，先 OCR 识别文字再由 DeepSeek 解析字段，识别后可手动校对保存。';
+    }
+  } catch {
+    intro.textContent = '上传公司成本发票，由 AI 识别销售方、金额、日期等信息。';
+  }
+}
+
 export async function renderCompanyCostPage() {
   try {
-    await loadInvoices();
+    await Promise.all([loadInvoices(), updateAiStatusBanner()]);
   } catch (err) {
     alert('加载发票失败：' + err.message);
   }

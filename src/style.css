@@ -984,6 +984,8 @@ body{
 /* 公司成本 */
 .inv-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap}
 .inv-intro{font-size:13px;color:var(--txt2);line-height:1.55;margin:0;flex:1;min-width:200px}
+.inv-ai-warn{color:var(--amb-t);font-weight:500}
+.inv-intro code{font-size:12px;background:var(--surf3);padding:1px 5px;border-radius:4px}
 .inv-summary{font-size:12.5px;color:var(--txt3);font-weight:500;white-space:nowrap;padding-top:2px}
 .inv-drop{
   border:2px dashed var(--bdr2);border-radius:var(--rl);padding:36px 24px;text-align:center;
