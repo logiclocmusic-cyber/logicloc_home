@@ -1,0 +1,54 @@
+import { API } from './apiBase.js';
+
+function authHeaders(extra = {}) {
+  const token = sessionStorage.getItem('ledger_session_token');
+  const headers = { ...extra };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+export async function fetchState() {
+  const res = await fetch(`${API}/state`, { headers: authHeaders() });
+  if (res.status === 401) throw new Error('请先登录');
+  if (!res.ok) throw new Error(`加载失败 (${res.status})`);
+  return res.json();
+}
+
+export async function saveState(state) {
+  const res = await fetch(`${API}/state`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(state)
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `保存失败 (${res.status})`);
+  }
+}
+
+export async function uploadGearImage(gearId, file) {
+  const data = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('读取文件失败'));
+    reader.readAsDataURL(file);
+  });
+  const res = await fetch(`${API}/gear/${gearId}/image`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ data, mime: file.type })
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `上传失败 (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function checkHealth() {
+  const res = await fetch(`${API}/health`);
+  if (!res.ok) throw new Error('服务不可用');
+  return res.json();
+}

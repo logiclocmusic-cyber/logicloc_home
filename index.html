@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>家庭记账本</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.2.0/dist/tabler-icons.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+</head>
+<body>
+<div id="loginScreen" class="login-screen">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="logo-mark"><span class="c1"></span><span class="c2"></span><span class="c3"></span></div>
+      <h1>家庭记账本</h1>
+      <p>登录后管理家庭账本</p>
+    </div>
+    <form id="loginForm" class="login-form">
+      <label>邮箱<input id="loginEmail" type="email" autocomplete="username" placeholder="logicloc@qq.com" required></label>
+      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入密码" required></label>
+      <p id="loginError" class="login-error"></p>
+      <button type="submit" class="btn-cta login-btn" id="loginBtn"><i class="ti ti-login"></i> 登录</button>
+    </form>
+  </div>
+</div>
+<div class="app locked">
+<aside class="sb" id="sidebar">
+  <div class="sb-head">
+    <div class="sb-logo">
+      <div class="logo-mark"><span class="c1"></span><span class="c2"></span><span class="c3"></span></div>
+      <div class="sb-logo-text">
+        <h1>家庭记账本</h1>
+        <span id="subtitle">家庭记账 · 导入账单开始使用</span>
+      </div>
+    </div>
+    <button type="button" class="sb-toggle" id="sbToggle" title="折叠侧栏"><i class="ti ti-chevrons-left"></i></button>
+  </div>
+  <div class="nav-label">主菜单</div>
+  <nav class="nav">
+    <button class="ni on" onclick="sw('ledger',this)" title="明细列表"><span class="ni-icon lav"><i class="ti ti-list-details"></i></span><span class="ni-label">明细列表</span></button>
+    <button class="ni" onclick="sw('gear',this)" title="装备库"><span class="ni-icon teal"><i class="ti ti-baby-carriage"></i></span><span class="ni-label">装备库</span></button>
+    <button class="ni" onclick="sw('report',this)" title="收支报告"><span class="ni-icon green"><i class="ti ti-report-analytics"></i></span><span class="ni-label">收支报告</span></button>
+    <button class="ni" onclick="sw('income',this)" title="收入数据"><span class="ni-icon blue"><i class="ti ti-coin"></i></span><span class="ni-label">收入数据</span></button>
+    <button class="ni" id="nav-import" onclick="sw('import',this)" title="导入预览"><span class="ni-icon primary"><i class="ti ti-file-import"></i></span><span class="ni-label">导入预览</span></button>
+    <div class="nav-sp"></div>
+    <div class="nav-label">工具</div>
+    <button class="ni" onclick="filterPending()" title="待确认分类"><span class="ni-icon amber"><i class="ti ti-tag"></i></span><span class="ni-label">待确认分类</span><span id="pendingBadge" class="ni-badge" style="display:none">0</span></button>
+    <button class="ni" onclick="openAdd()" title="手动新增"><span class="ni-icon green"><i class="ti ti-plus"></i></span><span class="ni-label">手动新增</span></button>
+    <button class="ni" onclick="openSrc()" title="账单来源"><span class="ni-icon blue"><i class="ti ti-building-bank"></i></span><span class="ni-label">账单来源</span></button>
+    <button class="ni" onclick="openCat()" title="编辑分类"><span class="ni-icon lav"><i class="ti ti-tags"></i></span><span class="ni-label">编辑分类</span></button>
+  </nav>
+  <div class="sb-footer" title="SQLite 数据库">
+    <div class="sb-footer-text"><strong>SQLite 数据库</strong>数据保存在本地 data/ledger.db</div>
+    <i class="ti ti-database sb-footer-icon"></i>
+  </div>
+</aside>
+
+<div class="main">
+  <div class="topbar">
+    <div class="search-wrap">
+      <i class="ti ti-search"></i>
+      <input id="topSearch" placeholder="搜索对方、说明、分类…" oninput="syncSearch(this.value)">
+    </div>
+    <button class="btn-cta" onclick="openImport()"><i class="ti ti-plus"></i> 导入账单</button>
+    <div class="topbar-actions">
+      <div class="sv" id="sv"><i class="ti ti-check"></i> 已保存</div>
+      <div class="user-pill" id="userPill" title="点击退出登录">
+        <div class="avatar" id="userAvatar">L</div>
+        <span id="userDisplayName">Logic Loc</span>
+        <button type="button" class="logout-btn" id="logoutBtn" title="退出登录"><i class="ti ti-logout"></i></button>
+      </div>
+    </div>
+    <h2 id="vt">明细列表</h2>
+  </div>
+
+  <div class="page view on" id="view-ledger">
+    <div class="hero" id="heroBanner">
+      <div class="hero-inner">
+        <h2>欢迎回来，<em id="heroUserName">Logic Loc</em></h2>
+        <div class="hero-sub-row">
+          <p id="heroSub">导入微信、支付宝、银行流水，自动分类后再二次确认。</p>
+          <div class="hero-stats" id="heroStats"></div>
+        </div>
+        <a class="hero-chart-link" onclick="sw('charts',document.querySelector('.ni[onclick*=charts]'))">查看图表 →</a>
+      </div>
+      <div class="hero-deco"><i class="ti ti-wallet"></i></div>
+    </div>
+    <div class="chips" id="srcChips"></div>
+    <div class="bulk-bar" id="bulkBar">
+      <span class="bulk-cnt" id="bulkCnt">0 项已选</span>
+      <div class="bulk-sep"></div>
+      <span style="font-size:12.5px;color:var(--txt2)">批量移动到：</span>
+      <select id="bulkCatSel" class="btn" style="height:34px;min-width:140px"></select>
+      <button class="btn btn-p" onclick="applyBulkCat()" style="height:34px"><i class="ti ti-check"></i> 应用</button>
+      <div class="bulk-sep"></div>
+      <span style="font-size:12.5px;color:var(--txt2)">子分类：</span>
+      <select id="bulkSubCatSel" class="btn bulk-sub-sel" style="height:34px;min-width:120px" disabled title="选中项需属于同一分类"></select>
+      <button class="btn btn-p" id="bulkSubCatBtn" onclick="applyBulkSubCat()" style="height:34px" disabled><i class="ti ti-check"></i> 应用</button>
+      <div class="bulk-sep"></div>
+      <button class="btn btn-a" onclick="bulkToggleRefund(true)" style="height:34px">标记退款</button>
+      <button class="btn" onclick="bulkToggleRefund(false)" style="height:34px">撤销退款</button>
+      <button class="btn" onclick="clearSelection()" style="height:34px;margin-left:auto">✕ 取消</button>
+    </div>
+    <div class="fb">
+      <div class="fb-group fb-search">
+        <i class="ti ti-search fb-search-icon"></i>
+        <input id="qi" type="search" placeholder="搜索对方、说明、分类…" oninput="syncSearch(this.value)" aria-label="搜索">
+        <button type="button" class="fb-search-clear hide" id="searchClear" onclick="clearSearch()" title="清除搜索"><i class="ti ti-x"></i></button>
+      </div>
+      <div class="fb-sep" aria-hidden="true"></div>
+      <div class="fb-group fb-date">
+        <input type="date" id="d1" onchange="applyF()" aria-label="开始日期">
+        <span class="fb-to">至</span>
+        <input type="date" id="d2" onchange="applyF()" aria-label="结束日期">
+        <button type="button" class="btn btn-sm" onclick="setQuick('month')">本月</button>
+        <button type="button" class="btn btn-sm" onclick="setQuick('last')">上月</button>
+      </div>
+      <div class="fb-sep" aria-hidden="true"></div>
+      <div class="fb-group fb-filter">
+        <select id="cf" onchange="applyF()" aria-label="分类"><option value="">全部分类</option></select>
+        <div class="fb-seg" id="tfSeg" role="group" aria-label="收支">
+          <input type="hidden" id="tf" value="">
+          <button type="button" class="fb-seg-btn" data-val="支出" onclick="setTypeFilter('支出')">支</button>
+          <button type="button" class="fb-seg-btn" data-val="收入" onclick="setTypeFilter('收入')">收</button>
+        </div>
+        <label class="fb-switch" title="开启后不在列表中显示已退款记录">
+          <span class="fb-switch-label">隐藏退款</span>
+          <input type="checkbox" id="rfHide" onchange="applyF()" aria-label="隐藏退款" checked>
+          <span class="fb-switch-ui"></span>
+        </label>
+      </div>
+      <div class="fb-sep" aria-hidden="true"></div>
+      <div class="fb-group fb-sort">
+        <input type="hidden" id="sf" value="d-">
+        <button type="button" class="btn btn-sm" onclick="resetF()"><i class="ti ti-refresh"></i> 重置</button>
+      </div>
+    </div>
+    <div class="tw">
+      <div class="pager pager-top">
+        <span id="piTop"></span>
+        <select id="pgSize" class="pager-size" onchange="changePgSize(this.value)" aria-label="每页条数">
+          <option value="30" selected>30条/页</option><option value="50">50条/页</option><option value="100">100条/页</option><option value="200">200条/页</option>
+        </select>
+      </div>
+      <div class="tw-scroll">
+      <div class="th-row COL" id="ledgerHead">
+        <div class="th"><input type="checkbox" class="cb" id="selAll" onclick="toggleSelectAll(this)"></div>
+        <button type="button" class="th th-sort" data-sort="d" onclick="toggleSortCol('d')">日期<span class="th-sort-icon"></span></button>
+        <button type="button" class="th th-sort" data-sort="s" onclick="toggleSortCol('s')">来源<span class="th-sort-icon"></span></button>
+        <button type="button" class="th th-sort" data-sort="p" onclick="toggleSortCol('p')">交易对方<span class="th-sort-icon"></span></button>
+        <button type="button" class="th th-sort" data-sort="c" onclick="toggleSortCol('c')">分类<span class="th-sort-icon"></span></button>
+        <button type="button" class="th th-sort" data-sort="t" onclick="toggleSortCol('t')">收支<span class="th-sort-icon"></span></button>
+        <button type="button" class="th th-sort" data-sort="a" onclick="toggleSortCol('a')">金额<span class="th-sort-icon"></span></button>
+        <div class="th">操作</div>
+      </div>
+      <div id="tbody"></div>
+      </div>
+      <div class="pager"><span id="pi"></span><div class="pgs" id="pgs"></div></div>
+    </div>
+  </div>
+
+  <div class="page view" id="view-charts">
+    <div class="kpi5" id="kpi2"></div>
+    <div class="cg" style="margin-bottom:18px">
+      <div class="cc"><div class="ct"><i class="ti ti-chart-pie-2"></i> 支出分类占比</div><div id="catLeg" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;font-size:11px"></div><div style="position:relative;height:240px"><canvas id="cPie"></canvas></div></div>
+      <div class="cc"><div class="ct"><i class="ti ti-chart-pie-3"></i> 收入分类占比</div><div id="incLeg" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;font-size:11px"></div><div style="position:relative;height:240px"><canvas id="iPie"></canvas></div></div>
+    </div>
+    <div class="cc full" style="margin-bottom:18px"><div class="ct"><i class="ti ti-chart-bar"></i> 每月收入 vs 支出</div><div style="position:relative;height:260px"><canvas id="mBar"></canvas></div></div>
+    <div class="cc full"><div class="ct"><i class="ti ti-layout-columns"></i> 分类支出来源对比</div><div style="position:relative;height:270px"><canvas id="srcBar"></canvas></div></div>
+  </div>
+
+  <div class="page view" id="view-monitor">
+    <p class="monitor-intro">追踪每月关键支出分类，识别超支趋势。点击卡片查看明细。</p>
+    <div id="offsetSummary"></div>
+    <div class="mon-grid" id="monGrid"></div>
+    <div class="cc full"><div class="ct"><i class="ti ti-trending-up"></i> 关键支出月度对比</div><div style="position:relative;height:280px"><canvas id="monBar"></canvas></div></div>
+  </div>
+
+  <div class="page view" id="view-gear">
+    <div class="gear-head">
+      <p class="gear-intro">「母婴亲子 · 母婴装备」子分类下的支出会自动收录为装备，可上传产品图并修改产品名称。</p>
+      <span class="gear-count" id="gearCount"></span>
+    </div>
+    <div class="gear-gallery" id="gearGallery"></div>
+  </div>
+
+  <div class="page view" id="view-report">
+    <p class="report-intro">按月汇总家庭收入与支出走势，已退款及不计入统计的项目不含在内。</p>
+    <div class="kpi5" id="reportKpi"></div>
+    <div class="cc full report-chart-card">
+      <div class="report-chart-head">
+        <div class="ct"><i class="ti ti-chart-bar"></i> 每月收支走势</div>
+        <div class="report-legend" id="reportLeg"></div>
+      </div>
+      <div class="report-chart-wrap"><canvas id="reportChart"></canvas></div>
+    </div>
+    <div class="cc full report-table-card">
+      <div class="ct"><i class="ti ti-table"></i> 月度汇总</div>
+      <div class="report-table-wrap">
+        <table class="report-table" id="reportTable">
+          <thead><tr><th>月份</th><th>收入</th><th>支出</th><th>净结余</th></tr></thead>
+          <tbody id="reportTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="page view" id="view-income">
+    <p class="report-intro">按分类查看收入月度走势，各柱按子分类堆叠着色；闲置转让、乐极客收入等对冲类按净收入（收入减成本支出）统计，点击月份查看明细。</p>
+    <div class="income-grid" id="incomeGrid"></div>
+  </div>
+
+  <div class="page view" id="view-refunds">
+    <div class="rfbanner"><i class="ti ti-info-circle"></i><div>已退款条目<strong>不计入统计</strong>。可在明细列表中手动标记/撤销。</div></div>
+    <div class="tw">
+      <div class="tw-scroll">
+      <div class="th-row COL rf-cols">
+        <div class="th">日期</div><div class="th">来源</div>
+        <div class="th">交易对方</div>
+        <div class="th">收支</div><div class="th">金额</div><div class="th">操作</div>
+      </div>
+      <div id="rfbody"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="page view" id="view-import">
+    <div class="import-layout">
+      <div class="import-top-row">
+        <div class="import-panel">
+          <h4><i class="ti ti-upload"></i> 上传账单</h4>
+        <div class="src-type" id="impFormatTabs">
+          <label class="on"><input type="radio" name="imp-format" value="auto" checked> 自动识别</label>
+          <label><input type="radio" name="imp-format" value="wechat"> 微信</label>
+          <label><input type="radio" name="imp-format" value="alipay"> 支付宝</label>
+          <label><input type="radio" name="imp-format" value="bank"> 银行</label>
+        </div>
+        <div class="fg" style="margin-bottom:12px"><label>账单来源 *</label>
+          <select id="imp-src" onchange="onImportSrcChange()"></select>
+        </div>
+        <div id="imp-new-row" style="display:none;margin-bottom:12px">
+          <label style="font-size:12px;color:var(--txt3);margin-bottom:4px;display:block">新建来源</label>
+          <div class="arow"><input type="color" id="imp-new-color" value="#6941c6" style="width:44px;height:36px;border-radius:8px"><input id="imp-new-src" placeholder="如：微信-胡晗" style="flex:1"></div>
+        </div>
+        <div class="drop-zone" id="dropZone">
+          <i class="ti ti-upload"></i>
+          <p>拖入 CSV 文件，或点击选择</p>
+          <span>支持微信 / 支付宝 / 银行流水（CSV、Excel）</span>
+        </div>
+        <input type="file" id="importBillFile" accept=".csv,.txt,.xlsx,.xls" style="display:none">
+        <div class="import-stats" id="importStats"></div>
+        <div class="import-preview" id="importPreview">选择文件后将显示解析摘要</div>
+        <div class="import-actions">
+          <button class="btn" onclick="resetImportPreview()"><i class="ti ti-refresh"></i> 清空</button>
+          <button class="btn btn-p" id="importConfirmBtn" disabled onclick="confirmImport()"><i class="ti ti-check"></i> 确认导入</button>
+        </div>
+        </div>
+
+        <div class="tl-card" id="importTimeline"></div>
+      </div>
+
+      <div class="import-panel" id="importHistoryPanel">
+        <h4 style="display:flex;align-items:center;width:100%">
+          <span><i class="ti ti-files"></i> 已上传文件 <span class="panel-sub">按来源分类</span></span>
+          <span class="import-history-count" id="importHistoryCount"></span>
+        </h4>
+        <div id="importHistoryMain"></div>
+      </div>
+
+      <div class="import-panel" id="importRecordPreview" style="display:none">
+        <h4><i class="ti ti-list"></i> 记录预览（前 20 条）</h4>
+        <div class="import-preview-table">
+          <div class="tw-scroll" id="importRecordTable"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- modals unchanged structure -->
+<div class="mo hide" id="moAdd">
+  <div class="mbox wide">
+    <div class="mh"><h3><i class="ti ti-plus" style="color:var(--primary);margin-right:6px"></i>手动新增</h3><button class="mclose" onclick="closeAdd()"><i class="ti ti-x"></i></button></div>
+    <div class="mb">
+      <div class="form-grid">
+        <div class="fg"><label>日期 *</label><input type="date" id="f-date"></div>
+        <div class="fg"><label>时间</label><input type="time" id="f-time" value="12:00"></div>
+        <div class="fg"><label>来源 *</label><select id="f-src"></select></div>
+        <div class="fg"><label>收支 *</label><select id="f-type"><option value="支出">支出</option><option value="收入">收入</option></select></div>
+        <div class="fg"><label>金额 *</label><input type="number" id="f-amt" step="0.01" min="0"></div>
+        <div class="fg"><label>分类 *</label><select id="f-cat" onchange="syncAddSubcats()"></select></div>
+        <div class="fg"><label>子分类</label><select id="f-sub"><option value="">无</option></select></div>
+        <div class="fg"><label>交易对方</label><input type="text" id="f-peer"></div>
+        <div class="fg"><label>支付方式</label><input type="text" id="f-pay"></div>
+        <div class="fg span2"><label>商品说明</label><textarea id="f-desc"></textarea></div>
+        <div class="fg span2"><label>备注</label><input type="text" id="f-note"></div>
+      </div>
+    </div>
+    <div class="mf"><button class="btn" onclick="closeAdd()">取消</button><button class="btn btn-p" onclick="saveAdd()">保存</button></div>
+  </div>
+</div>
+
+<div class="mo hide" id="moSrc">
+  <div class="mbox">
+    <div class="mh"><h3>账单来源管理</h3><button class="mclose" onclick="closeSrc()"><i class="ti ti-x"></i></button></div>
+    <div class="mb"><div class="src-list" id="srcList"></div>
+      <div class="arow"><input type="color" id="ns-color" value="#6941c6" style="width:44px;height:36px;border-radius:8px"><input id="ns-name" placeholder="新来源名称…" style="flex:1"><button class="btn btn-p" onclick="addSrc()">添加</button></div>
+    </div>
+    <div class="mf"><button class="btn" onclick="closeSrc()">取消</button><button class="btn btn-p" onclick="saveSrc()">保存</button></div>
+  </div>
+</div>
+
+<div class="mo hide" id="moCat">
+  <div class="mbox wide">
+    <div class="mh"><h3>编辑分类</h3><button class="mclose" onclick="closeCat()"><i class="ti ti-x"></i></button></div>
+    <div class="mb">
+      <p class="cat-edit-hint">点击分类左侧箭头展开子分类（逗号分隔），明细表中会显示第二个下拉框。</p>
+      <div class="cl" id="catList"></div>
+      <div class="arow"><input id="nn" placeholder="新分类名称…" style="flex:1"><button class="btn btn-p" onclick="addCat()">添加</button></div>
+    </div>
+    <div class="mf"><button class="btn" onclick="closeCat()">取消</button><button class="btn btn-p" onclick="saveCat()">保存</button></div>
+  </div>
+</div>
+
+<div class="mo hide" id="moDet">
+  <div class="mbox wide">
+    <div class="mh"><h3 id="detTitle"></h3><button class="mclose" onclick="closeDetModal()">✕</button></div>
+    <div class="mb" style="padding:0">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:var(--surf2);border-bottom:1px solid var(--bdr)">
+        <span id="detSummary" style="font-size:13px;color:var(--txt2)"></span>
+        <span id="detTotal" style="font-size:16px;font-weight:700;color:var(--red-t)"></span>
+      </div>
+      <div class="det-bulk-bar" id="detBulkBar">
+        <span class="bulk-cnt" id="detBulkCnt">0 项已选</span>
+        <div class="bulk-sep"></div>
+        <span class="det-bulk-label">批量移动到：</span>
+        <select id="detBulkCatSel" class="btn det-bulk-sel"></select>
+        <button class="btn btn-p btn-sm" onclick="applyDetBulkCat()"><i class="ti ti-check"></i> 应用</button>
+        <div class="bulk-sep"></div>
+        <span class="det-bulk-label">子分类：</span>
+        <select id="detBulkSubCatSel" class="btn det-bulk-sel" disabled title="选中项需属于同一分类"></select>
+        <button class="btn btn-p btn-sm" id="detBulkSubCatBtn" onclick="applyDetBulkSubCat()" disabled><i class="ti ti-check"></i> 应用</button>
+        <div class="bulk-sep"></div>
+        <button class="btn btn-a btn-sm" onclick="detBulkToggleRefund(true)">标记退款</button>
+        <button class="btn btn-sm" onclick="detBulkToggleRefund(false)">撤销退款</button>
+        <button class="btn btn-sm" onclick="clearDetSelection()" style="margin-left:auto">✕ 取消</button>
+      </div>
+      <div id="detBody" style="max-height:50vh;overflow-y:auto"></div>
+    </div>
+  </div>
+</div>
+
+<div class="mo hide" id="moGear">
+  <div class="mbox wide">
+    <div class="mh"><h3><i class="ti ti-baby-carriage" style="color:var(--primary);margin-right:6px"></i>编辑装备</h3><button class="mclose" onclick="closeGearEdit()"><i class="ti ti-x"></i></button></div>
+    <div class="mb gear-modal-body">
+      <div class="gear-modal-layout">
+        <div class="gear-img-preview" id="gearImgPreview" title="点击上传产品图">
+          <div class="gear-modal-ph"><i class="ti ti-photo-plus"></i><span>点击上传产品图</span></div>
+        </div>
+        <div class="gear-form">
+          <div class="fg"><label>产品名称</label><input type="text" id="gearNameInp" placeholder="如：婴儿推车"></div>
+          <div class="gear-meta" id="gearMeta"></div>
+        </div>
+      </div>
+    </div>
+    <div class="mf">
+      <button class="btn" onclick="triggerGearUpload()"><i class="ti ti-upload"></i> 上传图片</button>
+      <button class="btn" onclick="closeGearEdit()">取消</button>
+      <button class="btn btn-p" onclick="saveGearEdit()">保存</button>
+    </div>
+  </div>
+</div>
+<input type="file" id="gearFileInp" accept="image/*,.heic,.heif" style="display:none">
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
