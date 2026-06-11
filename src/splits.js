@@ -1,4 +1,6 @@
 // ── 账目拆分 ─────────────────────────────────────────────────────────────────
+import { catPickBtnHtml } from './cat-picker.js';
+import { SUBCAT_UNSET_LABEL, subCatSelectHtml } from './subcat-ui.js';
 
 let getCats = () => [];
 let getSubcatsFor = () => [];
@@ -26,12 +28,13 @@ export function splitSum(row) {
 /** 将含拆分的记录展开为统计用虚拟行 */
 export function expandRowForStats(row) {
   if (!hasSplits(row)) return [row];
-  return row.splits.map(sp => ({
+  return row.splits.map((sp, idx) => ({
     ...row,
     分类: sp.category || row['分类'],
     子分类: sp.subcategory || '',
     金额: Number(sp.amount) || 0,
-    _splitOf: row.id
+    _splitOf: row.id,
+    _splitIdx: idx
   }));
 }
 
@@ -78,10 +81,11 @@ function splitLineHtml(sp, idx, parentId, parentType) {
     `<option value="${c}"${c === sp.category ? ' selected' : ''}>${c}</option>`
   ).join('');
   const subOpts = subs.length
-    ? ['<option value="">子分类</option>', ...subs.map(s =>
+    ? ['<option value="">' + SUBCAT_UNSET_LABEL + '</option>', ...subs.map(s =>
       `<option value="${s}"${s === (sp.subcategory || '') ? ' selected' : ''}>${s}</option>`
     )].join('')
     : '<option value="">无</option>';
+  const subUnset = subs.length && !(sp.subcategory || '');
   const sign = parentType === '收入' ? '+' : '-';
   return `<div class="split-line" data-idx="${idx}">
     <div class="split-line-amt">
@@ -94,7 +98,7 @@ function splitLineHtml(sp, idx, parentId, parentType) {
     </div>
     <div class="split-line-sub">
       <label>子分类</label>
-      <select class="split-sub-inp" data-idx="${idx}">${subOpts}</select>
+      <select class="split-sub-inp cs cs-sub${subUnset ? ' cs-sub-unset' : ''}" data-idx="${idx}">${subOpts}</select>
     </div>
     <div class="split-line-note">
       <label>备注</label>
@@ -264,33 +268,39 @@ export function updateSplitItem(parentId, idx, field, value) {
   onPersist();
 }
 
-export function splitSubRowHtml(row, sp, idx) {
+function splitSubRowCells(row, sp, idx, gridCls) {
   const subs = getSubcatsFor(sp.category);
-  const catOpts = getCats().map(c =>
-    `<option value="${c}"${c === sp.category ? ' selected' : ''}>${c}</option>`
-  ).join('');
-  const subSel = subs.length
-    ? `<select class="cs cs-sub split-sub-sel" onchange="updSplitSub(${row.id},${idx},this.value)">${['<option value="">子分类</option>', ...subs.map(s =>
-      `<option value="${s}"${s === (sp.subcategory || '') ? ' selected' : ''}>${s}</option>`
-    )].join('')}</select>`
-    : '';
+  const mainBtn = catPickBtnHtml(row.id, sp.category, { splitIdx: idx });
+  const subSel = subCatSelectHtml({
+    subs,
+    sub: sp.subcategory || '',
+    onchange: `updSplitSub(${row.id},${idx},this.value)`,
+    extraClass: 'split-sub-sel',
+  });
   const sign = row['收支'] === '收入' ? '+' : '-';
-  const note = sp.note ? `<span class="split-sub-note">${sp.note}</span>` : '';
-  return `<div class="tr COL ledger-split-row" data-parent-id="${row.id}">
+  const note = sp.note ? `<span class="split-sub-note">${sp.note}</span>` : `<span class="split-sub-tag">子项 ${idx + 1}</span>`;
+  const dateCell = gridCls === 'COL-NODATE' ? '' : `<div class="td dt-cell split-dt"><span class="split-sub-tag">子项 ${idx + 1}</span></div>`;
+  const peerNote = gridCls === 'COL-NODATE' ? note : (sp.note ? `<span class="split-sub-note">${sp.note}</span>` : '');
+  return `<div class="tr ${gridCls} ledger-split-row" data-parent-id="${row.id}">
     <div class="td td-check"><span class="split-tree-line"></span></div>
-    <div class="td dt-cell split-dt"><span class="split-sub-tag">子项 ${idx + 1}</span></div>
+    ${dateCell}
     <div class="td split-empty"></div>
-    <div class="td peer-desc split-peer">${note}</div>
-    <div class="td cat-cell split-cat-cell">
-      <select class="cs cs-main" onchange="updSplitCat(${row.id},${idx},this.value)">${catOpts}</select>
-      ${subSel}
-    </div>
+    <div class="td peer-desc split-peer">${peerNote}</div>
+    <div class="td cat-cell split-cat-cell">${mainBtn}${subSel}</div>
     <div class="td type-cell split-empty"></div>
     <div class="td amt-cell ${row['收支'] === '收入' ? 'i' : 'e'} no-strike">
       <div class="amt-val">${sign}¥${Number(sp.amount).toFixed(2)}</div>
     </div>
     <div class="td td-actions split-empty"></div>
   </div>`;
+}
+
+export function splitSubRowHtml(row, sp, idx) {
+  return splitSubRowCells(row, sp, idx, 'COL');
+}
+
+export function splitSubRowNoDateHtml(row, sp, idx) {
+  return splitSubRowCells(row, sp, idx, 'COL-NODATE');
 }
 
 export function parentCatCellHtml(row) {

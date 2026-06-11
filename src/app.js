@@ -1,8 +1,12 @@
 // ── 主应用 ───────────────────────────────────────────────────────────────────
+import { Categorizer } from './categorizer.js';
+import { ImportTimeline } from './import-timeline.js';
+import { Parsers } from './parsers.js';
 import {
-  DEFAULT_CATS, DEFAULT_EMOJIS, DEFAULT_SOURCES, DEFAULT_SUBCATS, CAT_COLORS,
+  DEFAULT_CATS, DEFAULT_EMOJIS, LEGACY_DEFAULT_EMOJIS, DEFAULT_SOURCES, DEFAULT_SUBCATS, CAT_COLORS,
   MONITOR_CATS, EXCLUDE_CATS, OFFSET_CATS, MONITOR_EMOJIS, INCOME_DATA_CATS
 } from './config.js';
+import { renderCatIcon, iconRef } from './cat-icons.js';
 import { fetchState, saveState, resetLedger, checkHealth } from './api.js';
 import {
   createBatchId, stampImportBatch, deriveImportHistory,
@@ -22,8 +26,17 @@ import {
   initSplits, hasSplits, expandRowForStats, rowMatchesCat, rowSearchHaystack,
   toggleSplitExpand, isSplitExpanded, openSplitEditor, closeSplitEditor, getSplitEditId,
   addSplitLine, saveSplitEditor, clearSplits, updateSplitItem,
-  parentCatCellHtml, splitSubRowHtml
+  parentCatCellHtml, splitSubRowHtml, splitSubRowNoDateHtml
 } from './splits.js';
+import { initCatPicker, catPickBtnHtml, openEmojiPicker, closeEmojiPicker } from './cat-picker.js';
+import { subCatSelectHtml, rowHasUnsetSub } from './subcat-ui.js';
+import { srcMarkHtml } from './source-logos.js';
+import {
+  initCatBrowse, renderCatBrowse, selectCatBrowse,
+  toggleCatBrowseGroup, toggleCatBrowseUnsetSubFilter,
+  getCatBrowseSelectedKeys, clearCatBrowseSelection, updateCatBrowseBulkBar,
+  toggleCatBrowseSelect, toggleCatBrowseGroupSelect, toggleCatBrowseSelectAll
+} from './cat-browse.js';
 
 let CATS = [...DEFAULT_CATS];
 let EMOJIS = { ...DEFAULT_EMOJIS };
@@ -34,7 +47,7 @@ let OFFSET_CATS_SET = OFFSET_CATS;
 let allData = [], filteredData = [], curPage = 1;
 let PG = 30;
 let activeSrc = 'all', refunded = new Set(), excluded = new Set(), charts = {};
-let filterPendingOnly = false;
+let filterUnsetSubOnly = false;
 let detRows = [], detSort = 'a-';
 let detIsIncome = false;
 let detContext = null;
@@ -73,11 +86,72 @@ function renderImportTimelineView() {
   });
 }
 
+const WEEKDAY_LABELS = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+
 function formatDateLabel(date) {
   if (!date) return '—';
   const d = new Date(`${date}T12:00:00`);
   if (Number.isNaN(d.getTime())) return date;
   return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+function formatDayHeader(date) {
+  if (!date) return '—';
+  const d = new Date(`${date}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return date;
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${mm}.${dd} ${WEEKDAY_LABELS[d.getDay()]}`;
+}
+
+function fmtDayAmt(n) {
+  const v = Math.round(n * 100) / 100;
+  return Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0$/, '').replace(/\.$/, '');
+}
+
+function daySumHtml(inc, exp) {
+  return `<span class="ledger-day-sum">
+    <span class="day-sum-item day-sum-inc"><i class="ti ti-arrow-up day-sum-ico"></i><span class="day-sum-val">${fmtDayAmt(inc)}</span></span>
+    <span class="day-sum-item day-sum-exp"><i class="ti ti-arrow-down day-sum-ico"></i><span class="day-sum-val">${fmtDayAmt(exp)}</span></span>
+  </span>`;
+}
+
+function computeDayTotals(data) {
+  const totals = {};
+  data.forEach(r => {
+    const d = r['日期'];
+    if (!totals[d]) totals[d] = { inc: 0, exp: 0 };
+    if (r['退款状态'] === 'refunded') return;
+    if (r['收支'] === '收入') totals[d].inc += r['金额'];
+    else totals[d].exp += r['金额'];
+  });
+  return totals;
+}
+
+function renderLedgerDayRow(row) {
+  const isR = row['退款状态'] === 'refunded';
+  const isEx = row['统计状态'] === 'excluded';
+  const isSel = selectedIds.has(row.id);
+  const split = hasSplits(row);
+  const catCell = split ? parentCatCellHtml(row) : catCellHtml(row);
+  const typeCat = split ? (row.splits[0]?.category || row['分类']) : row['分类'];
+  let html = `<div class="tr COL COL-NODATE ledger-row${split ? ' has-splits' : ''}${isR ? ' refunded' : ''}${isEx ? ' excluded' : ''}${isSel ? ' selected' : ''}" data-id="${row.id}">
+    <div class="td td-check"><input type="checkbox" class="cb" ${isSel ? 'checked' : ''} onchange="toggleSelect(${row.id},this)"></div>
+    <div class="td no-strike src-cell">${srcBadge(row['来源'])}</div>
+    ${peerDescCell(row)}
+    ${catCell}
+    <div class="td no-strike type-cell">${typeBadge(row['收支'], row['退款状态'], typeCat)}</div>
+    ${amtCellHtml(row, isR)}
+    <div class="td no-strike td-actions">
+      <button type="button" class="icon-act split${split ? ' on' : ''}" title="${split ? '编辑拆分' : '拆分账目'}" onclick="openSplitEditor(${row.id})"><i class="ti ti-arrows-split"></i></button>
+      <button type="button" class="icon-act rf ${isR ? 'um' : 'mk'}" title="${isR ? '撤销退款' : '标记退款'}" onclick="toggleRf(${row.id})"><i class="ti ${isR ? 'ti-rotate-clockwise' : 'ti-receipt-refund'}"></i></button>
+      <button type="button" class="icon-act ex ${isEx ? 'on' : ''}" title="${isEx ? '恢复计入统计' : '不计入统计'}" onclick="toggleExclude(${row.id})"><i class="ti ti-calculator-off"></i></button>
+    </div>
+  </div>`;
+  if (split && isSplitExpanded(row.id)) {
+    html += row.splits.map((sp, i) => splitSubRowNoDateHtml(row, sp, i)).join('');
+  }
+  return html;
 }
 
 function formatTimeShort(time) {
@@ -143,16 +217,9 @@ function catCellHtml(row) {
   const cat = row['分类'];
   const sub = row['子分类'] || '';
   const subs = subcatsFor(cat);
-  const mainOpts = CATS.map(c => `<option value="${c}"${c === cat ? ' selected' : ''}>${catLabel(c)}</option>`).join('');
-  const subSel = subs.length
-    ? `<select class="cs cs-sub${subs.length && !sub ? ' cs-sub-unset' : ''}" onchange="updSubCat(${row.id},this.value)">${['<option value="">子分类</option>', ...subs.map(s =>
-        `<option value="${s}"${s === sub ? ' selected' : ''}>${s}</option>`
-      )].join('')}</select>`
-    : '';
-  return `<div class="td no-strike cat-cell">
-    <select class="cs cs-main" onchange="updCat(${row.id},this.value)">${mainOpts}</select>
-    ${subSel}
-  </div>`;
+  const mainBtn = catPickBtnHtml(row.id, cat);
+  const subSel = subCatSelectHtml({ subs, sub, onchange: `updSubCat(${row.id},this.value)` });
+  return `<div class="td no-strike cat-cell">${mainBtn}${subSel}</div>`;
 }
 
 function catLabel(c) { return c; }
@@ -224,23 +291,29 @@ function buildState() {
 
 let persistTimer = null;
 
-function persist() {
+async function persistNow() {
   flash();
   updateSubtitle();
   clearTimeout(persistTimer);
-  persistTimer = setTimeout(async () => {
-    try {
-      const res = await saveState(buildState());
-      if (res?.stateVersion != null) stateVersion = res.stateVersion;
-    } catch (err) {
-      if (err.code === 'STATE_CONFLICT') {
-        await loadData();
-        alert('检测到云端有更新，已自动同步最新数据');
-        return;
-      }
-      alert('保存失败：' + err.message);
+  persistTimer = null;
+  try {
+    const res = await saveState(buildState());
+    if (res?.stateVersion != null) stateVersion = res.stateVersion;
+    return true;
+  } catch (err) {
+    if (err.code === 'STATE_CONFLICT') {
+      await loadData();
+      alert('保存失败：云端数据已被其他设备更新，已同步最新数据');
+      return false;
     }
-  }, 300);
+    alert('保存失败：' + err.message);
+    return false;
+  }
+}
+
+function persist() {
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => { persistNow(); }, 300);
 }
 
 async function updateBackendFooter(count) {
@@ -275,7 +348,14 @@ async function loadData() {
     if (state.categories) {
       CATS = [...state.categories.cats];
       DEFAULT_CATS.forEach(c => { if (!CATS.includes(c)) CATS.push(c); });
-      EMOJIS = { ...DEFAULT_EMOJIS, ...state.categories.emojis };
+      EMOJIS = { ...DEFAULT_EMOJIS };
+      if (state.categories.emojis) {
+        for (const [cat, val] of Object.entries(state.categories.emojis)) {
+          const legacy = LEGACY_DEFAULT_EMOJIS[cat];
+          if (legacy && val === legacy) continue;
+          EMOJIS[cat] = val;
+        }
+      }
       SUBCATS = { ...DEFAULT_SUBCATS, ...(state.categories.subcats || {}) };
       const babySubs = SUBCATS['母婴亲子'];
       if (babySubs && !babySubs.includes('母婴装备')) {
@@ -313,13 +393,15 @@ async function loadData() {
     renderKPI();
     renderMonitor();
     updateSubtitle();
-    updatePendingBadge();
     renderImportHistoryUI();
     renderGearPage();
     await updateBackendFooter(health?.count ?? allData.length);
   } catch (err) {
     await updateBackendFooter();
-    alert('无法加载数据：' + err.message + '\n\n' + (API_BASE ? '请检查 Railway 后端与 VITE_API_BASE 配置' : '请确认已运行 npm run dev'));
+    const hint = API_BASE ? '请检查 Railway 后端与 VITE_API_BASE 配置' : '请确认已运行 npm run dev';
+    const msg = `无法加载数据：${err.message}\n\n${hint}`;
+    if (appReady) alert(msg);
+    else throw new Error(msg);
   }
 }
 
@@ -364,22 +446,16 @@ function renderKPI() {
   updateSubtitle();
 }
 
-function updatePendingBadge() {
-  const n = allData.filter(r => Categorizer.isPending(r) && isCountedInStats(r)).length;
-  const el = document.getElementById('pendingBadge');
-  if (el) {
-    el.textContent = n;
-    el.style.display = n > 0 ? '' : 'none';
-  }
-}
-
 function buildSrcChips() {
   const el = document.getElementById('srcChips');
   const allSrcs = ['all', ...new Set(allData.map(r => r['来源']))];
   el.innerHTML = allSrcs.map(s => {
     const clr = s === 'all' ? '#98a2b3' : srcColor(s);
     const on = (s === 'all' && activeSrc === 'all') || s === activeSrc;
-    return `<div class="chip${on ? ' on' : ''}" onclick="filterSrc('${s.replace(/'/g, "\\'")}',this)" data-src="${s}"><span class="dot" style="background:${clr}"></span>${s === 'all' ? '全部' : s}</div>`;
+    const mark = s === 'all'
+      ? '<span class="dot" style="background:#98a2b3"></span>'
+      : srcMarkHtml(s, { size: 20, fallbackColor: clr });
+    return `<div class="chip${on ? ' on' : ''}" onclick="filterSrc('${s.replace(/'/g, "\\'")}',this)" data-src="${s}">${mark}${s === 'all' ? '全部' : s}</div>`;
   }).join('');
 }
 
@@ -430,7 +506,7 @@ function applyF() {
     if (cat && !rowMatchesCat(r, cat)) return false;
     if (tp && r['收支'] !== tp) return false;
     if (hideRf && r['退款状态'] === 'refunded') return false;
-    if (filterPendingOnly && !Categorizer.isPending(r)) return false;
+    if (filterUnsetSubOnly && !rowHasUnsetSub(r, subcatsFor)) return false;
     if (q && !rowMatchesSearch(r, q)) return false;
     if (d1 && r['日期'] < d1) return false;
     if (d2 && r['日期'] > d2) return false;
@@ -529,7 +605,8 @@ function resetF() {
   document.getElementById('tf').value = '';
   syncTypeSegUI();
   document.getElementById('rfHide').checked = true;
-  filterPendingOnly = false;
+  filterUnsetSubOnly = false;
+  syncUnsetSubFilterUI();
   document.getElementById('sf').value = 'd-';
   activeSrc = 'all';
   document.querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
@@ -539,9 +616,8 @@ function resetF() {
 }
 
 function srcBadge(s) {
-  const clr = srcColor(s);
   const lbl = s.length > 9 ? s.slice(0, 9) + '…' : s;
-  return `<span class="src-inline"><span class="src-dot" style="background:${clr}"></span>${lbl}</span>`;
+  return `<span class="src-inline">${srcMarkHtml(s, { size: 18, fallbackColor: srcColor(s) })}${lbl}</span>`;
 }
 
 function typeBadge(t, rf, cat) {
@@ -560,35 +636,33 @@ function renderTable() {
   const pd = filteredData.slice(start, start + PG);
   const el = document.getElementById('tbody');
   if (!pd.length) {
-    el.innerHTML = '<div style="padding:36px;text-align:center;color:var(--txt3);font-size:13px"><i class="ti ti-inbox" style="font-size:28px;display:block;margin-bottom:7px"></i>没有符合条件的记录</div>';
+    el.innerHTML = '<div class="ledger-day-empty"><i class="ti ti-inbox"></i>没有符合条件的记录</div>';
     renderPager();
     return;
   }
-  el.innerHTML = pd.map(row => {
-    const isR = row['退款状态'] === 'refunded';
-    const isEx = row['统计状态'] === 'excluded';
-    const isSel = selectedIds.has(row.id);
-    const split = hasSplits(row);
-    const catCell = split ? parentCatCellHtml(row) : catCellHtml(row);
-    const typeCat = split ? (row.splits[0]?.category || row['分类']) : row['分类'];
-    let html = `<div class="tr COL ledger-row${split ? ' has-splits' : ''}${isR ? ' refunded' : ''}${isEx ? ' excluded' : ''}${isSel ? ' selected' : ''}" data-id="${row.id}">
-      <div class="td td-check"><input type="checkbox" class="cb" ${isSel ? 'checked' : ''} onchange="toggleSelect(${row.id},this)"></div>
-      ${dateTimeCell(row['日期'], row['时间'])}
-      <div class="td no-strike src-cell">${srcBadge(row['来源'])}</div>
-      ${peerDescCell(row)}
-      ${catCell}
-      <div class="td no-strike type-cell">${typeBadge(row['收支'], row['退款状态'], typeCat)}</div>
-      ${amtCellHtml(row, isR)}
-      <div class="td no-strike td-actions">
-        <button type="button" class="icon-act split${split ? ' on' : ''}" title="${split ? '编辑拆分' : '拆分账目'}" onclick="openSplitEditor(${row.id})"><i class="ti ti-arrows-split"></i></button>
-        <button type="button" class="icon-act rf ${isR ? 'um' : 'mk'}" title="${isR ? '撤销退款' : '标记退款'}" onclick="toggleRf(${row.id})"><i class="ti ${isR ? 'ti-rotate-clockwise' : 'ti-receipt-refund'}"></i></button>
-        <button type="button" class="icon-act ex ${isEx ? 'on' : ''}" title="${isEx ? '恢复计入统计' : '不计入统计'}" onclick="toggleExclude(${row.id})"><i class="ti ti-calculator-off"></i></button>
-      </div>
-    </div>`;
-    if (split && isSplitExpanded(row.id)) {
-      html += row.splits.map((sp, i) => splitSubRowHtml(row, sp, i)).join('');
+
+  const dayTotals = computeDayTotals(filteredData);
+  const dayOrder = [];
+  const dayMap = new Map();
+  pd.forEach(row => {
+    const d = row['日期'];
+    if (!dayMap.has(d)) {
+      dayMap.set(d, []);
+      dayOrder.push(d);
     }
-    return html;
+    dayMap.get(d).push(row);
+  });
+
+  el.innerHTML = dayOrder.map(date => {
+    const rows = dayMap.get(date);
+    const t = dayTotals[date] || { inc: 0, exp: 0 };
+    return `<section class="ledger-day-card">
+      <header class="ledger-day-head">
+        <span class="ledger-day-date">${formatDayHeader(date)}</span>
+        ${daySumHtml(t.inc, t.exp)}
+      </header>
+      <div class="ledger-day-rows">${rows.map(renderLedgerDayRow).join('')}</div>
+    </section>`;
   }).join('');
   renderPager();
 }
@@ -671,9 +745,9 @@ function updCat(id, nc) {
   persist();
   renderKPI();
   renderMonitor();
-  updatePendingBadge();
   renderTable();
   refreshDetailModal();
+  refreshActiveViews();
 }
 
 function updSubCat(id, sub) {
@@ -688,6 +762,64 @@ function updSubCat(id, sub) {
   persist();
   renderTable();
   refreshDetailModal();
+  refreshActiveViews();
+}
+
+function reorderCats(fromIdx, toIdx) {
+  if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0 || fromIdx >= CATS.length || toIdx >= CATS.length) return;
+  const [moved] = CATS.splice(fromIdx, 1);
+  CATS.splice(toIdx, 0, moved);
+  persist();
+  buildCatFilter();
+  renderCatBrowse();
+}
+
+function applyCatBrowseBulkCat() {
+  const newCat = document.getElementById('catBrowseBulkCatSel')?.value;
+  if (!newCat) return;
+  getCatBrowseSelectedKeys().forEach(key => {
+    const sep = key.indexOf(':');
+    const parentId = Number(sep < 0 ? key : key.slice(0, sep));
+    const splitIdx = sep < 0 ? null : Number(key.slice(sep + 1));
+    const row = allData.find(r => r.id === parentId);
+    if (!row) return;
+    if (splitIdx != null && hasSplits(row)) {
+      updateSplitItem(parentId, splitIdx, 'category', newCat);
+    } else if (!hasSplits(row)) {
+      row['分类'] = newCat;
+      const subs = subcatsFor(newCat);
+      if (row['子分类'] && !subs.includes(row['子分类'])) row['子分类'] = '';
+      row._autoCat = false;
+      row._catConf = 'manual';
+      Categorizer.learn(row['交易对方'], newCat, row['商品说明']);
+    }
+  });
+  persist();
+  renderKPI();
+  renderMonitor();
+  applyF();
+  clearCatBrowseSelection();
+}
+
+function applyCatBrowseBulkSub() {
+  const subSel = document.getElementById('catBrowseBulkSubSel');
+  if (!subSel || subSel.disabled) return;
+  const newSub = subSel.value;
+  getCatBrowseSelectedKeys().forEach(key => {
+    const sep = key.indexOf(':');
+    const parentId = Number(sep < 0 ? key : key.slice(0, sep));
+    const splitIdx = sep < 0 ? null : Number(key.slice(sep + 1));
+    const row = allData.find(r => r.id === parentId);
+    if (!row) return;
+    if (splitIdx != null && hasSplits(row)) {
+      updateSplitItem(parentId, splitIdx, 'subcategory', newSub);
+    } else if (!hasSplits(row)) {
+      row['子分类'] = newSub;
+    }
+  });
+  persist();
+  applyF();
+  clearCatBrowseSelection();
 }
 
 function renderRfView() {
@@ -717,7 +849,7 @@ function showAllDetail(cat) {
   detSelectedIds.clear();
   const ad = activeExpanded().filter(r => r['收支'] === '支出' && r['分类'] === cat);
   const total = ad.reduce((s, r) => s + r['金额'], 0);
-  document.getElementById('detTitle').innerHTML = `<span style="margin-right:6px">${EMOJIS[cat] || '📌'}</span>${cat} · 全部`;
+  document.getElementById('detTitle').innerHTML = `<span class="inline-cat-icon" style="margin-right:6px">${catIconHtml(cat, { size: 18 })}</span>${cat} · 全部`;
   document.getElementById('detSummary').textContent = `共 ${fmtCount(ad.length)} 笔支出`;
   document.getElementById('detTotal').textContent = fmtMoney(total);
   document.getElementById('detTotal').style.color = 'var(--red-t)';
@@ -734,7 +866,7 @@ function showDetail(month, cat) {
   detSelectedIds.clear();
   const rows = activeExpanded().filter(r => r['收支'] === '支出' && r['日期'].startsWith(month) && r['分类'] === cat);
   const total = rows.reduce((s, r) => s + r['金额'], 0);
-  document.getElementById('detTitle').innerHTML = `<span style="margin-right:6px">${MONITOR_EMOJIS[cat] || EMOJIS[cat] || ''}</span>${cat} · ${month}`;
+  document.getElementById('detTitle').innerHTML = `<span class="inline-cat-icon" style="margin-right:6px">${catIconHtml(cat, { size: 18, value: MONITOR_EMOJIS[cat] })}</span>${cat} · ${month}`;
   document.getElementById('detSummary').textContent = `共 ${fmtCount(rows.length)} 笔支出`;
   document.getElementById('detTotal').textContent = fmtMoney(total);
   document.getElementById('detTotal').style.color = 'var(--red-t)';
@@ -809,6 +941,7 @@ function refreshDetailModal() {
 function refreshActiveViews() {
   if (document.getElementById('view-income')?.classList.contains('on')) renderIncomeData();
   if (document.getElementById('view-report')?.classList.contains('on')) renderReport();
+  if (document.getElementById('view-catbrowse')?.classList.contains('on')) renderCatBrowse();
 }
 
 function rowDisplayTitle(row) {
@@ -894,7 +1027,7 @@ function renderMonitor() {
         const exp = rows.filter(r => r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0);
         const net = inc - exp;
         return `<div class="kpi-c" style="border-left:3px solid #ff6d00;cursor:pointer" onclick="showAllDetail('${cat}')">
-          <div class="kpi-l">${EMOJIS[cat] || ''} ${cat}</div>
+          <div class="kpi-l"><span class="inline-cat-icon">${catIconHtml(cat, { size: 16 })}</span> ${cat}</div>
           <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-top:4px">
             <span style="font-size:13px;color:var(--grn-t);font-weight:600">+${fmtMoney(inc)}</span>
             <span style="font-size:12px;color:var(--red-t)">-${fmtMoney(exp)}</span>
@@ -907,13 +1040,16 @@ function renderMonitor() {
     } else offsetEl.innerHTML = '';
   }
   const grid = document.getElementById('monGrid');
-  if (!grid) return;
+  if (!grid) {
+    refreshActiveViews();
+    return;
+  }
   grid.innerHTML = MONITOR_CATS.map(cat => {
     const rows = months.map(m => ({ m, amt: ad.filter(r => r['日期'].startsWith(m) && r['分类'] === cat).reduce((s, r) => s + r['金额'], 0) }));
     const total = rows.reduce((s, r) => s + r.amt, 0);
     const maxAmt = Math.max(...rows.map(r => r.amt), 1);
     return `<div class="mon-c">
-      <div class="mon-title" style="justify-content:space-between"><span>${MONITOR_EMOJIS[cat] || ''} ${cat}</span><span style="font-size:11px;font-weight:700;color:var(--red-t)">共 ${fmtMoney(total)}</span></div>
+      <div class="mon-title" style="justify-content:space-between"><span><span class="inline-cat-icon">${catIconHtml(cat, { size: 16, value: MONITOR_EMOJIS[cat] })}</span> ${cat}</span><span style="font-size:11px;font-weight:700;color:var(--red-t)">共 ${fmtMoney(total)}</span></div>
       ${rows.map(({ m, amt }) => `<div class="mon-row" onclick="showDetail('${m}','${cat}')" style="cursor:pointer">
         <span class="mon-month">${m}</span>
         <div style="flex:1;margin:0 8px;height:6px;background:var(--surf2);border-radius:3px;overflow:hidden"><div style="width:${(amt / maxAmt * 100).toFixed(1)}%;height:100%;background:${catColor(cat)};border-radius:3px"></div></div>
@@ -937,6 +1073,7 @@ function renderMonitor() {
     },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { font: { size: 11 } } }, tooltip: chartMoneyTooltip }, scales: { y: { ticks: { callback: fmtChartAxis } } } }
   });
+  refreshActiveViews();
 }
 
 function renderCharts() {
@@ -1316,7 +1453,7 @@ function sw(name, el) {
   document.querySelectorAll('.ni').forEach(n => n.classList.remove('on'));
   document.getElementById('view-' + name).classList.add('on');
   el.classList.add('on');
-  document.getElementById('vt').textContent = { ledger: '明细列表', charts: '统计图表', monitor: '统计监控', gear: '装备库', report: '收支报告', income: '收入数据', company: '公司成本', refunds: '退款管理', import: '导入预览' }[name];
+  document.getElementById('vt').textContent = { ledger: '明细列表', catbrowse: '分类检索', charts: '统计图表', monitor: '统计监控', gear: '装备库', report: '收支报告', income: '收入数据', company: '公司成本', refunds: '退款管理', import: '导入预览' }[name];
   if (name === 'charts') setTimeout(renderCharts, 60);
   if (name === 'report') setTimeout(renderReport, 60);
   if (name === 'income') setTimeout(renderIncomeData, 60);
@@ -1325,6 +1462,7 @@ function sw(name, el) {
   if (name === 'gear') renderGearPage();
   if (name === 'company') renderCompanyCostPage();
   if (name === 'import') renderImportPage();
+  if (name === 'catbrowse') setTimeout(renderCatBrowse, 60);
 }
 
 function setQuick(type) {
@@ -1344,9 +1482,16 @@ function setQuick(type) {
   applyF();
 }
 
-function filterPending() {
-  filterPendingOnly = true;
-  sw('ledger', document.querySelector('.ni[onclick*="ledger"]'));
+function syncUnsetSubFilterUI() {
+  const btn = document.getElementById('unsetSubFilterBtn');
+  if (btn) btn.classList.toggle('on', filterUnsetSubOnly);
+}
+
+function toggleUnsetSubFilter(btn) {
+  filterUnsetSubOnly = !filterUnsetSubOnly;
+  if (btn) btn.classList.toggle('on', filterUnsetSubOnly);
+  else syncUnsetSubFilterUI();
+  curPage = 1;
   applyF();
 }
 
@@ -1602,12 +1747,11 @@ function confirmImport() {
   applyF();
   renderKPI();
   renderMonitor();
-  updatePendingBadge();
   renderImportHistoryUI();
   alert(`成功导入 ${count} 笔记录`);
 }
 
-function deleteImportBatch(encodedId) {
+async function deleteImportBatch(encodedId) {
   const batchId = decodeURIComponent(encodedId);
   const entry = importHistory.find(h => String(h.id) === String(batchId));
   if (!entry) return;
@@ -1622,12 +1766,13 @@ function deleteImportBatch(encodedId) {
     excluded.delete(id);
   });
 
-  persist();
+  const saved = await persistNow();
+  if (!saved) return;
+
   buildSrcChips();
   applyF();
   renderKPI();
   renderMonitor();
-  updatePendingBadge();
   renderImportTimelineView();
   renderImportHistoryUI();
 }
@@ -1656,7 +1801,6 @@ async function resetAllLedger() {
     applyF();
     renderKPI();
     renderMonitor();
-    updatePendingBadge();
     renderImportPage();
     updateBackendFooter(0);
     alert('已清空全部账目，请重新导入账单文件。');
@@ -1680,6 +1824,8 @@ function setupImportHistoryDelete() {
 function setupDropZone() {
   const zone = document.getElementById('dropZone');
   const input = document.getElementById('importBillFile');
+  if (!zone || !input || zone._bound) return;
+  zone._bound = true;
   zone.addEventListener('click', () => {
     if (!importActiveSource) { alert('请先选择导入来源'); return; }
     input.click();
@@ -1746,7 +1892,7 @@ function openSrc() { renderSrcList(); document.getElementById('moSrc').classList
 function closeSrc() { document.getElementById('moSrc').classList.add('hide'); }
 function renderSrcList() {
   document.getElementById('srcList').innerHTML = SOURCES.map((s, i) => `
-    <div class="src-row"><span class="si" style="background:${s.color}">${s.name[0]}</span>
+    <div class="src-row">${srcMarkHtml(s.name, { size: 32, fallbackColor: s.color })}
     <input class="sni" value="${s.name}" data-i="${i}"></div>`).join('');
 }
 function addSrc() {
@@ -1764,8 +1910,35 @@ function saveSrc() {
   closeSrc();
 }
 
+function catIconValue(cat) {
+  return EMOJIS[cat] || DEFAULT_EMOJIS[cat] || iconRef('1F4CC');
+}
+
+function catIconHtml(cat, opts = {}) {
+  const value = opts.value ?? catIconValue(cat);
+  return renderCatIcon(value, { size: opts.size, wrapClass: opts.wrapClass, class: opts.class });
+}
+
+function setCatIconBtn(btn, value) {
+  const v = value || iconRef('1F4CC');
+  btn.dataset.emoji = v;
+  btn.innerHTML = renderCatIcon(v, { size: 22 });
+}
+
 function openCat() { renderCatList(); document.getElementById('moCat').classList.remove('hide'); }
-function closeCat() { document.getElementById('moCat').classList.add('hide'); }
+function closeCat() { document.getElementById('moCat').classList.add('hide'); closeEmojiPicker(); }
+
+function pickCatEmoji(ev, i) {
+  ev.stopPropagation();
+  const btn = ev.currentTarget;
+  openEmojiPicker(btn, btn.dataset.emoji || catIconValue(CATS[i]), em => setCatIconBtn(btn, em));
+}
+
+function pickNewCatEmoji(ev) {
+  ev.stopPropagation();
+  const btn = ev.currentTarget;
+  openEmojiPicker(btn, btn.dataset.emoji || iconRef('1F4CC'), em => setCatIconBtn(btn, em));
+}
 
 const catSubExpanded = new Set();
 
@@ -1784,9 +1957,11 @@ function renderCatList() {
   document.getElementById('catList').innerHTML = CATS.map((c, i) => {
     const subs = SUBCATS[c] || [];
     const open = catSubExpanded.has(c);
+    const em = catIconValue(c);
     return `<div class="cat-edit-item" data-i="${i}">
       <div class="cr">
         <button type="button" class="cat-sub-toggle${open ? ' open' : ''}" title="子分类${subs.length ? `（${subs.length}）` : ''}" onclick="toggleCatSub(${i})"><i class="ti ti-chevron-right"></i></button>
+        <button type="button" class="cat-emoji-btn" data-i="${i}" data-emoji="${em}" title="设置图标" onclick="pickCatEmoji(event,${i})">${catIconHtml(c, { size: 22 })}</button>
         <input class="ni2" value="${c}" data-i="${i}">
         <button class="db" onclick="delCat(${i})">✕</button>
       </div>
@@ -1808,13 +1983,21 @@ function delCat(i) {
 function addCat() {
   const n = document.getElementById('nn').value.trim();
   if (!n || CATS.includes(n)) { alert(n ? '已存在' : '请输入名称'); return; }
+  const emBtn = document.getElementById('nnEmoji');
+  const em = emBtn?.dataset.emoji || iconRef('1F4CC');
   CATS.push(n);
-  EMOJIS[n] = '';
+  EMOJIS[n] = em;
   SUBCATS[n] = [];
   document.getElementById('nn').value = '';
+  if (emBtn) setCatIconBtn(emBtn, iconRef('1F4CC'));
   renderCatList();
 }
 function saveCat() {
+  const emojiByIndex = {};
+  document.querySelectorAll('#catList .cat-emoji-btn').forEach(btn => {
+    emojiByIndex[parseInt(btn.dataset.i, 10)] = btn.dataset.emoji?.trim() || btn.textContent.trim() || iconRef('1F4CC');
+  });
+
   document.querySelectorAll('#catList .ni2').forEach(inp => {
     const i = parseInt(inp.dataset.i, 10);
     const old = CATS[i];
@@ -1844,10 +2027,14 @@ function saveCat() {
     allData.filter(r => r['分类'] === cat && r['子分类'] && !subs.includes(r['子分类']))
       .forEach(r => r['子分类'] = '');
   });
+  CATS.forEach((c, i) => {
+    if (emojiByIndex[i] != null) EMOJIS[c] = emojiByIndex[i];
+  });
   persist();
   buildCatFilter();
   applyF();
   closeCat();
+  refreshActiveViews();
 }
 
 // ── 批量选择 ─────────────────────────────────────────────────────────────────
@@ -1856,7 +2043,7 @@ let selectedIds = new Set();
 function toggleSelect(id, cb) {
   if (cb.checked) selectedIds.add(id); else selectedIds.delete(id);
   updateBulkBar();
-  const row = document.querySelector(`.tr[data-id="${id}"]`);
+  const row = document.querySelector(`[data-id="${id}"]`);
   if (row) row.classList.toggle('selected', cb.checked);
 }
 
@@ -1924,7 +2111,6 @@ function applyBulkCat() {
   persist();
   renderKPI();
   renderMonitor();
-  updatePendingBadge();
   applyF();
   updateBulkBar();
 }
@@ -2029,7 +2215,6 @@ function applyDetBulkCat() {
   persist();
   renderKPI();
   renderMonitor();
-  updatePendingBadge();
   applyF();
   refreshDetailModal();
 }
@@ -2098,11 +2283,13 @@ function handleUpdSplitCat(parentId, idx, cat) {
   renderTable();
   renderKPI();
   renderMonitor();
+  refreshActiveViews();
 }
 
 function handleUpdSplitSub(parentId, idx, sub) {
   updateSplitItem(parentId, idx, 'subcategory', sub);
   renderTable();
+  refreshActiveViews();
 }
 
 function handleSaveSplit() {
@@ -2121,8 +2308,47 @@ function clearSplitFromModal() {
   if (id) handleClearSplit(id);
 }
 
-export function initApp() {
+let appReady = false;
+let initPromise = null;
+
+export async function initApp() {
+  if (initPromise) return initPromise;
+  initPromise = initAppInner().catch(err => {
+    initPromise = null;
+    throw err;
+  });
+  return initPromise;
+}
+
+async function initAppInner() {
+  if (appReady) {
+    await loadData();
+    return;
+  }
+  const nnEmoji = document.getElementById('nnEmoji');
+  if (nnEmoji) setCatIconBtn(nnEmoji, nnEmoji.dataset.emoji || iconRef('1F4CC'));
   Categorizer.onRulesChange(() => persist());
+  initCatPicker({
+    getCats: () => CATS,
+    getEmoji: c => catIconValue(c),
+    getCatColor: c => catColor(c),
+    onSelect: (rowId, cat, splitIdx) => {
+      if (splitIdx != null) handleUpdSplitCat(rowId, splitIdx, cat);
+      else updCat(rowId, cat);
+    }
+  });
+  syncUnsetSubFilterUI();
+  initCatBrowse({
+    getCats: () => CATS,
+    getEmoji: c => catIconHtml(c, { size: 20, wrapClass: 'catbrowse-tab-emoji-wrap' }),
+    getSubcatsFor: subcatsFor,
+    getExpandedRows: activeExpanded,
+    getCatLabel: catLabel,
+    formatDateLabel,
+    formatTimeShort,
+    srcBadge,
+    onReorderCats: reorderCats
+  });
   initGear({ getAllData: () => allData, onPersist: persist });
   initSplits({
     getCats: () => CATS,
@@ -2132,15 +2358,18 @@ export function initApp() {
   });
   setupGearUpload();
   setupCompanyCost();
-  loadData();
   setupDropZone();
   setupImportHistoryDelete();
+  await loadData();
+  appReady = true;
 }
 
 Object.assign(window, {
-  sw, openImport, filterPending,
+  sw, openImport, toggleUnsetSubFilter, toggleCatBrowseUnsetSubFilter, selectCatBrowse, toggleCatBrowseGroup,
+  toggleCatBrowseSelect, toggleCatBrowseGroupSelect, toggleCatBrowseSelectAll, clearCatBrowseSelection,
+  applyCatBrowseBulkCat, applyCatBrowseBulkSub,
   openAdd, closeAdd, saveAdd, openSrc, closeSrc, addSrc, saveSrc,
-  openCat, closeCat, addCat, saveCat, delCat, toggleCatSub,
+  openCat, closeCat, addCat, saveCat, delCat, toggleCatSub, pickCatEmoji, pickNewCatEmoji,
   setQuick, resetF, applyF, changePgSize, filterSrc, setTypeFilter, toggleSortCol,
   toggleSelect, toggleSelectAll, clearSelection, applyBulkCat, applyBulkSubCat, bulkToggleRefund,
   resetImportPreview, confirmImport, onImportSrcChange, toggleDupImport, toggleAllDupImport, resetAllLedger,

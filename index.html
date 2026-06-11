@@ -38,6 +38,7 @@
   <div class="nav-label">主菜单</div>
   <nav class="nav">
     <button class="ni on" onclick="sw('ledger',this)" title="明细列表"><span class="ni-icon lav"><i class="ti ti-list-details"></i></span><span class="ni-label">明细列表</span></button>
+    <button class="ni" onclick="sw('catbrowse',this)" title="分类检索"><span class="ni-icon amber"><i class="ti ti-category"></i></span><span class="ni-label">分类检索</span></button>
     <button class="ni" onclick="sw('gear',this)" title="装备库"><span class="ni-icon teal"><i class="ti ti-baby-carriage"></i></span><span class="ni-label">装备库</span></button>
     <button class="ni" onclick="sw('report',this)" title="收支报告"><span class="ni-icon green"><i class="ti ti-report-analytics"></i></span><span class="ni-label">收支报告</span></button>
     <button class="ni" onclick="sw('income',this)" title="收入数据"><span class="ni-icon blue"><i class="ti ti-coin"></i></span><span class="ni-label">收入数据</span></button>
@@ -45,7 +46,6 @@
     <button class="ni" id="nav-import" onclick="sw('import',this)" title="导入预览"><span class="ni-icon primary"><i class="ti ti-file-import"></i></span><span class="ni-label">导入预览</span></button>
     <div class="nav-sp"></div>
     <div class="nav-label">工具</div>
-    <button class="ni" onclick="filterPending()" title="待确认分类"><span class="ni-icon amber"><i class="ti ti-tag"></i></span><span class="ni-label">待确认分类</span><span id="pendingBadge" class="ni-badge" style="display:none">0</span></button>
     <button class="ni" onclick="openAdd()" title="手动新增"><span class="ni-icon green"><i class="ti ti-plus"></i></span><span class="ni-label">手动新增</span></button>
     <button class="ni" onclick="openSrc()" title="账单来源"><span class="ni-icon blue"><i class="ti ti-building-bank"></i></span><span class="ni-label">账单来源</span></button>
     <button class="ni" onclick="openCat()" title="编辑分类"><span class="ni-icon lav"><i class="ti ti-tags"></i></span><span class="ni-label">编辑分类</span></button>
@@ -118,6 +118,7 @@
           <input type="checkbox" id="rfHide" onchange="applyF()" aria-label="隐藏退款" checked>
           <span class="fb-switch-ui"></span>
         </label>
+        <button type="button" class="fb-unset-filter" id="unsetSubFilterBtn" onclick="toggleUnsetSubFilter(this)" title="仅显示未设置子分类的记录">未分类</button>
       </div>
       <div class="fb-sep" aria-hidden="true"></div>
       <div class="fb-group fb-sort">
@@ -125,27 +126,29 @@
         <button type="button" class="btn btn-sm" onclick="resetF()"><i class="ti ti-refresh"></i> 重置</button>
       </div>
     </div>
-    <div class="tw">
-      <div class="pager pager-top">
-        <span id="piTop"></span>
-        <select id="pgSize" class="pager-size" onchange="changePgSize(this.value)" aria-label="每页条数">
-          <option value="30" selected>30条/页</option><option value="50">50条/页</option><option value="100">100条/页</option><option value="200">200条/页</option>
-        </select>
+    <div class="tw ledger-day-view">
+      <div class="ledger-table-wrap">
+        <div class="pager pager-top ledger-day-pager">
+          <label class="ledger-sel-all"><input type="checkbox" class="cb" id="selAll" onclick="toggleSelectAll(this)"><span>全选本页</span></label>
+          <span id="piTop"></span>
+          <select id="pgSize" class="pager-size" onchange="changePgSize(this.value)" aria-label="每页条数">
+            <option value="30" selected>30条/页</option><option value="50">50条/页</option><option value="100">100条/页</option><option value="200">200条/页</option>
+          </select>
+        </div>
+        <div class="tw-scroll">
+          <div class="th-row COL COL-NODATE" id="ledgerHead">
+            <div class="th"></div>
+            <button type="button" class="th th-sort" data-sort="s" onclick="toggleSortCol('s')">来源<span class="th-sort-icon"></span></button>
+            <button type="button" class="th th-sort" data-sort="p" onclick="toggleSortCol('p')">交易对方<span class="th-sort-icon"></span></button>
+            <button type="button" class="th th-sort" data-sort="c" onclick="toggleSortCol('c')">分类<span class="th-sort-icon"></span></button>
+            <button type="button" class="th th-sort" data-sort="t" onclick="toggleSortCol('t')">收支<span class="th-sort-icon"></span></button>
+            <button type="button" class="th th-sort" data-sort="a" onclick="toggleSortCol('a')">金额<span class="th-sort-icon"></span></button>
+            <div class="th">操作</div>
+          </div>
+          <div id="tbody" class="ledger-day-list"></div>
+        </div>
+        <div class="pager ledger-day-pager-bottom"><span id="pi"></span><div class="pgs" id="pgs"></div></div>
       </div>
-      <div class="tw-scroll">
-      <div class="th-row COL" id="ledgerHead">
-        <div class="th"><input type="checkbox" class="cb" id="selAll" onclick="toggleSelectAll(this)"></div>
-        <button type="button" class="th th-sort" data-sort="d" onclick="toggleSortCol('d')">日期<span class="th-sort-icon"></span></button>
-        <button type="button" class="th th-sort" data-sort="s" onclick="toggleSortCol('s')">来源<span class="th-sort-icon"></span></button>
-        <button type="button" class="th th-sort" data-sort="p" onclick="toggleSortCol('p')">交易对方<span class="th-sort-icon"></span></button>
-        <button type="button" class="th th-sort" data-sort="c" onclick="toggleSortCol('c')">分类<span class="th-sort-icon"></span></button>
-        <button type="button" class="th th-sort" data-sort="t" onclick="toggleSortCol('t')">收支<span class="th-sort-icon"></span></button>
-        <button type="button" class="th th-sort" data-sort="a" onclick="toggleSortCol('a')">金额<span class="th-sort-icon"></span></button>
-        <div class="th">操作</div>
-      </div>
-      <div id="tbody"></div>
-      </div>
-      <div class="pager"><span id="pi"></span><div class="pgs" id="pgs"></div></div>
     </div>
   </div>
 
@@ -164,6 +167,30 @@
     <div id="offsetSummary"></div>
     <div class="mon-grid" id="monGrid"></div>
     <div class="cc full"><div class="ct"><i class="ti ti-trending-up"></i> 关键支出月度对比</div><div style="position:relative;height:280px"><canvas id="monBar"></canvas></div></div>
+  </div>
+
+  <div class="page view" id="view-catbrowse">
+    <p class="report-intro">按分类浏览账目；点击分类卡片切换，长按卡片可拖动排序。点击账目分类可修改，也可勾选后批量调整（已退款、不计入统计的项目不含在内）。</p>
+    <div class="catbrowse-tabs-wrap" id="catBrowseTabsWrap">
+      <div class="catbrowse-tabs" id="catBrowseTabs"></div>
+    </div>
+    <div class="catbrowse-summary" id="catBrowseSummary"></div>
+    <div class="catbrowse-filters">
+      <button type="button" class="fb-unset-filter" id="catBrowseUnsetSubFilterBtn" onclick="toggleCatBrowseUnsetSubFilter(this)" title="仅显示未设置子分类的记录">未分类</button>
+    </div>
+    <div class="bulk-bar catbrowse-bulk-bar" id="catBrowseBulkBar">
+      <span class="bulk-cnt" id="catBrowseBulkCnt">0 项已选</span>
+      <div class="bulk-sep"></div>
+      <span style="font-size:12.5px;color:var(--txt2)">批量移动到：</span>
+      <select id="catBrowseBulkCatSel" class="btn" style="height:34px;min-width:140px"></select>
+      <button class="btn btn-p" onclick="applyCatBrowseBulkCat()" style="height:34px"><i class="ti ti-check"></i> 应用</button>
+      <div class="bulk-sep"></div>
+      <span style="font-size:12.5px;color:var(--txt2)">子分类：</span>
+      <select id="catBrowseBulkSubSel" class="btn bulk-sub-sel" style="height:34px;min-width:120px" disabled title="选中项需属于同一分类"></select>
+      <button class="btn btn-p" id="catBrowseBulkSubBtn" onclick="applyCatBrowseBulkSub()" style="height:34px" disabled><i class="ti ti-check"></i> 应用</button>
+      <button class="btn" onclick="clearCatBrowseSelection()" style="height:34px;margin-left:auto">✕ 取消</button>
+    </div>
+    <div class="catbrowse-body" id="catBrowseBody"></div>
   </div>
 
   <div class="page view" id="view-gear">
@@ -346,9 +373,13 @@
   <div class="mbox wide">
     <div class="mh"><h3>编辑分类</h3><button class="mclose" onclick="closeCat()"><i class="ti ti-x"></i></button></div>
     <div class="mb">
-      <p class="cat-edit-hint">点击分类左侧箭头展开子分类（逗号分隔），明细表中会显示第二个下拉框。</p>
+      <p class="cat-edit-hint">点击圆形图标可自定义 emoji；左侧箭头展开子分类（逗号分隔）。</p>
       <div class="cl" id="catList"></div>
-      <div class="arow"><input id="nn" placeholder="新分类名称…" style="flex:1"><button class="btn btn-p" onclick="addCat()">添加</button></div>
+      <div class="arow cat-add-row">
+        <button type="button" class="cat-emoji-btn" id="nnEmoji" data-emoji="icon:1F4CC" title="新分类图标" onclick="pickNewCatEmoji(event)"></button>
+        <input id="nn" placeholder="新分类名称…" style="flex:1">
+        <button class="btn btn-p" onclick="addCat()">添加</button>
+      </div>
     </div>
     <div class="mf"><button class="btn" onclick="closeCat()">取消</button><button class="btn btn-p" onclick="saveCat()">保存</button></div>
   </div>

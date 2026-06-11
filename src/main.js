@@ -12,8 +12,8 @@ window.ImportTimeline = ImportTimeline;
 
 setupSidebar();
 
-ensureAuth(() => {
-  initApp();
+ensureAuth(async () => {
+  await initApp();
 });
 
 window.syncSearch = syncSearch;

@@ -1,4 +1,4 @@
-import { API } from './apiBase.js';
+import { API, API_BASE } from './apiBase.js';
 
 const TOKEN_KEY = 'ledger_session_token';
 
@@ -36,28 +36,48 @@ export function updateUserUI() {
   if (av) av.textContent = avatarLetter(name);
 }
 
+function networkLoginHint() {
+  if (API_BASE) {
+    return `无法连接后端（${API_BASE}）。请检查 Railway 是否在线，以及 Vercel 的 VITE_API_BASE、FRONTEND_URL 是否配置正确。`;
+  }
+  return '无法连接后端。请确认已运行 npm run dev，并通过 http://localhost:5173 访问。';
+}
+
 export async function fetchMe() {
   const token = getToken();
   if (!token) return null;
-  const res = await fetch(`${API}/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
-  if (!res.ok) {
-    setToken(null);
-    currentUser = null;
+  try {
+    const res = await fetch(`${API}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      // 仅当会话仍是发起请求时的 token 才清除，避免与登录表单的竞态互相覆盖
+      if (res.status === 401 && getToken() === token) {
+        setToken(null);
+        currentUser = null;
+      }
+      return null;
+    }
+    const { user } = await res.json();
+    if (getToken() !== token) return currentUser;
+    currentUser = user;
+    return user;
+  } catch {
     return null;
   }
-  const { user } = await res.json();
-  currentUser = user;
-  return user;
 }
 
 export async function login(email, password) {
-  const res = await fetch(`${API}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password })
-  });
+  let res;
+  try {
+    res = await fetch(`${API}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+  } catch {
+    throw new Error(networkLoginHint());
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || '登录失败');
   setToken(data.token);
@@ -89,6 +109,8 @@ export function hideLoginScreen() {
   document.querySelector('.app')?.classList.remove('locked');
 }
 
+let sessionBooted = false;
+
 export function setupLoginForm(onSuccess) {
   const form = document.getElementById('loginForm');
   const errEl = document.getElementById('loginError');
@@ -104,24 +126,42 @@ export function setupLoginForm(onSuccess) {
         document.getElementById('loginPassword').value
       );
       hideLoginScreen();
+      sessionBooted = true;
       await onSuccess();
     } catch (err) {
-      errEl.textContent = err.message;
+      showLoginScreen();
+      errEl.textContent = err.message || '登录失败，请重试';
     } finally {
       btn.disabled = false;
     }
   });
 
-  document.getElementById('logoutBtn')?.addEventListener('click', () => logout());
+  document.getElementById('logoutBtn')?.addEventListener('click', () => {
+    sessionBooted = false;
+    logout();
+  });
 }
 
 export async function ensureAuth(onAuthed) {
   setupLoginForm(onAuthed);
   const user = await fetchMe();
-  if (user) {
+  // 用户已在等待 fetchMe 期间通过表单完成登录并引导进应用，避免重复 init 把页面打回登录页
+  if (sessionBooted) return;
+
+  const authed = user || currentUser || getToken();
+  if (authed) {
     updateUserUI();
     hideLoginScreen();
-    await onAuthed();
+    try {
+      sessionBooted = true;
+      await onAuthed();
+    } catch (err) {
+      sessionBooted = false;
+      console.error(err);
+      showLoginScreen();
+      const errEl = document.getElementById('loginError');
+      if (errEl) errEl.textContent = err.message || '加载应用失败，请重新登录';
+    }
   } else {
     showLoginScreen();
   }

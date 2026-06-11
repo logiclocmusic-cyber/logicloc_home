@@ -7,13 +7,51 @@ export const DEFAULT_CATS = [
   '其他收入','其他'
 ];
 
-export const DEFAULT_EMOJIS = {
+import { iconRef } from './cat-icons.js';
+
+/** 旧版 emoji 默认（用于迁移到卡通图标） */
+export const LEGACY_DEFAULT_EMOJIS = {
   '交通出行':'🚇','餐饮美食':'🍜','日用百货':'🛒','购物消费':'🛍️','数码电器':'💻',
   '通讯费用':'📱','水电煤气':'💡','生活服务':'🔧','家居家装':'🏠','文化休闲':'🎭',
   '母婴亲子':'👶','医疗健康':'🏥','美容美发':'💇','宠物':'🐾','保险':'🛡️',
   '工商税务':'🏛️','商业服务':'💼','转账':'💸','红包奖励':'🧧','闲置转让':'♻️',
   '代拍代购':'🛒','乐极客收入':'🎮','直播收入':'📹','房产交易':'🏘️','投资理财':'📈',
-  '衣服鞋帽':'👗','探店置换':'📸','人情往来':'🤝','工资收入':'💼',  '其他收入':'💰','其他':'📌'
+  '衣服鞋帽':'👗','探店置换':'📸','人情往来':'🤝','工资收入':'💼','其他收入':'💰','其他':'📌'
+};
+
+/** 默认卡通图标（OpenMoji） */
+export const DEFAULT_EMOJIS = {
+  '交通出行': iconRef('1F682'),
+  '餐饮美食': iconRef('1F374'),
+  '日用百货': iconRef('1F9FB'),
+  '购物消费': iconRef('1F6CD'),
+  '数码电器': iconRef('1F4BB'),
+  '通讯费用': iconRef('1F4F1'),
+  '水电煤气': iconRef('1F4A1'),
+  '生活服务': iconRef('1F527'),
+  '家居家装': iconRef('1F3E0'),
+  '文化休闲': iconRef('1F3AD'),
+  '母婴亲子': iconRef('1F476'),
+  '医疗健康': iconRef('1F3E5'),
+  '美容美发': iconRef('1F486'),
+  '宠物': iconRef('1F43E'),
+  '保险': iconRef('1F6E1'),
+  '工商税务': iconRef('1F3DB'),
+  '商业服务': iconRef('1F4BC'),
+  '转账': iconRef('1F4B8'),
+  '红包奖励': iconRef('1F9E7'),
+  '闲置转让': iconRef('267B'),
+  '代拍代购': iconRef('1F6D2'),
+  '乐极客收入': iconRef('1F3AE'),
+  '直播收入': iconRef('1F4F9'),
+  '房产交易': iconRef('1F3D8'),
+  '投资理财': iconRef('1F4C8'),
+  '衣服鞋帽': iconRef('1F455'),
+  '探店置换': iconRef('1F4F8'),
+  '人情往来': iconRef('1F91D'),
+  '工资收入': iconRef('1F4B0'),
+  '其他收入': iconRef('1F4B5'),
+  '其他': iconRef('1F4CC'),
 };
 
 /** 各主分类下的默认子分类（可在「编辑分类」中修改） */
@@ -45,8 +83,14 @@ export const INCOME_DATA_CATS = ['闲置转让', '乐极客收入', '红包奖�
 export const EXCLUDE_CATS = new Set(['转账']);
 export const OFFSET_CATS = new Set(['代拍代购','闲置转让','餐饮美食','探店置换','人情往来','乐极客收入']);
 export const MONITOR_EMOJIS = {
-  '餐饮美食':'🍜','水电煤气':'💡','通讯费用':'📱','交通出行':'🚇',
-  '母婴亲子':'👶','保险':'🛡️','医疗健康':'🏥','工商税务':'🏛️'
+  '餐饮美食': iconRef('1F374'),
+  '水电煤气': iconRef('1F4A1'),
+  '通讯费用': iconRef('1F4F1'),
+  '交通出行': iconRef('1F682'),
+  '母婴亲子': iconRef('1F476'),
+  '保险': iconRef('1F6E1'),
+  '医疗健康': iconRef('1F3E5'),
+  '工商税务': iconRef('1F3DB'),
 };
 
 export const DEFAULT_SOURCES = [
