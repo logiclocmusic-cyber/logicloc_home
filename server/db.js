@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { deriveImportHistory } from '../src/import-manager.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env.DB_PATH || join(__dirname, '..', 'data', 'ledger.db');
@@ -133,6 +134,22 @@ export function mergeTransactions(newRows) {
   state.nextId = nextId;
   const stateVersion = writeState(state, { skipVersionCheck: true });
   return { added: added.length, total: state.transactions.length, stateVersion };
+}
+
+/** 按导入批次 ID 删除关联账目（服务端原子操作，不依赖客户端 stateVersion） */
+export function deleteImportBatchById(batchId) {
+  const state = readState();
+  const bid = String(batchId);
+  const toDelete = state.transactions.filter(r => String(r._importBatchId) === bid);
+  const deleteIds = new Set(toDelete.map(r => r.id));
+
+  state.transactions = state.transactions.filter(r => !deleteIds.has(r.id));
+  state.refunded = (state.refunded || []).filter(id => !deleteIds.has(id));
+  state.excluded = (state.excluded || []).filter(id => !deleteIds.has(id));
+  state.importHistory = deriveImportHistory(state.transactions, state.importHistory || []);
+
+  const stateVersion = writeState(state, { skipVersionCheck: true });
+  return { deleted: toDelete.length, stateVersion };
 }
 
 /** 清空全部账目与导入历史，保留分类/来源/规则/装备库等配置 */

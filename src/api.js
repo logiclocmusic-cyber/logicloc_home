@@ -22,8 +22,10 @@ export async function saveState(state) {
   });
   if (res.status === 401) throw new Error('登录已过期，请重新登录');
   if (res.status === 409) {
-    const err = new Error('数据已被其他设备更新，请刷新后重试');
+    const body = await res.json().catch(() => ({}));
+    const err = new Error(body.error || '数据已被其他设备更新，请刷新后重试');
     err.code = 'STATE_CONFLICT';
+    err.currentVersion = body.currentVersion;
     throw err;
   }
   if (!res.ok) {
@@ -49,6 +51,19 @@ export async function uploadGearImage(gearId, file) {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `上传失败 (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function deleteImportBatchApi(batchId) {
+  const res = await fetch(`${API}/import-batches/${encodeURIComponent(batchId)}`, {
+    method: 'DELETE',
+    headers: authHeaders()
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `删除失败 (${res.status})`);
   }
   return res.json();
 }

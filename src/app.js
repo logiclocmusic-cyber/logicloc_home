@@ -7,7 +7,7 @@ import {
   MONITOR_CATS, EXCLUDE_CATS, OFFSET_CATS, MONITOR_EMOJIS, INCOME_DATA_CATS
 } from './config.js';
 import { renderCatIcon, iconRef } from './cat-icons.js';
-import { fetchState, saveState, resetLedger, checkHealth } from './api.js';
+import { fetchState, saveState, resetLedger, deleteImportBatchApi, checkHealth } from './api.js';
 import {
   createBatchId, stampImportBatch, deriveImportHistory,
   recordsForBatch as batchRecords, deleteConfirmMessage
@@ -291,7 +291,7 @@ function buildState() {
 
 let persistTimer = null;
 
-async function persistNow() {
+async function persistNow(opts = {}) {
   flash();
   updateSubtitle();
   clearTimeout(persistTimer);
@@ -301,6 +301,10 @@ async function persistNow() {
     if (res?.stateVersion != null) stateVersion = res.stateVersion;
     return true;
   } catch (err) {
+    if (err.code === 'STATE_CONFLICT' && !opts._retried && err.currentVersion != null) {
+      stateVersion = err.currentVersion;
+      return persistNow({ _retried: true });
+    }
     if (err.code === 'STATE_CONFLICT') {
       await loadData();
       alert('保存失败：云端数据已被其他设备更新，已同步最新数据');
@@ -1759,22 +1763,14 @@ async function deleteImportBatch(encodedId) {
   const toDelete = batchRecords(allData, entry);
   if (!confirm(deleteConfirmMessage(entry, toDelete))) return;
 
-  const deleteIds = new Set(toDelete.map(r => r.id));
-  allData = allData.filter(r => !deleteIds.has(r.id));
-  deleteIds.forEach(id => {
-    refunded.delete(id);
-    excluded.delete(id);
-  });
-
-  const saved = await persistNow();
-  if (!saved) return;
-
-  buildSrcChips();
-  applyF();
-  renderKPI();
-  renderMonitor();
-  renderImportTimelineView();
-  renderImportHistoryUI();
+  try {
+    const res = await deleteImportBatchApi(batchId);
+    if (res?.stateVersion != null) stateVersion = res.stateVersion;
+    await loadData();
+    renderImportTimelineView();
+  } catch (err) {
+    alert('删除失败：' + (err.message || '请刷新后重试'));
+  }
 }
 
 async function resetAllLedger() {

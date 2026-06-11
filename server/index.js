@@ -3,7 +3,7 @@ import cors from 'cors';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { readState, writeState, mergeTransactions, resetLedger, getStats } from './db.js';
+import { readState, writeState, mergeTransactions, resetLedger, deleteImportBatchById, getStats } from './db.js';
 import { initAuth, login, logout, getUserFromToken, parseAuthHeader } from './auth.js';
 import { scanInvoiceImage, getAiStatus } from './deepseek.js';
 import {
@@ -123,6 +123,17 @@ app.put('/api/state', requireAuth, (req, res) => {
         currentVersion: err.currentVersion
       });
     }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/import-batches/:batchId', requireAuth, (req, res) => {
+  try {
+    const batchId = decodeURIComponent(req.params.batchId || '');
+    if (!batchId) return res.status(400).json({ error: '缺少批次 ID' });
+    const result = deleteImportBatchById(batchId);
+    res.json({ ok: true, ...result });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
