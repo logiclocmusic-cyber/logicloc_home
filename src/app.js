@@ -37,6 +37,10 @@ import {
   getCatBrowseSelectedKeys, clearCatBrowseSelection, updateCatBrowseBulkBar,
   toggleCatBrowseSelect, toggleCatBrowseGroupSelect, toggleCatBrowseSelectAll
 } from './cat-browse.js';
+import {
+  initRenqing, loadRenqingState, getRenqingState, renderRenqingPage,
+  selectRenqingPerson, triggerRenqingAvatarUpload, setupRenqingUpload
+} from './renqing.js';
 
 let CATS = [...DEFAULT_CATS];
 let EMOJIS = { ...DEFAULT_EMOJIS };
@@ -285,7 +289,8 @@ function buildState() {
     nextId,
     stateVersion,
     gearLibrary: gear.gearLibrary,
-    nextGearId: gear.nextGearId
+    nextGearId: gear.nextGearId,
+    renqingAvatars: getRenqingState().renqingAvatars
   };
 }
 
@@ -375,6 +380,7 @@ async function loadData() {
     importHistory = state.importHistory || [];
     Categorizer.applyRules(state.rules);
     loadGearState(state);
+    loadRenqingState(state);
 
     allData.forEach(r => {
       if (!r['子分类']) r['子分类'] = '';
@@ -945,7 +951,9 @@ function refreshDetailModal() {
 function refreshActiveViews() {
   if (document.getElementById('view-income')?.classList.contains('on')) renderIncomeData();
   if (document.getElementById('view-report')?.classList.contains('on')) renderReport();
+  if (document.getElementById('view-catreport')?.classList.contains('on')) renderCatReport();
   if (document.getElementById('view-catbrowse')?.classList.contains('on')) renderCatBrowse();
+  if (document.getElementById('view-renqing')?.classList.contains('on')) renderRenqingPage();
 }
 
 function rowDisplayTitle(row) {
@@ -1239,6 +1247,202 @@ function renderReport() {
 }
 
 const INCOME_SUB_COLORS = ['#FDBA74', '#86EFAC', '#1E3A5F', '#93C5FD', '#C4B5FD', '#FDA4AF', '#67E8F9', '#FDE68A'];
+const EXPENSE_SUB_COLORS = ['#FDA4AF', '#FB7185', '#F87171', '#EF4444', '#E11D48', '#F97316', '#FB923C', '#FDBA74'];
+let catReportCat = '';
+
+function catReportRows(cat) {
+  return activeExpanded().filter(r => r['分类'] === cat);
+}
+
+function catReportSubcats(cat, rows, type) {
+  const typed = rows.filter(r => r['收支'] === type);
+  const configured = subcatsFor(cat);
+  const used = [...new Set(typed.map(r => r['子分类'] || '未分类'))];
+  const merged = [...configured];
+  used.forEach(s => { if (!merged.includes(s)) merged.push(s); });
+  const list = merged.filter(s => typed.some(r => (r['子分类'] || '未分类') === s));
+  return list.sort((a, b) => {
+    if (a === '未分类') return 1;
+    if (b === '未分类') return -1;
+    const ai = configured.indexOf(a), bi = configured.indexOf(b);
+    if (ai >= 0 && bi >= 0) return ai - bi;
+    if (ai >= 0) return -1;
+    if (bi >= 0) return 1;
+    return a.localeCompare(b, 'zh-CN');
+  });
+}
+
+function catReportSubcatSum(rows, sub, type) {
+  return rows
+    .filter(r => r['收支'] === type && (sub === '全部' || (r['子分类'] || '未分类') === sub))
+    .reduce((s, r) => s + r['金额'], 0);
+}
+
+function populateCatReportSelect() {
+  const sel = document.getElementById('catReportSel');
+  if (!sel) return;
+  sel.innerHTML = CATS.map(c => `<option value="${c}">${catLabel(c)}</option>`).join('');
+  if (!catReportCat || !CATS.includes(catReportCat)) catReportCat = CATS[0] || '';
+  sel.value = catReportCat;
+}
+
+function onCatReportChange() {
+  catReportCat = document.getElementById('catReportSel')?.value || CATS[0] || '';
+  renderCatReport();
+}
+
+function catReportChartOptions(months, cat) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        ...chartMoneyTooltip,
+        backgroundColor: '#fff',
+        titleColor: '#344054',
+        bodyColor: '#475467',
+        borderColor: '#eaecf0',
+        borderWidth: 1,
+        padding: 12,
+        displayColors: true,
+        boxPadding: 4,
+        callbacks: {
+          ...chartMoneyTooltip.callbacks,
+          footer(items) {
+            const exp = items.filter(i => i.dataset.stack === 'exp').reduce((s, i) => s + (i.parsed?.y || 0), 0);
+            const inc = items.filter(i => i.dataset.stack === 'inc').reduce((s, i) => s + (i.parsed?.y || 0), 0);
+            if (!exp && !inc) return '';
+            const net = inc - exp;
+            return `净额 ${fmtMoneySigned(net)}`;
+          }
+        }
+      }
+    },
+    scales: {
+      x: {
+        stacked: true,
+        grid: { color: 'rgba(255,255,255,0.06)' },
+        ticks: { color: 'rgba(255,255,255,0.55)', font: { size: 11 }, maxRotation: 45 }
+      },
+      y: {
+        stacked: true,
+        beginAtZero: true,
+        grid: { color: 'rgba(255,255,255,0.08)' },
+        ticks: { color: 'rgba(255,255,255,0.55)', callback: fmtChartAxis }
+      }
+    },
+    onClick(_evt, elements, chart) {
+      if (!elements.length || !cat || !chart) return;
+      const month = months[elements[0].index];
+      const stack = chart.data.datasets[elements[0].datasetIndex]?.stack;
+      if (stack === 'inc') showIncomeDetail(month, cat);
+      else showDetail(month, cat);
+    },
+    onHover(evt, elements) {
+      evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+    }
+  };
+}
+
+function renderCatReport() {
+  populateCatReportSelect();
+  const cat = catReportCat || document.getElementById('catReportSel')?.value || CATS[0];
+  if (!cat) return;
+
+  const catRows = catReportRows(cat);
+  const months = [...new Set(catRows.map(r => r['日期'].slice(0, 7)))].sort();
+  const titleEl = document.getElementById('catReportChartTitle');
+  if (titleEl) titleEl.textContent = `${catLabel(cat)} · 每月子分类收支`;
+
+  const totalExp = catRows.filter(r => r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0);
+  const totalInc = catRows.filter(r => r['收支'] === '收入').reduce((s, r) => s + r['金额'], 0);
+  const totalNet = totalInc - totalExp;
+
+  const kpiEl = document.getElementById('catReportKpi');
+  if (kpiEl) {
+    kpiEl.innerHTML = [
+      kpiCard('累计支出', fmtMoney(totalExp), `${months.length} 个月`, 'ti-arrow-down-right', 'pink', 'c-red'),
+      kpiCard('累计收入', fmtMoney(totalInc), `${months.length} 个月`, 'ti-arrow-up-right', 'green', 'c-grn'),
+      kpiCard('净额', fmtMoneySigned(totalNet), totalNet >= 0 ? '收入大于支出' : '支出大于收入', 'ti-scale', 'blue', totalNet >= 0 ? 'c-blu' : 'c-red')
+    ].join('');
+  }
+
+  const expSubcats = catReportSubcats(cat, catRows, '支出');
+  const incSubcats = catReportSubcats(cat, catRows, '收入');
+  const legEl = document.getElementById('catReportLeg');
+  if (legEl) {
+    const expLeg = expSubcats.map((sub, si) =>
+      `<span class="catreport-leg-item"><span class="catreport-leg-dot" style="background:${EXPENSE_SUB_COLORS[si % EXPENSE_SUB_COLORS.length]}"></span>支出·${sub}</span>`
+    ).join('');
+    const incLeg = incSubcats.map((sub, si) =>
+      `<span class="catreport-leg-item"><span class="catreport-leg-dot" style="background:${INCOME_SUB_COLORS[si % INCOME_SUB_COLORS.length]}"></span>收入·${sub}</span>`
+    ).join('');
+    legEl.innerHTML = (expLeg + incLeg) || '<span>暂无子分类数据</span>';
+  }
+
+  const tbody = document.getElementById('catReportTableBody');
+  if (tbody) {
+    if (!months.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--txt3);padding:24px">该分类暂无数据</td></tr>';
+    } else {
+      tbody.innerHTML = [...months].reverse().map(m => {
+        const exp = catRows.filter(r => r['日期'].startsWith(m) && r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0);
+        const inc = catRows.filter(r => r['日期'].startsWith(m) && r['收支'] === '收入').reduce((s, r) => s + r['金额'], 0);
+        const net = inc - exp;
+        return `<tr>
+          <td>${fmtMonthLabel(m)}</td>
+          <td class="c-exp">${fmtMoney(exp)}</td>
+          <td class="c-inc">${fmtMoney(inc)}</td>
+          <td class="c-net" style="color:${net >= 0 ? 'var(--blu-t)' : 'var(--red-t)'}">${fmtMoneySigned(net)}</td>
+        </tr>`;
+      }).join('');
+    }
+  }
+
+  if (charts.catReport) charts.catReport.destroy();
+  const ctx = document.getElementById('catReportChart');
+  if (!ctx) return;
+  if (!months.length) {
+    charts.catReport = null;
+    return;
+  }
+
+  const datasets = [];
+  expSubcats.forEach((sub, si) => {
+    datasets.push({
+      label: `支出 · ${sub}`,
+      data: months.map(m => +catReportSubcatSum(catRows.filter(r => r['日期'].startsWith(m)), sub, '支出').toFixed(2)),
+      backgroundColor: EXPENSE_SUB_COLORS[si % EXPENSE_SUB_COLORS.length],
+      stack: 'exp',
+      borderRadius: ctx2 => stackedBarRadius(ctx2, 8),
+      borderSkipped: false,
+      barPercentage: 0.72,
+      categoryPercentage: 0.82
+    });
+  });
+  incSubcats.forEach((sub, si) => {
+    datasets.push({
+      label: `收入 · ${sub}`,
+      data: months.map(m => +catReportSubcatSum(catRows.filter(r => r['日期'].startsWith(m)), sub, '收入').toFixed(2)),
+      backgroundColor: INCOME_SUB_COLORS[si % INCOME_SUB_COLORS.length],
+      stack: 'inc',
+      borderRadius: ctx2 => stackedBarRadius(ctx2, 8),
+      borderSkipped: false,
+      barPercentage: 0.72,
+      categoryPercentage: 0.82
+    });
+  });
+
+  if (!datasets.length) return;
+
+  charts.catReport = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: months.map(fmtMonthLabel), datasets },
+    options: catReportChartOptions(months, cat)
+  });
+}
 
 function incomeCatIsNetted(cat) {
   return OFFSET_CATS_SET.has(cat);
@@ -1457,10 +1661,12 @@ function sw(name, el) {
   document.querySelectorAll('.ni').forEach(n => n.classList.remove('on'));
   document.getElementById('view-' + name).classList.add('on');
   el.classList.add('on');
-  document.getElementById('vt').textContent = { ledger: '明细列表', catbrowse: '分类检索', charts: '统计图表', monitor: '统计监控', gear: '装备库', report: '收支报告', income: '收入数据', company: '公司成本', refunds: '退款管理', import: '导入预览' }[name];
+  document.getElementById('vt').textContent = { ledger: '明细列表', catbrowse: '分类检索', catreport: '分类报表', renqing: '人情往来', charts: '统计图表', monitor: '统计监控', gear: '装备库', report: '收支报告', income: '收入数据', company: '公司成本', refunds: '退款管理', import: '导入预览' }[name];
   if (name === 'charts') setTimeout(renderCharts, 60);
   if (name === 'report') setTimeout(renderReport, 60);
   if (name === 'income') setTimeout(renderIncomeData, 60);
+  if (name === 'catreport') setTimeout(renderCatReport, 60);
+  if (name === 'renqing') setTimeout(renderRenqingPage, 60);
   if (name === 'refunds') renderRfView();
   if (name === 'monitor') renderMonitor();
   if (name === 'gear') renderGearPage();
@@ -1903,14 +2109,70 @@ function setupDropZone() {
 }
 
 // ── 手动新增 / 来源 / 分类 ───────────────────────────────────────────────────
-function openAdd() {
+let editRowId = null;
+
+const ADD_TITLE_HTML = '<i class="ti ti-plus" style="color:var(--primary);margin-right:6px"></i>手动新增';
+const EDIT_TITLE_HTML = '<i class="ti ti-edit" style="color:var(--primary);margin-right:6px"></i>编辑账目';
+
+function setAddModalMode(edit) {
+  const h3 = document.querySelector('#moAdd .mh h3');
+  if (h3) h3.innerHTML = edit ? EDIT_TITLE_HTML : ADD_TITLE_HTML;
+}
+
+function fillAddForm(row) {
   document.getElementById('f-src').innerHTML = SOURCES.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
   buildCatFilter();
+  document.getElementById('f-date').value = row['日期'] || '';
+  document.getElementById('f-time').value = row['时间'] || '12:00';
+  document.getElementById('f-src').value = row['来源'] || '';
+  document.getElementById('f-type').value = row['收支'] || '支出';
+  document.getElementById('f-amt').value = row['金额'] ?? '';
+  document.getElementById('f-cat').value = row['分类'] || '';
   syncAddSubcats();
-  document.getElementById('f-date').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('f-sub').value = row['子分类'] || '';
+  document.getElementById('f-peer').value = row['交易对方'] || '';
+  document.getElementById('f-pay').value = row['支付方式'] || '';
+  document.getElementById('f-desc').value = row['商品说明'] || '';
+  document.getElementById('f-note').value = row['备注'] || '';
+}
+
+function openAdd() {
+  editRowId = null;
+  setAddModalMode(false);
+  fillAddForm({
+    日期: new Date().toISOString().slice(0, 10),
+    时间: '12:00',
+    收支: '支出',
+    分类: CATS[0] || ''
+  });
+  document.getElementById('f-amt').value = '';
+  document.getElementById('f-peer').value = '';
+  document.getElementById('f-pay').value = '';
+  document.getElementById('f-desc').value = '';
+  document.getElementById('f-note').value = '';
   document.getElementById('moAdd').classList.remove('hide');
 }
-function closeAdd() { document.getElementById('moAdd').classList.add('hide'); }
+
+function openEditRow(id) {
+  const row = allData.find(r => r.id === id);
+  if (!row) return;
+  editRowId = id;
+  setAddModalMode(true);
+  fillAddForm(row);
+  document.getElementById('moAdd').classList.remove('hide');
+}
+
+function editRenqingRow(id) {
+  const row = allData.find(r => r.id === id);
+  if (row && hasSplits(row)) openSplitEditor(id);
+  else openEditRow(id);
+}
+
+function closeAdd() {
+  editRowId = null;
+  setAddModalMode(false);
+  document.getElementById('moAdd').classList.add('hide');
+}
 function syncAddSubcats() {
   const cat = document.getElementById('f-cat').value;
   const sel = document.getElementById('f-sub');
@@ -1931,14 +2193,25 @@ function saveAdd() {
   const desc = document.getElementById('f-desc').value.trim() || '手动录入';
   const note = document.getElementById('f-note').value.trim() || '';
   if (!dt || !src || !tp || isNaN(amt) || amt <= 0 || !cat) { alert('请填写必填项'); return; }
-  const row = { id: nextId++, 日期: dt, 时间: tm, 来源: src, 交易对方: peer, 商品说明: desc, 分类: cat, 子分类: sub, 收支: tp, 金额: amt, 支付方式: pay, 备注: note, 退款状态: 'normal', 统计状态: 'normal', _autoCat: false, _catConf: 'manual', _hash: '' };
-  row._hash = Parsers.txnHash(row);
-  allData.push(row);
+  if (editRowId != null) {
+    const row = allData.find(r => r.id === editRowId);
+    if (!row) { closeAdd(); return; }
+    Object.assign(row, {
+      日期: dt, 时间: tm, 来源: src, 交易对方: peer, 商品说明: desc,
+      分类: cat, 子分类: sub, 收支: tp, 金额: amt, 支付方式: pay, 备注: note
+    });
+    row._hash = Parsers.txnHash(row);
+  } else {
+    const row = { id: nextId++, 日期: dt, 时间: tm, 来源: src, 交易对方: peer, 商品说明: desc, 分类: cat, 子分类: sub, 收支: tp, 金额: amt, 支付方式: pay, 备注: note, 退款状态: 'normal', 统计状态: 'normal', _autoCat: false, _catConf: 'manual', _hash: '' };
+    row._hash = Parsers.txnHash(row);
+    allData.push(row);
+  }
   allData.sort((a, b) => (b['日期'] + b['时间']).localeCompare(a['日期'] + a['时间']));
   persist();
   buildSrcChips();
   applyF();
   renderKPI();
+  refreshActiveViews();
   closeAdd();
 }
 
@@ -2325,6 +2598,7 @@ function onSplitSaved() {
   renderKPI();
   renderMonitor();
   refreshDetailModal();
+  refreshActiveViews();
 }
 
 function handleToggleSplitExpand(id) {
@@ -2403,6 +2677,17 @@ async function initAppInner() {
     srcBadge,
     onReorderCats: reorderCats
   });
+  initRenqing({
+    getExpandedRows: activeExpanded,
+    getSubcatsFor: subcatsFor,
+    formatDayHeader,
+    formatTimeShort,
+    srcBadgeHtml: srcBadge,
+    typeBadgeHtml: typeBadge,
+    onPersist: persist,
+    onEditRow: editRenqingRow
+  });
+  setupRenqingUpload();
   initGear({ getAllData: () => allData, onPersist: persist });
   initSplits({
     getCats: () => CATS,
@@ -2422,12 +2707,12 @@ Object.assign(window, {
   sw, openImport, toggleUnsetSubFilter, toggleCatBrowseUnsetSubFilter, selectCatBrowse, toggleCatBrowseGroup,
   toggleCatBrowseSelect, toggleCatBrowseGroupSelect, toggleCatBrowseSelectAll, clearCatBrowseSelection,
   applyCatBrowseBulkCat, applyCatBrowseBulkSub,
-  openAdd, closeAdd, saveAdd, openSrc, closeSrc, addSrc, saveSrc,
+  openAdd, closeAdd, saveAdd, openEditRow, openSrc, closeSrc, addSrc, saveSrc,
   openCat, closeCat, addCat, saveCat, delCat, toggleCatSub, pickCatEmoji, pickNewCatEmoji,
   setQuick, resetF, applyF, changePgSize, filterSrc, setTypeFilter, toggleSortCol,
   toggleSelect, toggleSelectAll, clearSelection, applyBulkCat, applyBulkSubCat, bulkToggleRefund,
   resetImportPreview, confirmImport, onImportSrcChange, toggleDupImport, toggleAllDupImport, resetAllLedger,
-  openBatchSrc, closeBatchSrc, saveBatchSrc,
+  openBatchSrc, closeBatchSrc, saveBatchSrc, onCatReportChange, selectRenqingPerson, triggerRenqingAvatarUpload,
   goP, toggleRf, toggleExclude, updCat, updSubCat, updCatDet, showAllDetail, showDetail, showIncomeDetail, closeDetModal, toggleDetSort,
   toggleDetSelect, toggleDetSelectAll, clearDetSelection, applyDetBulkCat, applyDetBulkSubCat, detBulkToggleRefund,
   openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload,

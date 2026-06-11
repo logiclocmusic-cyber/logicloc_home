@@ -40,6 +40,8 @@
     <button class="ni on" onclick="sw('ledger',this)" title="明细列表"><span class="ni-icon lav"><i class="ti ti-list-details"></i></span><span class="ni-label">明细列表</span></button>
     <button class="ni" onclick="sw('catbrowse',this)" title="分类检索"><span class="ni-icon amber"><i class="ti ti-category"></i></span><span class="ni-label">分类检索</span></button>
     <button class="ni" onclick="sw('gear',this)" title="装备库"><span class="ni-icon teal"><i class="ti ti-baby-carriage"></i></span><span class="ni-label">装备库</span></button>
+    <button class="ni" onclick="sw('catreport',this)" title="分类报表"><span class="ni-icon lav"><i class="ti ti-chart-bar"></i></span><span class="ni-label">分类报表</span></button>
+    <button class="ni" onclick="sw('renqing',this)" title="人情往来"><span class="ni-icon pink"><i class="ti ti-heart-handshake"></i></span><span class="ni-label">人情往来</span></button>
     <button class="ni" onclick="sw('report',this)" title="收支报告"><span class="ni-icon green"><i class="ti ti-report-analytics"></i></span><span class="ni-label">收支报告</span></button>
     <button class="ni" onclick="sw('income',this)" title="收入数据"><span class="ni-icon blue"><i class="ti ti-coin"></i></span><span class="ni-label">收入数据</span></button>
     <button class="ni" onclick="sw('company',this)" title="公司成本"><span class="ni-icon pink"><i class="ti ti-receipt"></i></span><span class="ni-label">公司成本</span></button>
@@ -199,6 +201,49 @@
       <span class="gear-count" id="gearCount"></span>
     </div>
     <div class="gear-gallery" id="gearGallery"></div>
+  </div>
+
+  <div class="page view" id="view-renqing">
+    <div class="renqing-layout">
+      <aside class="renqing-sidebar">
+        <div class="renqing-side-head">人物</div>
+        <div class="renqing-people" id="renqingPeople"></div>
+      </aside>
+      <main class="renqing-main hide" id="renqingPanel">
+        <div class="renqing-head" id="renqingHead"></div>
+        <div class="renqing-kpi" id="renqingKpi"></div>
+        <div class="cc full renqing-list-card">
+          <div class="ct"><i class="ti ti-list-details"></i> 往来明细</div>
+          <div class="renqing-list" id="renqingList"></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="page view" id="view-catreport">
+    <p class="report-intro">选择主分类，按月查看支出与收入的子分类堆叠柱状图；已退款及不计入统计的项目不含在内。</p>
+    <div class="catreport-toolbar">
+      <label class="catreport-cat-label">分类
+        <select id="catReportSel" onchange="onCatReportChange()"></select>
+      </label>
+    </div>
+    <div class="kpi5" id="catReportKpi"></div>
+    <div class="cc full catreport-chart-card">
+      <div class="report-chart-head">
+        <div class="ct"><i class="ti ti-chart-bar"></i> <span id="catReportChartTitle">每月子分类收支</span></div>
+        <div class="catreport-legend" id="catReportLeg"></div>
+      </div>
+      <div class="catreport-chart-wrap"><canvas id="catReportChart"></canvas></div>
+    </div>
+    <div class="cc full report-table-card">
+      <div class="ct"><i class="ti ti-table"></i> 月度汇总</div>
+      <div class="report-table-wrap">
+        <table class="report-table" id="catReportTable">
+          <thead><tr><th>月份</th><th>支出</th><th>收入</th><th>净额</th></tr></thead>
+          <tbody id="catReportTableBody"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <div class="page view" id="view-report">
@@ -447,6 +492,7 @@
   </div>
 </div>
 <input type="file" id="gearFileInp" accept="image/*,.heic,.heif" style="display:none">
+<input type="file" id="renqingFileInp" accept="image/*,.heic,.heif" style="display:none">
 
 <div class="mo hide" id="moSplit">
   <div class="mbox wide">
