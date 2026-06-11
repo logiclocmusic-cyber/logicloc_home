@@ -68,6 +68,20 @@ export async function deleteImportBatchApi(batchId) {
   return res.json();
 }
 
+export async function changeImportBatchSourceApi(batchId, source) {
+  const res = await fetch(`${API}/import-batches/${encodeURIComponent(batchId)}/source`, {
+    method: 'PATCH',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ source })
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `修改失败 (${res.status})`);
+  }
+  return res.json();
+}
+
 export async function resetLedger() {
   const res = await fetch(`${API}/reset-ledger`, {
     method: 'POST',

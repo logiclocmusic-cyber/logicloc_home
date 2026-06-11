@@ -359,6 +359,18 @@
   </div>
 </div>
 
+<div class="mo hide" id="moBatchSrc">
+  <div class="mbox">
+    <div class="mh"><h3><i class="ti ti-edit" style="color:var(--primary);margin-right:6px"></i>修改导入来源</h3><button class="mclose" onclick="closeBatchSrc()"><i class="ti ti-x"></i></button></div>
+    <div class="mb">
+      <p class="batch-src-file" id="batchSrcFile"></p>
+      <div class="fg"><label>当前来源</label><div id="batchSrcCurrent" class="batch-src-current"></div></div>
+      <div class="fg"><label>新来源</label><select id="batchSrcSel"></select></div>
+    </div>
+    <div class="mf"><button class="btn" onclick="closeBatchSrc()">取消</button><button class="btn btn-p" onclick="saveBatchSrc()">确认修改</button></div>
+  </div>
+</div>
+
 <div class="mo hide" id="moSrc">
   <div class="mbox">
     <div class="mh"><h3>账单来源管理</h3><button class="mclose" onclick="closeSrc()"><i class="ti ti-x"></i></button></div>

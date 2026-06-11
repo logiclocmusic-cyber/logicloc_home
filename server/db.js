@@ -136,6 +136,27 @@ export function mergeTransactions(newRows) {
   return { added: added.length, total: state.transactions.length, stateVersion };
 }
 
+/** 修改导入批次关联账目的来源（服务端原子操作） */
+export function changeImportBatchSource(batchId, newSource) {
+  const state = readState();
+  const bid = String(batchId);
+  const source = String(newSource || '').trim();
+  if (!source) throw new Error('请选择新来源');
+
+  let changed = 0;
+  for (const r of state.transactions) {
+    if (String(r._importBatchId) === bid) {
+      r['来源'] = source;
+      changed++;
+    }
+  }
+  if (!changed) throw new Error('未找到该批次的账目');
+
+  state.importHistory = deriveImportHistory(state.transactions, state.importHistory || []);
+  const stateVersion = writeState(state, { skipVersionCheck: true });
+  return { changed, source, stateVersion };
+}
+
 /** 按导入批次 ID 删除关联账目（服务端原子操作，不依赖客户端 stateVersion） */
 export function deleteImportBatchById(batchId) {
   const state = readState();

@@ -1061,12 +1061,16 @@ body{
 .import-history-item .ih-meta{font-size:11px;color:var(--txt3);line-height:1.45}
 .import-history-item .ih-date{font-size:10.5px;color:var(--txt3);white-space:nowrap;flex-shrink:0}
 .import-history-item .ih-main{flex:1;min-width:0}
+.import-history-item .ih-edit,
 .import-history-item .ih-del{
   flex-shrink:0;width:30px;height:30px;border:none;border-radius:8px;background:transparent;
   color:var(--txt3);cursor:pointer;display:flex;align-items:center;justify-content:center;
   font-size:16px;transition:all .15s;margin-top:2px;
 }
+.import-history-item .ih-edit:hover{background:var(--blu-bg);color:var(--blu-t)}
 .import-history-item .ih-del:hover{background:var(--red-bg);color:var(--red-t)}
+.batch-src-file{font-size:13px;font-weight:600;color:var(--txt);margin-bottom:12px;word-break:break-all}
+.batch-src-current{font-size:13px;color:var(--txt2);padding:8px 10px;background:var(--surf2);border-radius:8px}
 .import-history-empty{font-size:12.5px;color:var(--txt3);padding:16px 0;text-align:center;line-height:1.65}
 .import-history-count{font-size:11px;color:var(--txt3);font-weight:500;margin-left:auto}
 .import-preview-table{

@@ -3,7 +3,7 @@ import cors from 'cors';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { readState, writeState, mergeTransactions, resetLedger, deleteImportBatchById, getStats } from './db.js';
+import { readState, writeState, mergeTransactions, resetLedger, deleteImportBatchById, changeImportBatchSource, getStats } from './db.js';
 import { initAuth, login, logout, getUserFromToken, parseAuthHeader } from './auth.js';
 import { scanInvoiceImage, getAiStatus } from './deepseek.js';
 import {
@@ -132,6 +132,19 @@ app.delete('/api/import-batches/:batchId', requireAuth, (req, res) => {
     const batchId = decodeURIComponent(req.params.batchId || '');
     if (!batchId) return res.status(400).json({ error: '缺少批次 ID' });
     const result = deleteImportBatchById(batchId);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.patch('/api/import-batches/:batchId/source', requireAuth, (req, res) => {
+  try {
+    const batchId = decodeURIComponent(req.params.batchId || '');
+    const source = req.body?.source;
+    if (!batchId) return res.status(400).json({ error: '缺少批次 ID' });
+    if (!source || !String(source).trim()) return res.status(400).json({ error: '请选择新来源' });
+    const result = changeImportBatchSource(batchId, source);
     res.json({ ok: true, ...result });
   } catch (err) {
     res.status(500).json({ error: err.message });

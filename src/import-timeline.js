@@ -263,6 +263,7 @@ export const ImportTimeline = (() => {
         <div class="ih-file" title="${fname}">${fname}</div>
         <div class="ih-meta">${fmt ? fmt + ' · ' : ''}${range} · ${h.count || 0} 笔</div>
       </div>
+      <button class="ih-edit" data-edit-batch="${bid}" title="修改来源"><i class="ti ti-edit"></i></button>
       <button class="ih-del" data-del-batch="${bid}" title="删除此文件及关联账目"><i class="ti ti-trash"></i></button>
     </div>`;
   }
@@ -335,6 +336,7 @@ export const ImportTimeline = (() => {
           <div class="ih-file" title="${fname}">${fname}</div>
           <div class="ih-meta">${h.source}${fmt ? ' · ' + fmt : ''} · ${range} · ${h.count || 0} 笔</div>
         </div>
+        <button class="ih-edit" data-edit-batch="${bid}" title="修改来源"><i class="ti ti-edit"></i></button>
         <button class="ih-del" data-del-batch="${bid}" title="删除此文件及关联账目"><i class="ti ti-trash"></i></button>
       </div>`;
     }).join('');

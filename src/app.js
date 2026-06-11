@@ -7,7 +7,7 @@ import {
   MONITOR_CATS, EXCLUDE_CATS, OFFSET_CATS, MONITOR_EMOJIS, INCOME_DATA_CATS
 } from './config.js';
 import { renderCatIcon, iconRef } from './cat-icons.js';
-import { fetchState, saveState, resetLedger, deleteImportBatchApi, checkHealth } from './api.js';
+import { fetchState, saveState, resetLedger, deleteImportBatchApi, changeImportBatchSourceApi, checkHealth } from './api.js';
 import {
   createBatchId, stampImportBatch, deriveImportHistory,
   recordsForBatch as batchRecords, deleteConfirmMessage
@@ -1773,6 +1773,59 @@ async function deleteImportBatch(encodedId) {
   }
 }
 
+let editingBatchId = null;
+
+function openBatchSrc(encodedId) {
+  const batchId = decodeURIComponent(encodedId);
+  const entry = importHistory.find(h => String(h.id) === String(batchId));
+  if (!entry) return;
+
+  editingBatchId = batchId;
+  const fileEl = document.getElementById('batchSrcFile');
+  const curEl = document.getElementById('batchSrcCurrent');
+  const sel = document.getElementById('batchSrcSel');
+  if (!fileEl || !curEl || !sel) return;
+
+  fileEl.textContent = entry.fileName || '未命名文件';
+  curEl.textContent = entry.source || '—';
+  sel.innerHTML = SOURCES.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+  const alt = SOURCES.find(s => s.name !== entry.source);
+  sel.value = alt?.name || SOURCES[0]?.name || '';
+
+  document.getElementById('moBatchSrc')?.classList.remove('hide');
+}
+
+function closeBatchSrc() {
+  editingBatchId = null;
+  document.getElementById('moBatchSrc')?.classList.add('hide');
+}
+
+async function saveBatchSrc() {
+  const newSource = document.getElementById('batchSrcSel')?.value?.trim();
+  if (!editingBatchId || !newSource) return;
+
+  const entry = importHistory.find(h => String(h.id) === String(editingBatchId));
+  if (!entry) return;
+  if (entry.source === newSource) {
+    closeBatchSrc();
+    return;
+  }
+
+  const count = entry.count || batchRecords(allData, entry).length;
+  const fname = entry.fileName || '未命名文件';
+  if (!confirm(`将「${fname}」的 ${count} 笔账目来源改为「${newSource}」？`)) return;
+
+  try {
+    const res = await changeImportBatchSourceApi(editingBatchId, newSource);
+    if (res?.stateVersion != null) stateVersion = res.stateVersion;
+    closeBatchSrc();
+    await loadData();
+    renderImportTimelineView();
+  } catch (err) {
+    alert('修改失败：' + (err.message || '请刷新后重试'));
+  }
+}
+
 async function resetAllLedger() {
   const n = allData.length;
   const files = importHistory.length;
@@ -1805,14 +1858,19 @@ async function resetAllLedger() {
   }
 }
 
-function setupImportHistoryDelete() {
+function setupImportHistoryActions() {
   ['importHistoryMain'].forEach(cid => {
     const el = document.getElementById(cid);
-    if (!el || el._delBound) return;
-    el._delBound = true;
+    if (!el || el._ihBound) return;
+    el._ihBound = true;
     el.addEventListener('click', e => {
-      const btn = e.target.closest('[data-del-batch]');
-      if (btn) deleteImportBatch(btn.getAttribute('data-del-batch'));
+      const editBtn = e.target.closest('[data-edit-batch]');
+      if (editBtn) {
+        openBatchSrc(editBtn.getAttribute('data-edit-batch'));
+        return;
+      }
+      const delBtn = e.target.closest('[data-del-batch]');
+      if (delBtn) deleteImportBatch(delBtn.getAttribute('data-del-batch'));
     });
   });
 }
@@ -2355,7 +2413,7 @@ async function initAppInner() {
   setupGearUpload();
   setupCompanyCost();
   setupDropZone();
-  setupImportHistoryDelete();
+  setupImportHistoryActions();
   await loadData();
   appReady = true;
 }
@@ -2369,6 +2427,7 @@ Object.assign(window, {
   setQuick, resetF, applyF, changePgSize, filterSrc, setTypeFilter, toggleSortCol,
   toggleSelect, toggleSelectAll, clearSelection, applyBulkCat, applyBulkSubCat, bulkToggleRefund,
   resetImportPreview, confirmImport, onImportSrcChange, toggleDupImport, toggleAllDupImport, resetAllLedger,
+  openBatchSrc, closeBatchSrc, saveBatchSrc,
   goP, toggleRf, toggleExclude, updCat, updSubCat, updCatDet, showAllDetail, showDetail, showIncomeDetail, closeDetModal, toggleDetSort,
   toggleDetSelect, toggleDetSelectAll, clearDetSelection, applyDetBulkCat, applyDetBulkSubCat, detBulkToggleRefund,
   openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload,
