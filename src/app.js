@@ -1528,8 +1528,8 @@ function catReportChartOptions(months, cat) {
         callbacks: {
           ...chartMoneyTooltip.callbacks,
           footer(items) {
-            const exp = items.filter(i => i.dataset.stack === 'exp').reduce((s, i) => s + (i.parsed?.y || 0), 0);
-            const inc = items.filter(i => i.dataset.stack === 'inc').reduce((s, i) => s + (i.parsed?.y || 0), 0);
+            const exp = items.filter(i => i.dataset._kind === 'exp').reduce((s, i) => s + (i.parsed?.y || 0), 0);
+            const inc = items.filter(i => i.dataset._kind === 'inc').reduce((s, i) => s + (i.parsed?.y || 0), 0);
             if (!exp && !inc) return '';
             const net = inc - exp;
             return `净额 ${fmtMoneySigned(net)}`;
@@ -1539,22 +1539,25 @@ function catReportChartOptions(months, cat) {
     },
     scales: {
       x: {
-        stacked: true,
+        stacked: false,
         grid: { color: 'rgba(255,255,255,0.06)' },
         ticks: { color: 'rgba(255,255,255,0.55)', font: { size: 11 }, maxRotation: 45 }
       },
       y: {
-        stacked: true,
+        stacked: false,
         beginAtZero: true,
         grid: { color: 'rgba(255,255,255,0.08)' },
         ticks: { color: 'rgba(255,255,255,0.55)', callback: fmtChartAxis }
       }
     },
-    onClick(_evt, elements, chart) {
-      if (!elements.length || !cat || !chart) return;
-      const month = months[elements[0].index];
-      const stack = chart.data.datasets[elements[0].datasetIndex]?.stack;
-      if (stack === 'inc') showIncomeDetail(month, cat);
+    onClick(evt, _elements, chart) {
+      if (!cat || !chart) return;
+      const hit = chart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, false);
+      if (!hit.length) return;
+      const el = hit[0];
+      const month = months[el.index];
+      const kind = chart.data.datasets[el.datasetIndex]?._kind;
+      if (kind === 'inc') showIncomeDetail(month, cat);
       else showDetail(month, cat);
     },
     onHover(evt, elements) {
@@ -1571,7 +1574,7 @@ function renderCatReport() {
   const catRows = catReportRows(cat);
   const months = [...new Set(catRows.map(r => r['日期'].slice(0, 7)))].sort();
   const titleEl = document.getElementById('catReportChartTitle');
-  if (titleEl) titleEl.textContent = `${catLabel(cat)} · 每月子分类收支`;
+  if (titleEl) titleEl.textContent = `${catLabel(cat)} · 每月各子分类收支对比`;
 
   const totalExp = catRows.filter(r => r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0);
   const totalInc = catRows.filter(r => r['收支'] === '收入').reduce((s, r) => s + r['金额'], 0);
@@ -1629,16 +1632,17 @@ function renderCatReport() {
   }
 
   const datasets = [];
+  const barRadius = { topLeft: 5, topRight: 5, bottomLeft: 0, bottomRight: 0 };
   expSubcats.forEach((sub, si) => {
     datasets.push({
       label: `支出 · ${sub}`,
       data: months.map(m => +catReportSubcatSum(catRows.filter(r => r['日期'].startsWith(m)), sub, '支出').toFixed(2)),
       backgroundColor: EXPENSE_SUB_COLORS[si % EXPENSE_SUB_COLORS.length],
-      stack: 'exp',
-      borderRadius: ctx2 => stackedBarRadius(ctx2, 8),
+      _kind: 'exp',
+      borderRadius: barRadius,
       borderSkipped: false,
-      barPercentage: 0.72,
-      categoryPercentage: 0.82
+      barPercentage: 0.9,
+      categoryPercentage: 0.8
     });
   });
   incSubcats.forEach((sub, si) => {
@@ -1646,11 +1650,11 @@ function renderCatReport() {
       label: `收入 · ${sub}`,
       data: months.map(m => +catReportSubcatSum(catRows.filter(r => r['日期'].startsWith(m)), sub, '收入').toFixed(2)),
       backgroundColor: INCOME_SUB_COLORS[si % INCOME_SUB_COLORS.length],
-      stack: 'inc',
-      borderRadius: ctx2 => stackedBarRadius(ctx2, 8),
+      _kind: 'inc',
+      borderRadius: barRadius,
       borderSkipped: false,
-      barPercentage: 0.72,
-      categoryPercentage: 0.82
+      barPercentage: 0.9,
+      categoryPercentage: 0.8
     });
   });
 
