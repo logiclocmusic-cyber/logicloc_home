@@ -775,6 +775,22 @@ function updSubCat(id, sub) {
   refreshActiveViews();
 }
 
+function updRenqingSubCat(id, sub) {
+  const row = allData.find(r => r.id === id);
+  if (row && hasSplits(row)) {
+    alert('此记录已拆分，请在下方拆分项上修改子分类');
+    return;
+  }
+  if (!row) return;
+  updSubCat(id, sub);
+  selectRenqingPerson(sub || '未分类');
+}
+
+function updRenqingSplitSub(parentId, idx, sub) {
+  handleUpdSplitSub(parentId, idx, sub);
+  selectRenqingPerson(sub || '未分类');
+}
+
 function reorderCats(fromIdx, toIdx) {
   if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0 || fromIdx >= CATS.length || toIdx >= CATS.length) return;
   const [moved] = CATS.splice(fromIdx, 1);
@@ -2367,6 +2383,18 @@ function saveCat() {
 // ── 批量选择 ─────────────────────────────────────────────────────────────────
 let selectedIds = new Set();
 
+function computeSelectedStats() {
+  const rows = [...selectedIds].map(id => allData.find(r => r.id === id)).filter(Boolean);
+  let exp = 0;
+  let inc = 0;
+  rows.forEach(r => {
+    const amt = Number(r['金额']) || 0;
+    if (r['收支'] === '收入') inc += amt;
+    else exp += amt;
+  });
+  return { count: rows.length, exp, inc, net: inc - exp };
+}
+
 function toggleSelect(id, cb) {
   if (cb.checked) selectedIds.add(id); else selectedIds.delete(id);
   updateBulkBar();
@@ -2393,7 +2421,14 @@ function updateBulkBar() {
   if (!bar) return;
   if (selectedIds.size > 0) {
     bar.classList.add('show');
-    document.getElementById('bulkCnt').textContent = `${selectedIds.size} 项已选`;
+    const stats = computeSelectedStats();
+    document.getElementById('bulkCnt').textContent = `${stats.count} 项已选`;
+    const statsEl = document.getElementById('bulkStats');
+    if (statsEl) {
+      const parts = [`支出 ${fmtMoney(stats.exp)}`, `收入 ${fmtMoney(stats.inc)}`];
+      if (stats.exp || stats.inc) parts.push(`净额 ${fmtMoneySigned(stats.net)}`);
+      statsEl.textContent = parts.join(' · ');
+    }
     const rows = [...selectedIds].map(id => allData.find(r => r.id === id)).filter(Boolean);
     const cats = new Set(rows.map(r => r['分类']));
     const sameCat = cats.size === 1 ? [...cats][0] : null;
@@ -2420,7 +2455,11 @@ function updateBulkBar() {
       subSel.title = sameCat ? '该分类暂无子分类' : '选中项需属于同一分类';
       subSel.innerHTML = `<option value="">${sameCat ? '该分类无子分类' : '需同一分类'}</option>`;
     }
-  } else bar.classList.remove('show');
+  } else {
+    bar.classList.remove('show');
+    const statsEl = document.getElementById('bulkStats');
+    if (statsEl) statsEl.textContent = '';
+  }
 }
 
 function applyBulkCat() {
@@ -2713,6 +2752,7 @@ Object.assign(window, {
   toggleSelect, toggleSelectAll, clearSelection, applyBulkCat, applyBulkSubCat, bulkToggleRefund,
   resetImportPreview, confirmImport, onImportSrcChange, toggleDupImport, toggleAllDupImport, resetAllLedger,
   openBatchSrc, closeBatchSrc, saveBatchSrc, onCatReportChange, selectRenqingPerson, triggerRenqingAvatarUpload,
+  updRenqingSubCat, updRenqingSplitSub,
   goP, toggleRf, toggleExclude, updCat, updSubCat, updCatDet, showAllDetail, showDetail, showIncomeDetail, closeDetModal, toggleDetSort,
   toggleDetSelect, toggleDetSelectAll, clearDetSelection, applyDetBulkCat, applyDetBulkSubCat, detBulkToggleRefund,
   openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload,

@@ -871,17 +871,25 @@ body{
 .renqing-day-sum{display:flex;gap:10px;font-variant-numeric:tabular-nums}
 .renqing-day-sum .inc{color:var(--grn-t)}.renqing-day-sum .exp{color:var(--red-t)}
 .renqing-txn{
-  display:grid;grid-template-columns:minmax(100px,1.1fr) minmax(72px,.8fr) minmax(0,1.6fr) minmax(56px,.6fr) minmax(72px,.7fr);
+  display:grid;grid-template-columns:minmax(72px,.7fr) minmax(72px,.8fr) minmax(88px,.95fr) minmax(0,1.4fr) minmax(56px,.6fr) minmax(72px,.7fr);
   gap:8px 10px;align-items:center;padding:10px 14px;border-top:1px solid var(--bdr);font-size:12.5px;
 }
 .renqing-txn.editable{cursor:pointer;transition:background .12s}
 .renqing-txn.editable:hover{background:var(--surf2)}
 .renqing-txn-time{font-weight:600;color:var(--txt2);font-size:12px;font-variant-numeric:tabular-nums}
+.renqing-txn-sub{min-width:0}
+.renqing-txn-sub .renqing-sub-sel{
+  width:100%;max-width:100%;min-height:26px;padding:4px 8px;border:1px solid var(--bdr);border-radius:8px;
+  background:var(--surf);color:var(--txt);font-size:11px;font-weight:600;
+}
+.renqing-txn-sub .renqing-sub-sel.cs-sub-unset{color:var(--txt3)}
+.renqing-txn-sub--text{font-size:11px;font-weight:600;color:var(--txt2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .renqing-txn-desc{color:var(--txt2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .renqing-txn-amt{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
 .renqing-txn-amt.inc{color:var(--grn-t)}.renqing-txn-amt.exp{color:var(--red-t)}
 @media(max-width:900px){
-  .renqing-txn{grid-template-columns:1fr 1fr;grid-template-rows:auto auto}
+  .renqing-txn{grid-template-columns:1fr 1fr;grid-template-rows:auto auto auto}
+  .renqing-txn-sub{grid-column:1/-1}
   .renqing-txn-desc{grid-column:1/-1}
   .renqing-txn-amt{text-align:left}
 }
@@ -1028,6 +1036,8 @@ body{
 }
 .bulk-bar.show{display:flex}
 .bulk-cnt{font-size:13px;font-weight:600;color:var(--primary-t);margin-right:4px}
+.bulk-stats{font-size:12.5px;font-weight:600;color:var(--txt2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.bulk-stats:empty{display:none}
 .bulk-sep{width:1px;height:22px;background:var(--bdr);margin:0 4px}
 .bulk-sub-sel:disabled{opacity:.55;cursor:not-allowed}
 

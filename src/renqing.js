@@ -1,6 +1,7 @@
 /** 人情往来：按子分类（人物）查看往来款与收支 */
 import { fmtMoney, fmtMoneySigned, fmtCount } from './format.js';
 import { assetUrl } from './apiBase.js';
+import { subCatSelectHtml } from './subcat-ui.js';
 
 export const RENQING_CAT = '人情往来';
 
@@ -122,6 +123,19 @@ function personStats(rows) {
   return { inc, exp, net: inc - exp, count: rows.length };
 }
 
+/** 净额 = 收到 − 送出；送出更多为对方欠我，收到更多为我欠对方 */
+function netOweHint(net) {
+  if (net > 0) return '我欠对方';
+  if (net < 0) return '对方欠我';
+  return '收支相抵';
+}
+
+function netOweClass(net) {
+  if (net > 0) return 'neg';
+  if (net < 0) return 'pos';
+  return '';
+}
+
 function esc(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 }
@@ -131,7 +145,7 @@ function renderPersonListItem(name) {
   const { net } = personStats(rows);
   const active = activePerson === name;
   const displayName = name === '未分类' ? '未分类' : name;
-  const netCls = net > 0 ? 'pos' : net < 0 ? 'neg' : '';
+  const netCls = netOweClass(net);
   const amtTxt = rows.length ? fmtMoneySigned(net) : '暂无往来';
   return `<div class="renqing-person${active ? ' on' : ''}" role="button" tabindex="0" data-person="${esc(name)}" onclick="selectRenqingPerson(this.dataset.person)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectRenqingPerson(this.dataset.person)}">
     ${avatarCircleHtml(name, 'list')}
@@ -142,6 +156,26 @@ function renderPersonListItem(name) {
   </div>`;
 }
 
+function renqingSubsForRow(row) {
+  const configured = getSubcatsFor(RENQING_CAT);
+  const sub = row['子分类'] || '';
+  const merged = [...configured];
+  if (sub && !merged.includes(sub)) merged.push(sub);
+  return merged;
+}
+
+function renderTxnSubSelect(row) {
+  const subs = renqingSubsForRow(row);
+  const sub = row['子分类'] || '';
+  if (!subs.length) {
+    return `<div class="renqing-txn-sub renqing-txn-sub--text">${esc(sub || '未分类')}</div>`;
+  }
+  const onchange = row._splitOf != null && row._splitIdx != null
+    ? `updRenqingSplitSub(${row._splitOf},${row._splitIdx},this.value)`
+    : `updRenqingSubCat(${row._splitOf ?? row.id},this.value)`;
+  return `<div class="renqing-txn-sub" onclick="event.stopPropagation()">${subCatSelectHtml({ subs, sub, onchange, extraClass: 'renqing-sub-sel' })}</div>`;
+}
+
 function renderTxnRow(row) {
   const isInc = row['收支'] === '收入';
   const desc = (row['商品说明'] || row['交易对方'] || '—').trim() || '—';
@@ -149,6 +183,7 @@ function renderTxnRow(row) {
   return `<div class="renqing-txn editable" data-edit-id="${editId}" title="双击编辑">
     <div class="renqing-txn-time">${formatTimeShort(row['时间']) || '—'}</div>
     <div class="renqing-txn-src">${srcBadgeHtml(row['来源'])}</div>
+    ${renderTxnSubSelect(row)}
     <div class="renqing-txn-desc" title="${esc(desc)}">${esc(desc)}</div>
     <div class="renqing-txn-type">${typeBadgeHtml(row['收支'], row['退款状态'], row['分类'])}</div>
     <div class="renqing-txn-amt ${isInc ? 'inc' : 'exp'}">${isInc ? '+' : '-'}${fmtMoney(row['金额'])}</div>
@@ -174,7 +209,7 @@ function renderPersonDetail(name) {
   if (kpi) {
     const expN = fmtCount(rows.filter(r => r['收支'] === '支出').length);
     const incN = fmtCount(rows.filter(r => r['收支'] === '收入').length);
-    const netHint = net > 0 ? '对方欠我' : net < 0 ? '我欠对方' : '收支相抵';
+    const netHint = netOweHint(net);
     kpi.innerHTML = `
       <div class="renqing-kpi-card">
         <div class="renqing-kpi-label"><i class="ti ti-arrow-down-right"></i>送出（支出）</div>
@@ -188,7 +223,7 @@ function renderPersonDetail(name) {
       </div>
       <div class="renqing-kpi-card">
         <div class="renqing-kpi-label"><i class="ti ti-scale"></i>净往来</div>
-        <div class="renqing-kpi-value ${net >= 0 ? 'c-blu' : 'c-red'}">${fmtMoneySigned(net)}</div>
+        <div class="renqing-kpi-value ${net > 0 ? 'c-red' : net < 0 ? 'c-grn' : 'c-blu'}">${fmtMoneySigned(net)}</div>
         <div class="renqing-kpi-sub">${netHint}</div>
       </div>`;
   }
@@ -268,6 +303,7 @@ export function setupRenqingUpload() {
   if (list && !list._editBound) {
     list._editBound = true;
     list.addEventListener('dblclick', e => {
+      if (e.target.closest('select')) return;
       const el = e.target.closest('.renqing-txn[data-edit-id]');
       if (!el) return;
       const id = Number(el.dataset.editId);
