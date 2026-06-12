@@ -1380,6 +1380,134 @@ function onCatReportChange() {
   renderCatReport();
 }
 
+function catReportSparkLabels(months) {
+  const multiYear = new Set(months.map(m => m.slice(0, 4))).size > 1;
+  return months.map(m => {
+    const mo = parseInt(m.split('-')[1], 10);
+    return multiYear ? `${m.slice(2, 4)}/${mo}` : `${mo}`;
+  });
+}
+
+function catReportSparkOptions() {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    layout: { padding: { top: 4, bottom: 0, left: 0, right: 0 } },
+    plugins: { legend: { display: false }, tooltip: { enabled: false } },
+    scales: {
+      x: { display: false, grid: { display: false } },
+      y: { display: false, beginAtZero: true, grid: { display: false } }
+    },
+    animation: { duration: 350 }
+  };
+}
+
+function catReportSubMonthValues(catRows, months, sub, type) {
+  return months.map(m =>
+    +catReportSubcatSum(catRows.filter(r => r['日期'].startsWith(m)), sub, type).toFixed(2)
+  );
+}
+
+function catReportSubChangeBadge(values) {
+  if (values.length < 2) return { html: '', cls: 'flat' };
+  const last = values[values.length - 1];
+  const prev = values[values.length - 2];
+  const diff = last - prev;
+  if (!last && !prev) return { html: '<span class="catreport-sub-change flat">—</span>', cls: 'flat' };
+  if (diff === 0) return { html: '<span class="catreport-sub-change flat">持平 →</span>', cls: 'flat' };
+  const up = diff > 0;
+  const cls = up ? 'up' : 'down';
+  const arrow = up ? '↗' : '↘';
+  return {
+    html: `<span class="catreport-sub-change ${cls}">${fmtMoneySigned(diff)} ${arrow}</span>`,
+    cls
+  };
+}
+
+function renderCatReportSubTrends(months, catRows, expSubcats, incSubcats) {
+  const wrap = document.getElementById('catReportSubTrends');
+  if (!wrap) return;
+
+  if (charts.catReportSubs) Object.values(charts.catReportSubs).forEach(c => c?.destroy?.());
+  charts.catReportSubs = {};
+
+  if (!months.length) {
+    wrap.innerHTML = '<div class="catreport-sub-empty">暂无子分类月度数据</div>';
+    return;
+  }
+
+  const items = [];
+  expSubcats.forEach((sub, si) => {
+    items.push({ sub, type: '支出', stack: 'exp', color: EXPENSE_SUB_COLORS[si % EXPENSE_SUB_COLORS.length] });
+  });
+  incSubcats.forEach((sub, si) => {
+    items.push({ sub, type: '收入', stack: 'inc', color: INCOME_SUB_COLORS[si % INCOME_SUB_COLORS.length] });
+  });
+
+  if (!items.length) {
+    wrap.innerHTML = '<div class="catreport-sub-empty">该分类暂无子分类数据</div>';
+    return;
+  }
+
+  const lastMonth = months[months.length - 1];
+  const sorted = [...items].sort((a, b) => {
+    const av = catReportSubcatSum(catRows.filter(r => r['日期'].startsWith(lastMonth)), a.sub, a.type);
+    const bv = catReportSubcatSum(catRows.filter(r => r['日期'].startsWith(lastMonth)), b.sub, b.type);
+    return bv - av || a.type.localeCompare(b.type, 'zh') || a.sub.localeCompare(b.sub, 'zh-CN');
+  });
+
+  wrap.innerHTML = sorted.map((item, i) => {
+    const key = `${item.stack}-${item.sub}`.replace(/[^\w\u4e00-\u9fff-]/g, '_');
+    const typeCls = item.type === '支出' ? 'exp' : 'inc';
+    return `<article class="catreport-sub-card">
+      <div class="catreport-sub-card-main">
+        <div class="catreport-sub-card-label">
+          <span class="catreport-sub-type ${typeCls}">${item.type}</span>
+          <span>${item.sub}</span>
+        </div>
+        <div class="catreport-sub-card-value" id="catSubVal-${i}" style="color:${item.color}"></div>
+        <div class="catreport-sub-card-foot">
+          <span id="catSubChg-${i}"></span>
+          <span class="catreport-sub-period">${fmtMonthLabel(lastMonth)}</span>
+        </div>
+      </div>
+      <div class="catreport-sub-spark"><canvas id="catSubSpark-${i}" data-key="${key}"></canvas></div>
+    </article>`;
+  }).join('');
+
+  sorted.forEach((item, i) => {
+    const values = catReportSubMonthValues(catRows, months, item.sub, item.type);
+    const lastVal = values[values.length - 1] || 0;
+    const valEl = document.getElementById(`catSubVal-${i}`);
+    if (valEl) valEl.textContent = fmtMoney(lastVal, { integer: lastVal >= 1000 });
+
+    const chgEl = document.getElementById(`catSubChg-${i}`);
+    if (chgEl) chgEl.innerHTML = catReportSubChangeBadge(values).html;
+
+    const canvas = document.getElementById(`catSubSpark-${i}`);
+    if (!canvas) return;
+    const hi = values.length - 1;
+    const datasets = [{
+      data: values,
+      backgroundColor: values.map((v, idx) =>
+        idx === hi && v > 0 ? item.color : 'rgba(148,163,184,0.22)'
+      ),
+      borderRadius: 4,
+      borderSkipped: false,
+      barPercentage: 0.82,
+      categoryPercentage: 0.9,
+      maxBarThickness: 14
+    }];
+
+    const chartKey = canvas.dataset.key || `sub-${i}`;
+    charts.catReportSubs[chartKey] = new Chart(canvas, {
+      type: 'bar',
+      data: { labels: catReportSparkLabels(months), datasets },
+      options: catReportSparkOptions()
+    });
+  });
+}
+
 function catReportChartOptions(months, cat) {
   return {
     responsive: true,
@@ -1493,6 +1621,8 @@ function renderCatReport() {
   if (charts.catReport) charts.catReport.destroy();
   const ctx = document.getElementById('catReportChart');
   if (!ctx) return;
+  renderCatReportSubTrends(months, catRows, expSubcats, incSubcats);
+
   if (!months.length) {
     charts.catReport = null;
     return;

@@ -242,7 +242,7 @@
   </div>
 
   <div class="page view" id="view-catreport">
-    <p class="report-intro">选择主分类，按月查看支出与收入的子分类堆叠柱状图；已退款及不计入统计的项目不含在内。</p>
+    <p class="report-intro">选择主分类，按月查看子分类堆叠柱状图；下方小图可对比各子分类月度变化趋势。已退款及不计入统计的项目不含在内。</p>
     <div class="catreport-toolbar">
       <label class="catreport-cat-label">分类
         <select id="catReportSel" onchange="onCatReportChange()"></select>
@@ -255,6 +255,10 @@
         <div class="catreport-legend" id="catReportLeg"></div>
       </div>
       <div class="catreport-chart-wrap"><canvas id="catReportChart"></canvas></div>
+    </div>
+    <div class="cc full catreport-sub-trends-card">
+      <div class="ct"><i class="ti ti-trending-up"></i> 子分类趋势</div>
+      <div class="catreport-sub-trends" id="catReportSubTrends"></div>
     </div>
     <div class="cc full report-table-card">
       <div class="ct"><i class="ti ti-table"></i> 月度汇总</div>
