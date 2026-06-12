@@ -2,6 +2,7 @@
 import { fmtMoney, fmtCount } from './format.js';
 import { catPickBtnHtml } from './cat-picker.js';
 import { subCatSelectHtml, subCatGroupTitleHtml, rowHasUnsetSub } from './subcat-ui.js';
+import { findPairForKey, validateTxnPair } from './txn-pairs.js';
 
 let getCats = () => [];
 let getEmoji = () => '📌';
@@ -117,7 +118,7 @@ function browseCatCell(row) {
     ? `updSplitSub(${parentId},${splitIdx},this.value)`
     : `updSubCat(${parentId},this.value)`;
   const subSel = subCatSelectHtml({ subs, sub, onchange: subChange, extraClass: 'cs-compact' });
-  return `<div class="catbrowse-row-cat">${mainBtn}${subSel}</div>`;
+  return `<div class="catbrowse-row-cat">${mainBtn}<span class="catbrowse-cat-sep">·</span>${subSel}</div>`;
 }
 
 function renderBrowseRow(row) {
@@ -128,14 +129,17 @@ function renderBrowseRow(row) {
   const showDesc = d && d !== '/' && d !== p;
   const isInc = row['收支'] === '收入';
   const splitTag = row._splitOf != null ? '<span class="catbrowse-split-tag">拆分</span>' : '';
-  return `<div class="catbrowse-row${isSel ? ' selected' : ''}" data-sel-key="${key}">
+  const pairTag = findPairForKey(key)
+    ? '<span class="catbrowse-pair-tag" title="付款与返款已配对，探店已完成"><i class="ti ti-link"></i> 已完成</span>'
+    : '';
+  return `<div class="catbrowse-row${isSel ? ' selected' : ''}${pairTag ? ' paired' : ''}" data-sel-key="${key}">
     <div class="catbrowse-row-check" onclick="event.stopPropagation()">
       <input type="checkbox" class="cb" ${isSel ? 'checked' : ''}>
     </div>
     <div class="catbrowse-row-dt">${formatDateLabel(row['日期'])}<span>${formatTimeShort(row['时间'])}</span></div>
     <div class="catbrowse-row-src">${srcBadge(row['来源'])}</div>
     <div class="catbrowse-row-peer">
-      <div class="catbrowse-row-title">${p}${splitTag}</div>
+      <div class="catbrowse-row-title">${p}${splitTag}${pairTag}</div>
       ${showDesc ? `<div class="catbrowse-row-desc">${d}</div>` : ''}
     </div>
     ${browseCatCell(row)}
@@ -184,6 +188,25 @@ export function updateCatBrowseBulkBar() {
       subBtn.disabled = true;
       subSel.title = sameCat ? '该分类暂无子分类' : '选中项需属于同一分类';
       subSel.innerHTML = `<option value="">${sameCat ? '该分类无子分类' : '需同一分类'}</option>`;
+    }
+
+    const keys = [...catBrowseSelected];
+    const pairRows = rowsForKeys(keys);
+    const linkBtn = document.getElementById('catBrowseLinkBtn');
+    const unlinkBtn = document.getElementById('catBrowseUnlinkBtn');
+    if (linkBtn) {
+      const canLink = keys.length === 2 && pairRows.length === 2
+        && !validateTxnPair(pairRows[0], pairRows[1], keys[0], keys[1]);
+      linkBtn.disabled = !canLink;
+      linkBtn.title = canLink ? '将付款与返款配对，标记探店完成' : '需选中一笔支出与一笔收入，且金额相等、均未配对';
+    }
+    if (unlinkBtn) {
+      let canUnlink = false;
+      if (keys.length === 1 && findPairForKey(keys[0])) canUnlink = true;
+      if (keys.length === 2 && findPairForKey(keys[0]) && findPairForKey(keys[0]) === findPairForKey(keys[1])) {
+        canUnlink = true;
+      }
+      unlinkBtn.disabled = !canUnlink;
     }
   } else {
     bar.classList.remove('show');

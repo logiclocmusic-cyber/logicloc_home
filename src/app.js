@@ -38,9 +38,18 @@ import {
   toggleCatBrowseSelect, toggleCatBrowseGroupSelect, toggleCatBrowseSelectAll
 } from './cat-browse.js';
 import {
+  loadTxnPairs, getTxnPairs, validateTxnPair, addTxnPair,
+  removeTxnPairByKey, removeTxnPair, findPairForKey
+} from './txn-pairs.js';
+import {
   initRenqing, loadRenqingState, getRenqingState, renderRenqingPage,
   selectRenqingPerson, triggerRenqingAvatarUpload, setupRenqingUpload
 } from './renqing.js';
+import {
+  initAccounts, loadAccountsState, getAccountsState, renderAccountsPage,
+  selectFundAccount, setupAccountsEvents,
+  openAccountsMgr, closeAccountsMgr, resetAccountsMgrForm, saveAccountsMgr
+} from './accounts.js';
 
 let CATS = [...DEFAULT_CATS];
 let EMOJIS = { ...DEFAULT_EMOJIS };
@@ -290,7 +299,10 @@ function buildState() {
     stateVersion,
     gearLibrary: gear.gearLibrary,
     nextGearId: gear.nextGearId,
-    renqingAvatars: getRenqingState().renqingAvatars
+    renqingAvatars: getRenqingState().renqingAvatars,
+    accountCardFaces: getAccountsState().accountCardFaces,
+    accountRegistry: getAccountsState().accountRegistry,
+    txnPairs: getTxnPairs()
   };
 }
 
@@ -381,6 +393,8 @@ async function loadData() {
     Categorizer.applyRules(state.rules);
     loadGearState(state);
     loadRenqingState(state);
+    loadAccountsState(state);
+    loadTxnPairs(state);
 
     allData.forEach(r => {
       if (!r['子分类']) r['子分类'] = '';
@@ -630,6 +644,10 @@ function srcBadge(s) {
   return `<span class="src-inline">${srcMarkHtml(s, { size: 18, fallbackColor: srcColor(s) })}${lbl}</span>`;
 }
 
+function srcBadgeBrowse(s) {
+  return `<span class="src-inline src-inline-browse">${srcMarkHtml(s, { size: 18, fallbackColor: srcColor(s) })}${s}</span>`;
+}
+
 function typeBadge(t, rf, cat) {
   if (rf === 'refunded') return '<span class="type-lbl rf">已退款</span>';
   if (OFFSET_CATS_SET.has(cat)) {
@@ -827,6 +845,60 @@ function applyCatBrowseBulkCat() {
   clearCatBrowseSelection();
 }
 
+function catBrowseRowsForKeys(keys) {
+  const expanded = activeExpanded();
+  return keys.map(key => {
+    const sep = key.indexOf(':');
+    const parentId = Number(sep < 0 ? key : key.slice(0, sep));
+    const splitIdx = sep < 0 ? null : Number(key.slice(sep + 1));
+    if (splitIdx != null) {
+      return expanded.find(r => r._splitOf === parentId && r._splitIdx === splitIdx);
+    }
+    return expanded.find(r => r.id === parentId && r._splitOf == null);
+  }).filter(Boolean);
+}
+
+function linkCatBrowsePair() {
+  const keys = [...getCatBrowseSelectedKeys()];
+  if (keys.length !== 2) {
+    alert('请选择恰好两条账目进行配对');
+    return;
+  }
+  const rows = catBrowseRowsForKeys(keys);
+  if (rows.length !== 2) {
+    alert('记录不存在');
+    return;
+  }
+  const err = validateTxnPair(rows[0], rows[1], keys[0], keys[1]);
+  if (err) {
+    alert(err);
+    return;
+  }
+  addTxnPair(keys[0], keys[1]);
+  persist();
+  clearCatBrowseSelection();
+  renderCatBrowse();
+}
+
+function unlinkCatBrowsePair() {
+  const keys = [...getCatBrowseSelectedKeys()];
+  if (keys.length === 1) {
+    if (!findPairForKey(keys[0])) {
+      alert('该账目未配对');
+      return;
+    }
+    removeTxnPairByKey(keys[0]);
+  } else if (keys.length === 2) {
+    removeTxnPair(keys[0], keys[1]);
+  } else {
+    alert('请选择已配对的账目');
+    return;
+  }
+  persist();
+  clearCatBrowseSelection();
+  renderCatBrowse();
+}
+
 function applyCatBrowseBulkSub() {
   const subSel = document.getElementById('catBrowseBulkSubSel');
   if (!subSel || subSel.disabled) return;
@@ -970,6 +1042,7 @@ function refreshActiveViews() {
   if (document.getElementById('view-catreport')?.classList.contains('on')) renderCatReport();
   if (document.getElementById('view-catbrowse')?.classList.contains('on')) renderCatBrowse();
   if (document.getElementById('view-renqing')?.classList.contains('on')) renderRenqingPage();
+  if (document.getElementById('view-accounts')?.classList.contains('on')) renderAccountsPage();
 }
 
 function rowDisplayTitle(row) {
@@ -1530,6 +1603,40 @@ function incomeMonthLabels(months) {
   });
 }
 
+function incomeChartTooltipExternal({ chart, tooltip }) {
+  const wrap = chart.canvas.parentNode;
+  let el = wrap.querySelector('.income-chart-tooltip');
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'income-chart-tooltip';
+    wrap.appendChild(el);
+  }
+  if (!tooltip || tooltip.opacity === 0) {
+    el.style.opacity = '0';
+    el.style.pointerEvents = 'none';
+    return;
+  }
+
+  const title = tooltip.title?.[0] || '';
+  const footer = tooltip.footer?.filter(Boolean) || [];
+  const rows = (tooltip.dataPoints || []).map(dp => {
+    const color = dp.dataset?.backgroundColor || '#98a2b3';
+    const label = dp.dataset?.label || '';
+    const val = fmtMoney(dp.parsed?.y ?? 0);
+    return `<div class="ict-row"><span class="ict-dot" style="background:${color}"></span><span class="ict-label">${label}</span><span class="ict-val">${val}</span></div>`;
+  }).join('');
+
+  el.innerHTML = `
+    ${title ? `<div class="ict-title">${title}</div>` : ''}
+    <div class="ict-body">${rows}</div>
+    ${footer.length ? `<div class="ict-footer">${footer.map(f => `<div>${f}</div>`).join('')}</div>` : ''}`;
+
+  el.style.opacity = '1';
+  el.style.pointerEvents = 'none';
+  el.style.left = `${tooltip.caretX}px`;
+  el.style.top = `${tooltip.caretY}px`;
+}
+
 function incomeChartOptions(months, cat) {
   return {
     responsive: true,
@@ -1538,17 +1645,9 @@ function incomeChartOptions(months, cat) {
     plugins: {
       legend: { display: false },
       tooltip: {
-        ...chartMoneyTooltip,
-        backgroundColor: '#fff',
-        titleColor: '#344054',
-        bodyColor: '#475467',
-        borderColor: '#eaecf0',
-        borderWidth: 1,
-        padding: 12,
-        displayColors: true,
-        boxPadding: 4,
+        enabled: false,
+        external: incomeChartTooltipExternal,
         callbacks: {
-          ...chartMoneyTooltip.callbacks,
           footer(items) {
             const sum = items.reduce((s, i) => s + (i.parsed?.y || 0), 0);
             if (!sum) return '';
@@ -1677,12 +1776,13 @@ function sw(name, el) {
   document.querySelectorAll('.ni').forEach(n => n.classList.remove('on'));
   document.getElementById('view-' + name).classList.add('on');
   el.classList.add('on');
-  document.getElementById('vt').textContent = { ledger: '明细列表', catbrowse: '分类检索', catreport: '分类报表', renqing: '人情往来', charts: '统计图表', monitor: '统计监控', gear: '装备库', report: '收支报告', income: '收入数据', company: '公司成本', refunds: '退款管理', import: '导入预览' }[name];
+  document.getElementById('vt').textContent = { ledger: '明细列表', catbrowse: '分类检索', catreport: '分类报表', renqing: '人情往来', accounts: '资金账户', charts: '统计图表', monitor: '统计监控', gear: '装备库', report: '收支报告', income: '收入数据', company: '公司成本', refunds: '退款管理', import: '导入预览' }[name];
   if (name === 'charts') setTimeout(renderCharts, 60);
   if (name === 'report') setTimeout(renderReport, 60);
   if (name === 'income') setTimeout(renderIncomeData, 60);
   if (name === 'catreport') setTimeout(renderCatReport, 60);
   if (name === 'renqing') setTimeout(renderRenqingPage, 60);
+  if (name === 'accounts') setTimeout(renderAccountsPage, 60);
   if (name === 'refunds') renderRfView();
   if (name === 'monitor') renderMonitor();
   if (name === 'gear') renderGearPage();
@@ -2713,7 +2813,7 @@ async function initAppInner() {
     getCatLabel: catLabel,
     formatDateLabel,
     formatTimeShort,
-    srcBadge,
+    srcBadge: srcBadgeBrowse,
     onReorderCats: reorderCats
   });
   initRenqing({
@@ -2727,6 +2827,15 @@ async function initAppInner() {
     onEditRow: editRenqingRow
   });
   setupRenqingUpload();
+  initAccounts({
+    getAllRows: () => allData,
+    formatDayHeader,
+    formatTimeShort,
+    srcBadgeHtml: srcBadge,
+    rowTitle: rowDisplayTitle,
+    onPersist: persist
+  });
+  setupAccountsEvents();
   initGear({ getAllData: () => allData, onPersist: persist });
   initSplits({
     getCats: () => CATS,
@@ -2745,14 +2854,15 @@ async function initAppInner() {
 Object.assign(window, {
   sw, openImport, toggleUnsetSubFilter, toggleCatBrowseUnsetSubFilter, selectCatBrowse, toggleCatBrowseGroup,
   toggleCatBrowseSelect, toggleCatBrowseGroupSelect, toggleCatBrowseSelectAll, clearCatBrowseSelection,
-  applyCatBrowseBulkCat, applyCatBrowseBulkSub,
+  applyCatBrowseBulkCat, applyCatBrowseBulkSub, linkCatBrowsePair, unlinkCatBrowsePair,
   openAdd, closeAdd, saveAdd, openEditRow, openSrc, closeSrc, addSrc, saveSrc,
   openCat, closeCat, addCat, saveCat, delCat, toggleCatSub, pickCatEmoji, pickNewCatEmoji,
   setQuick, resetF, applyF, changePgSize, filterSrc, setTypeFilter, toggleSortCol,
   toggleSelect, toggleSelectAll, clearSelection, applyBulkCat, applyBulkSubCat, bulkToggleRefund,
   resetImportPreview, confirmImport, onImportSrcChange, toggleDupImport, toggleAllDupImport, resetAllLedger,
   openBatchSrc, closeBatchSrc, saveBatchSrc, onCatReportChange, selectRenqingPerson, triggerRenqingAvatarUpload,
-  updRenqingSubCat, updRenqingSplitSub,
+  updRenqingSubCat, updRenqingSplitSub, selectFundAccount,
+  openAccountsMgr, closeAccountsMgr, resetAccountsMgrForm, saveAccountsMgr,
   goP, toggleRf, toggleExclude, updCat, updSubCat, updCatDet, showAllDetail, showDetail, showIncomeDetail, closeDetModal, toggleDetSort,
   toggleDetSelect, toggleDetSelectAll, clearDetSelection, applyDetBulkCat, applyDetBulkSubCat, detBulkToggleRefund,
   openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload,

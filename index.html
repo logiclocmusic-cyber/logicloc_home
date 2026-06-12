@@ -42,6 +42,7 @@
     <button class="ni" onclick="sw('gear',this)" title="装备库"><span class="ni-icon teal"><i class="ti ti-baby-carriage"></i></span><span class="ni-label">装备库</span></button>
     <button class="ni" onclick="sw('catreport',this)" title="分类报表"><span class="ni-icon lav"><i class="ti ti-chart-bar"></i></span><span class="ni-label">分类报表</span></button>
     <button class="ni" onclick="sw('renqing',this)" title="人情往来"><span class="ni-icon pink"><i class="ti ti-heart-handshake"></i></span><span class="ni-label">人情往来</span></button>
+    <button class="ni" onclick="sw('accounts',this)" title="资金账户"><span class="ni-icon blue"><i class="ti ti-credit-card"></i></span><span class="ni-label">资金账户</span></button>
     <button class="ni" onclick="sw('report',this)" title="收支报告"><span class="ni-icon green"><i class="ti ti-report-analytics"></i></span><span class="ni-label">收支报告</span></button>
     <button class="ni" onclick="sw('income',this)" title="收入数据"><span class="ni-icon blue"><i class="ti ti-coin"></i></span><span class="ni-label">收入数据</span></button>
     <button class="ni" onclick="sw('company',this)" title="公司成本"><span class="ni-icon pink"><i class="ti ti-receipt"></i></span><span class="ni-label">公司成本</span></button>
@@ -191,6 +192,9 @@
       <span style="font-size:12.5px;color:var(--txt2)">子分类：</span>
       <select id="catBrowseBulkSubSel" class="btn bulk-sub-sel" style="height:34px;min-width:120px" disabled title="选中项需属于同一分类"></select>
       <button class="btn btn-p" id="catBrowseBulkSubBtn" onclick="applyCatBrowseBulkSub()" style="height:34px" disabled><i class="ti ti-check"></i> 应用</button>
+      <div class="bulk-sep"></div>
+      <button class="btn btn-a" id="catBrowseLinkBtn" onclick="linkCatBrowsePair()" style="height:34px" disabled title="将付款与返款配对"><i class="ti ti-link"></i> 关联配对</button>
+      <button class="btn" id="catBrowseUnlinkBtn" onclick="unlinkCatBrowsePair()" style="height:34px" disabled title="取消配对"><i class="ti ti-unlink"></i> 取消关联</button>
       <button class="btn" onclick="clearCatBrowseSelection()" style="height:34px;margin-left:auto">✕ 取消</button>
     </div>
     <div class="catbrowse-body" id="catBrowseBody"></div>
@@ -218,6 +222,22 @@
           <div class="renqing-list" id="renqingList"></div>
         </div>
       </main>
+    </div>
+  </div>
+
+  <div class="page view" id="view-accounts">
+    <div class="accounts-page-head">
+      <p class="report-intro">根据账目金额下方的支付方式自动汇总资金账户；点击银行卡查看该卡流水。可在设置中补全卡号或手动添加账户。</p>
+      <button type="button" class="accounts-settings-btn" onclick="openAccountsMgr()" title="账户管理" aria-label="账户管理"><i class="ti ti-settings"></i></button>
+    </div>
+    <div class="accounts-cards-scroll" id="accountsCards"></div>
+    <div class="accounts-panel hide" id="accountsPanel">
+      <div class="accounts-head" id="accountsHead"></div>
+      <div class="accounts-kpi" id="accountsKpi"></div>
+      <div class="cc full accounts-list-card">
+        <div class="ct"><i class="ti ti-list-details"></i> 流水明细</div>
+        <div class="accounts-list" id="accountsList"></div>
+      </div>
     </div>
   </div>
 
@@ -494,7 +514,38 @@
 </div>
 <input type="file" id="gearFileInp" accept="image/*,.heic,.heif" style="display:none">
 <input type="file" id="renqingFileInp" accept="image/*,.heic,.heif" style="display:none">
-
+<div class="mo hide" id="moAccounts">
+  <div class="mbox wide">
+    <div class="mh"><h3><i class="ti ti-credit-card" style="color:var(--primary);margin-right:6px"></i>账户管理</h3><button class="mclose" onclick="closeAccountsMgr()"><i class="ti ti-x"></i></button></div>
+    <div class="mb acct-mgr-body">
+      <p class="acct-mgr-hint">补全卡号后，点击银行卡上的眼睛图标可查看完整账号。删除仅隐藏展示，不影响已有流水。</p>
+      <div class="acct-mgr-list" id="acctMgrList"></div>
+      <div class="acct-mgr-form" id="acctMgrForm">
+        <div class="acct-mgr-form-title" id="acctMgrFormTitle">新增账户</div>
+        <input type="hidden" id="acctMgrKey">
+        <div class="form-grid acct-mgr-grid">
+          <div class="fg span2"><label>账户名称 *</label><input type="text" id="acctMgrLabel" placeholder="如：招商银行储蓄卡"></div>
+          <div class="fg span2"><label>卡号 / 账号</label><input type="text" id="acctMgrDigits" placeholder="完整卡号，仅数字或带空格" inputmode="numeric"></div>
+          <div class="fg"><label>类型</label>
+            <select id="acctMgrKind">
+              <option value="借记卡">借记卡</option>
+              <option value="信用卡">信用卡</option>
+              <option value="支付账户">支付账户</option>
+            </select>
+          </div>
+        </div>
+        <div class="acct-mgr-form-actions">
+          <button type="button" class="btn btn-sm" id="acctMgrResetBtn" onclick="resetAccountsMgrForm()">清空</button>
+          <button type="button" class="btn btn-p btn-sm" onclick="saveAccountsMgr()"><i class="ti ti-check"></i> 保存</button>
+        </div>
+      </div>
+    </div>
+    <div class="mf">
+      <button type="button" class="btn btn-p" onclick="resetAccountsMgrForm();document.getElementById('moAccounts').querySelector('.acct-mgr-form')?.scrollIntoView({behavior:'smooth',block:'nearest'})"><i class="ti ti-plus"></i> 新增账户</button>
+      <button type="button" class="btn" onclick="closeAccountsMgr()">关闭</button>
+    </div>
+  </div>
+</div>
 <div class="mo hide" id="moSplit">
   <div class="mbox wide">
     <div class="mh"><h3><i class="ti ti-arrows-split" style="color:var(--primary);margin-right:6px"></i>拆分账目</h3><button class="mclose" onclick="closeSplitEditor()"><i class="ti ti-x"></i></button></div>
