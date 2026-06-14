@@ -42,7 +42,7 @@
     <button class="ni" onclick="sw('gear',this)" title="装备库"><span class="ni-icon teal"><i class="ti ti-baby-carriage"></i></span><span class="ni-label">装备库</span></button>
     <button class="ni" onclick="sw('catreport',this)" title="分类报表"><span class="ni-icon lav"><i class="ti ti-chart-bar"></i></span><span class="ni-label">分类报表</span></button>
     <button class="ni" onclick="sw('renqing',this)" title="人情往来"><span class="ni-icon pink"><i class="ti ti-heart-handshake"></i></span><span class="ni-label">人情往来</span></button>
-    <button class="ni" onclick="sw('accounts',this)" title="资金账户"><span class="ni-icon blue"><i class="ti ti-credit-card"></i></span><span class="ni-label">资金账户</span></button>
+    <button class="ni" onclick="sw('accounts',this)" title="信用账户"><span class="ni-icon blue"><i class="ti ti-credit-card"></i></span><span class="ni-label">信用账户</span></button>
     <button class="ni" onclick="sw('report',this)" title="收支报告"><span class="ni-icon green"><i class="ti ti-report-analytics"></i></span><span class="ni-label">收支报告</span></button>
     <button class="ni" onclick="sw('income',this)" title="收入数据"><span class="ni-icon blue"><i class="ti ti-coin"></i></span><span class="ni-label">收入数据</span></button>
     <button class="ni" onclick="sw('company',this)" title="公司成本"><span class="ni-icon pink"><i class="ti ti-receipt"></i></span><span class="ni-label">公司成本</span></button>
@@ -227,18 +227,10 @@
 
   <div class="page view" id="view-accounts">
     <div class="accounts-page-head">
-      <p class="report-intro">根据账目金额下方的支付方式自动汇总资金账户；点击银行卡查看该卡流水。可在设置中补全卡号或手动添加账户。</p>
+      <p class="report-intro">管理信用卡额度、账单日与还款日，查看免息期时间轴；可绑定同银行共享额度。</p>
       <button type="button" class="accounts-settings-btn" onclick="openAccountsMgr()" title="账户管理" aria-label="账户管理"><i class="ti ti-settings"></i></button>
     </div>
-    <div class="accounts-cards-scroll" id="accountsCards"></div>
-    <div class="accounts-panel hide" id="accountsPanel">
-      <div class="accounts-head" id="accountsHead"></div>
-      <div class="accounts-kpi" id="accountsKpi"></div>
-      <div class="cc full accounts-list-card">
-        <div class="ct"><i class="ti ti-list-details"></i> 流水明细</div>
-        <div class="accounts-list" id="accountsList"></div>
-      </div>
-    </div>
+    <div id="accountsCreditSection"></div>
   </div>
 
   <div class="page view" id="view-catreport">
@@ -248,17 +240,13 @@
         <select id="catReportSel" onchange="onCatReportChange()"></select>
       </label>
     </div>
-    <div class="kpi5" id="catReportKpi"></div>
+    <div class="catreport-sub-kpis" id="catReportKpi"></div>
     <div class="cc full catreport-chart-card">
       <div class="report-chart-head">
-        <div class="ct"><i class="ti ti-chart-bar"></i> <span id="catReportChartTitle">每月子分类收支</span></div>
+        <div class="ct"><i class="ti ti-chart-bar"></i> <span id="catReportChartTitle">各子分类月度收支</span></div>
         <div class="catreport-legend" id="catReportLeg"></div>
       </div>
-      <div class="catreport-chart-wrap"><canvas id="catReportChart"></canvas></div>
-    </div>
-    <div class="cc full catreport-sub-trends-card">
-      <div class="ct"><i class="ti ti-trending-up"></i> 子分类趋势</div>
-      <div class="catreport-sub-trends" id="catReportSubTrends"></div>
+      <div class="catreport-sub-charts" id="catReportSubCharts"></div>
     </div>
     <div class="cc full report-table-card">
       <div class="ct"><i class="ti ti-table"></i> 月度汇总</div>
@@ -472,7 +460,10 @@
     <div class="mh"><h3 id="detTitle"></h3><button class="mclose" onclick="closeDetModal()">✕</button></div>
     <div class="mb" style="padding:0">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:var(--surf2);border-bottom:1px solid var(--bdr)">
-        <span id="detSummary" style="font-size:13px;color:var(--txt2)"></span>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0">
+          <span id="detSummary" style="font-size:13px;color:var(--txt2)"></span>
+          <button type="button" class="fb-unset-filter" id="detUnsetSubFilterBtn" onclick="toggleDetUnsetSubFilter(this)" title="仅显示未设置子分类的记录" style="display:none">未分类</button>
+        </div>
         <span id="detTotal" style="font-size:16px;font-weight:700;color:var(--red-t)"></span>
       </div>
       <div class="det-bulk-bar" id="detBulkBar">
@@ -522,8 +513,20 @@
   <div class="mbox wide">
     <div class="mh"><h3><i class="ti ti-credit-card" style="color:var(--primary);margin-right:6px"></i>账户管理</h3><button class="mclose" onclick="closeAccountsMgr()"><i class="ti ti-x"></i></button></div>
     <div class="mb acct-mgr-body">
-      <p class="acct-mgr-hint">补全卡号后，点击银行卡上的眼睛图标可查看完整账号。删除仅隐藏展示，不影响已有流水。</p>
+      <p class="acct-mgr-hint">补全卡号后，点击银行卡上的眼睛图标可查看完整账号。信用卡可填写额度、欠款与账单/还款日。合并账户后流水会汇总到目标账户。删除仅隐藏展示，不影响已有流水。</p>
       <div class="acct-mgr-list" id="acctMgrList"></div>
+      <div class="acct-mgr-merge hide" id="acctMgrMerge">
+        <div class="acct-mgr-merge-title"><i class="ti ti-arrows-join"></i> 合并账户</div>
+        <p class="acct-mgr-merge-hint">将 <strong id="acctMergeSourceName">—</strong> 合并到以下账户，原账户将从列表隐藏，流水汇总显示。</p>
+        <input type="hidden" id="acctMgrMergeSource">
+        <div class="fg"><label>合并到</label>
+          <select id="acctMgrMergeTarget"></select>
+        </div>
+        <div class="acct-mgr-merge-actions">
+          <button type="button" class="btn btn-sm" onclick="cancelAccountMerge()">取消</button>
+          <button type="button" class="btn btn-p btn-sm" onclick="confirmAccountMerge()"><i class="ti ti-check"></i> 确认合并</button>
+        </div>
+      </div>
       <div class="acct-mgr-form" id="acctMgrForm">
         <div class="acct-mgr-form-title" id="acctMgrFormTitle">新增账户</div>
         <input type="hidden" id="acctMgrKey">
@@ -536,6 +539,16 @@
               <option value="信用卡">信用卡</option>
               <option value="支付账户">支付账户</option>
             </select>
+          </div>
+        </div>
+        <div class="acct-mgr-credit hide" id="acctMgrCreditFields">
+          <div class="acct-mgr-credit-title">信用卡信息</div>
+          <div class="form-grid acct-mgr-grid">
+            <div class="fg"><label>信用额度</label><input type="number" id="acctMgrCreditLimit" min="0" step="0.01" placeholder="如 50000"></div>
+            <div class="fg"><label>当前可用额度</label><input type="number" id="acctMgrCreditAvail" min="0" step="0.01" placeholder="如 32000"></div>
+            <div class="fg"><label>当前欠款</label><input type="number" id="acctMgrCreditDebt" min="0" step="0.01" placeholder="如 18000"></div>
+            <div class="fg"><label>账单日</label><input type="number" id="acctMgrBillDay" min="1" max="31" placeholder="1–31"></div>
+            <div class="fg"><label>还款日</label><input type="number" id="acctMgrDueDay" min="1" max="31" placeholder="1–31"></div>
           </div>
         </div>
         <div class="acct-mgr-form-actions">

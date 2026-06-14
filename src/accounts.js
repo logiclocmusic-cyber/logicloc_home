@@ -1,33 +1,22 @@
-/** 资金账户：按支付方式（银行卡/账户）查看流水 */
-import { fmtMoney, fmtMoneySigned, fmtCount } from './format.js';
-import { assetUrl } from './apiBase.js';
+/** 信用账户：信用卡额度与免息期管理 */
+import { fmtMoney, fmtCount } from './format.js';
 import { isValidPayAccount, matchBankBrand, accountGroupKey, accountGroupName } from './bank-brands.js';
-
-const CARD_GRADIENTS = [
-  ['#5b5bd6', '#7c3aed'],
-  ['#1570ef', '#2e90fa'],
-  ['#099250', '#12b76a'],
-  ['#b54708', '#f79009'],
-  ['#c11574', '#ee46bc'],
-  ['#0e7090', '#06aed4'],
-  ['#363f72', '#4e5ba6'],
-  ['#b42318', '#f04438']
-];
 
 const MANUAL_PREFIX = '__manual:';
 const KIND_OPTIONS = ['借记卡', '信用卡', '支付账户'];
+const CREDIT_CARD_GROUPS = [
+  { id: 'huhan', name: '胡晗' },
+  { id: 'chencheng', name: '陈橙' }
+];
 
 let getAllRows = () => [];
-let formatDayHeader = d => d;
-let formatTimeShort = t => t;
-let srcBadgeHtml = s => s;
-let rowTitleFn = () => '—';
 let onPersist = () => {};
+let persistNowFn = null;
+let registryNeedsPersist = false;
 
 let accountCardFaces = {};
-let accountRegistry = { overrides: {}, hidden: [], manual: [] };
-let activeAccount = null;
-const revealedCardNums = new Set();
+let accountRegistry = { overrides: {}, hidden: [], manual: [], merges: {}, creditHidden: [], creditPools: [], creditGroups: {} };
+let creditCardEditMode = false;
 
 const CORP_MARKS = {
   WECHAT: { bg: '#07c160', icon: 'ti-brand-wechat' },
@@ -37,25 +26,102 @@ const CORP_MARKS = {
 
 export function initAccounts(deps) {
   getAllRows = deps.getAllRows || getAllRows;
-  formatDayHeader = deps.formatDayHeader || formatDayHeader;
-  formatTimeShort = deps.formatTimeShort || formatTimeShort;
-  srcBadgeHtml = deps.srcBadgeHtml || srcBadgeHtml;
-  rowTitleFn = deps.rowTitle || rowTitleFn;
   onPersist = deps.onPersist || onPersist;
+  persistNowFn = deps.persistNow || null;
+}
+
+function registryStorageKey(payKey) {
+  if (!payKey || isManualKey(payKey)) return payKey;
+  return accountGroupKey(payKey);
+}
+
+function mergeOverride(a, b) {
+  const out = { ...a, ...b };
+  if (a?.credit || b?.credit) out.credit = { ...(a?.credit || {}), ...(b?.credit || {}) };
+  return out;
+}
+
+function migrateRegistry(raw) {
+  const r = {
+    overrides: raw?.overrides && typeof raw.overrides === 'object' ? { ...raw.overrides } : {},
+    hidden: Array.isArray(raw?.hidden) ? [...raw.hidden] : [],
+    manual: Array.isArray(raw?.manual) ? raw.manual.map(m => ({ ...m })) : [],
+    merges: raw?.merges && typeof raw.merges === 'object' ? { ...raw.merges } : {},
+    creditHidden: Array.isArray(raw?.creditHidden) ? [...raw.creditHidden] : [],
+    creditPools: Array.isArray(raw?.creditPools) ? raw.creditPools.map(p => ({ ...p, cards: [...(p.cards || [])] })) : [],
+    creditGroups: raw?.creditGroups && typeof raw.creditGroups === 'object' ? { ...raw.creditGroups } : {}
+  };
+  let migrated = false;
+
+  const newOverrides = {};
+  for (const [k, v] of Object.entries(r.overrides)) {
+    const nk = registryStorageKey(k);
+    if (nk !== k) migrated = true;
+    newOverrides[nk] = newOverrides[nk] ? mergeOverride(newOverrides[nk], v) : { ...v };
+  }
+  r.overrides = newOverrides;
+
+  const migrateKeys = arr => {
+    const src = arr || [];
+    const out = [...new Set(src.map(registryStorageKey))];
+    if (out.length !== src.length || out.some((k, i) => k !== src[i])) migrated = true;
+    return out;
+  };
+  r.hidden = migrateKeys(r.hidden);
+  r.creditHidden = migrateKeys(r.creditHidden);
+
+  const newMerges = {};
+  for (const [src, tgt] of Object.entries(r.merges)) {
+    const ns = registryStorageKey(src);
+    const nt = registryStorageKey(tgt);
+    if (ns !== src || nt !== tgt) migrated = true;
+    newMerges[ns] = nt;
+  }
+  r.merges = newMerges;
+
+  const newCreditGroups = {};
+  for (const [k, v] of Object.entries(r.creditGroups)) {
+    const nk = registryStorageKey(k);
+    if (nk !== k) migrated = true;
+    if (CREDIT_CARD_GROUPS.some(g => g.id === v)) newCreditGroups[nk] = v;
+  }
+  r.creditGroups = newCreditGroups;
+
+  r.manual.forEach(m => {
+    const digits = onlyDigits(m.digits);
+    if (m.kind !== '信用卡' || !digits.endsWith('6802')) return;
+    const sample = `${m.label || ''} ${digits}`;
+    if (!/建设|建行|CCB/i.test(sample)) return;
+    const key = manualKey(m.id);
+    if (r.creditGroups[key] !== 'chencheng') {
+      r.creditGroups[key] = 'chencheng';
+      migrated = true;
+    }
+  });
+
+  return { registry: r, migrated };
 }
 
 function normalizeRegistry(raw) {
-  const r = raw && typeof raw === 'object' ? raw : {};
-  return {
-    overrides: r.overrides && typeof r.overrides === 'object' ? { ...r.overrides } : {},
-    hidden: Array.isArray(r.hidden) ? [...r.hidden] : [],
-    manual: Array.isArray(r.manual) ? r.manual.map(m => ({ ...m })) : []
-  };
+  return migrateRegistry(raw).registry;
+}
+
+export function consumeRegistryMigrationPersist() {
+  const flag = registryNeedsPersist;
+  registryNeedsPersist = false;
+  return flag;
+}
+
+async function flushAccountPersist() {
+  if (persistNowFn) return persistNowFn();
+  onPersist();
 }
 
 export function loadAccountsState(state) {
   accountCardFaces = state?.accountCardFaces || {};
-  accountRegistry = normalizeRegistry(state?.accountRegistry);
+  const { registry, migrated } = migrateRegistry(state?.accountRegistry);
+  accountRegistry = registry;
+  if (migrated) registryNeedsPersist = true;
 }
 
 export function getAccountsState() {
@@ -84,18 +150,6 @@ function inferKind(text, fallback = '支付账户') {
   return fallback;
 }
 
-function hashIdx(s) {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h % CARD_GRADIENTS.length;
-}
-
-function cardFaceSrc(payKey) {
-  const raw = accountCardFaces[payKey];
-  if (!raw) return '';
-  return assetUrl(raw);
-}
-
 function getManualEntry(payKey) {
   if (!isManualKey(payKey)) return null;
   const id = payKey.slice(MANUAL_PREFIX.length);
@@ -103,7 +157,233 @@ function getManualEntry(payKey) {
 }
 
 function getOverride(payKey) {
-  return accountRegistry.overrides[payKey] || null;
+  if (accountRegistry.overrides[payKey]) return accountRegistry.overrides[payKey];
+  const canon = registryStorageKey(payKey);
+  if (canon !== payKey && accountRegistry.overrides[canon]) return accountRegistry.overrides[canon];
+  for (const [k, v] of Object.entries(accountRegistry.overrides)) {
+    if (registryStorageKey(k) === canon) return v;
+  }
+  return null;
+}
+
+function canonicalAccountKey(payKey) {
+  let k = payKey;
+  const seen = new Set();
+  while (accountRegistry.merges?.[k] && !seen.has(k)) {
+    seen.add(k);
+    k = accountRegistry.merges[k];
+  }
+  return k;
+}
+
+function accountKeyForPay(pay) {
+  return canonicalAccountKey(accountGroupKey(pay));
+}
+
+function isMergedAway(payKey) {
+  return !!accountRegistry.merges?.[payKey];
+}
+
+function getCreditInfo(payKey) {
+  return getRawCreditInfo(payKey);
+}
+
+function getRawCreditInfo(payKey) {
+  const manual = getManualEntry(payKey);
+  if (manual?.credit) return { ...manual.credit };
+  const ov = getOverride(payKey);
+  if (ov?.credit) return { ...ov.credit };
+  return null;
+}
+
+function ensureCreditPools() {
+  if (!Array.isArray(accountRegistry.creditPools)) accountRegistry.creditPools = [];
+}
+
+function normalizePoolCardKey(payKey) {
+  return registryStorageKey(canonicalAccountKey(payKey));
+}
+
+function findCreditPoolById(poolId) {
+  ensureCreditPools();
+  return accountRegistry.creditPools.find(p => p.id === poolId) || null;
+}
+
+function creditPoolForCard(payKey) {
+  const key = normalizePoolCardKey(payKey);
+  ensureCreditPools();
+  return accountRegistry.creditPools.find(p => (p.cards || []).some(k => normalizePoolCardKey(k) === key)) || null;
+}
+
+function getEffectiveCreditInfo(payKey) {
+  const raw = getRawCreditInfo(payKey) || {};
+  const pool = creditPoolForCard(payKey);
+  if (!pool) return Object.keys(raw).length ? raw : null;
+  return {
+    ...raw,
+    limit: pool.limit,
+    available: pool.available,
+    debt: pool.debt,
+    poolId: pool.id,
+    poolName: pool.name
+  };
+}
+
+function mergePoolCredit(target, source) {
+  if (target.limit == null && source.limit != null) {
+    target.limit = source.limit;
+    target.available = source.available;
+    target.debt = source.debt;
+  }
+}
+
+function removeCreditPool(poolId) {
+  ensureCreditPools();
+  accountRegistry.creditPools = accountRegistry.creditPools.filter(p => p.id !== poolId);
+}
+
+function stripCardPoolCredit(payKey) {
+  const credit = getRawCreditInfo(payKey);
+  if (!credit) return;
+  const { billDay, dueDay } = credit;
+  const stripped = billDay != null || dueDay != null ? { billDay, dueDay } : null;
+  applyCreditToAccount(payKey, stripped);
+}
+
+function createCreditPool(cardKeys, name = '共享额度') {
+  ensureCreditPools();
+  const pool = {
+    id: `cp${Date.now()}`,
+    name,
+    limit: null,
+    available: null,
+    debt: null,
+    cards: [...new Set(cardKeys.map(normalizePoolCardKey))]
+  };
+  accountRegistry.creditPools.push(pool);
+  return pool;
+}
+
+function bindCreditCards(keys) {
+  ensureCreditPools();
+  const canonKeys = [...new Set(keys.map(normalizePoolCardKey))];
+  if (canonKeys.length < 2) return false;
+
+  const pools = new Map();
+  canonKeys.forEach(k => {
+    const p = creditPoolForCard(k);
+    if (p) pools.set(p.id, p);
+  });
+
+  let pool;
+  if (pools.size === 0) {
+    const brand = matchBankBrand(parsePayAccount(canonKeys[0]).label || canonKeys[0]);
+    pool = createCreditPool(canonKeys, brand?.name || '共享额度');
+  } else {
+    pool = [...pools.values()][0];
+    [...pools.values()].slice(1).forEach(p => {
+      pool.cards.push(...p.cards.filter(k => !pool.cards.includes(normalizePoolCardKey(k))));
+      mergePoolCredit(pool, p);
+      removeCreditPool(p.id);
+    });
+    canonKeys.forEach(k => {
+      const nk = normalizePoolCardKey(k);
+      if (!pool.cards.includes(nk)) pool.cards.push(nk);
+    });
+  }
+
+  if (pool.limit == null) {
+    for (const k of canonKeys) {
+      const raw = getRawCreditInfo(k);
+      if (raw?.limit != null) {
+        pool.limit = raw.limit;
+        pool.available = raw.available;
+        pool.debt = raw.debt;
+        break;
+      }
+    }
+  }
+
+  canonKeys.forEach(stripCardPoolCredit);
+  return true;
+}
+
+function unbindCreditCard(payKey) {
+  const key = normalizePoolCardKey(payKey);
+  const pool = creditPoolForCard(payKey);
+  if (!pool) return;
+  pool.cards = pool.cards.filter(k => normalizePoolCardKey(k) !== key);
+  if (pool.cards.length < 2) dissolveCreditPool(pool.id, { restoreTo: pool.cards[0] });
+}
+
+function dissolveCreditPool(poolId, { restoreTo } = {}) {
+  const pool = findCreditPoolById(poolId);
+  if (!pool) return;
+  if (restoreTo) {
+    const credit = {
+      limit: pool.limit,
+      available: pool.available,
+      debt: pool.debt
+    };
+    if ([credit.limit, credit.available, credit.debt].some(v => v != null)) {
+      const prev = getRawCreditInfo(restoreTo) || {};
+      applyCreditToAccount(restoreTo, { ...credit, billDay: prev.billDay, dueDay: prev.dueDay });
+    }
+  }
+  removeCreditPool(poolId);
+}
+
+function removeCardFromCreditPools(payKey) {
+  const key = normalizePoolCardKey(payKey);
+  ensureCreditPools();
+  accountRegistry.creditPools.forEach(pool => {
+    pool.cards = pool.cards.filter(k => normalizePoolCardKey(k) !== key);
+  });
+  const singles = accountRegistry.creditPools.filter(p => p.cards.length === 1);
+  singles.forEach(pool => dissolveCreditPool(pool.id, { restoreTo: pool.cards[0] }));
+  accountRegistry.creditPools = accountRegistry.creditPools.filter(p => p.cards.length >= 2);
+}
+
+function parseCreditAmount(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function parseCreditDay(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) && n >= 1 && n <= 31 ? n : null;
+}
+
+function formatCreditSummary(credit) {
+  if (!credit) return '';
+  const parts = [];
+  if (credit.poolName) parts.push(`与${credit.poolName}共享额度`);
+  if (credit.limit != null) parts.push(`额度 ${fmtMoney(credit.limit)}`);
+  if (credit.available != null) parts.push(`可用 ${fmtMoney(credit.available)}`);
+  if (credit.debt != null) parts.push(`欠款 ${fmtMoney(credit.debt)}`);
+  if (credit.billDay) parts.push(`账单日 ${credit.billDay}日`);
+  if (credit.dueDay) parts.push(`还款日 ${credit.dueDay}日`);
+  return parts.join(' · ');
+}
+
+function creditFieldsFromInputs() {
+  const limit = parseCreditAmount(document.getElementById('acctMgrCreditLimit')?.value);
+  const available = parseCreditAmount(document.getElementById('acctMgrCreditAvail')?.value);
+  const debt = parseCreditAmount(document.getElementById('acctMgrCreditDebt')?.value);
+  const dueDay = parseCreditDay(document.getElementById('acctMgrDueDay')?.value);
+  const billDay = parseCreditDay(document.getElementById('acctMgrBillDay')?.value);
+  if ([limit, available, debt, dueDay, billDay].every(v => v == null)) return null;
+  return { limit, available, debt, dueDay, billDay };
+}
+
+function syncAccountsMgrCreditFields() {
+  const kind = document.getElementById('acctMgrKind')?.value || '';
+  const panel = document.getElementById('acctMgrCreditFields');
+  if (panel) panel.classList.toggle('hide', kind !== '信用卡');
 }
 
 function accountDigits(payKey) {
@@ -167,13 +447,14 @@ function parsePayAccount(payKey) {
 
   const manual = getManualEntry(payKey);
   if (manual) {
-    return buildCardFields(
+    const fields = buildCardFields(
       manual.label,
       manual.digits,
       manual.kind || '支付账户',
       payKey,
       manual.label
     );
+    return manual.credit ? { ...fields, credit: { ...manual.credit } } : fields;
   }
 
   const full = (payKey || '').trim();
@@ -187,22 +468,14 @@ function parsePayAccount(payKey) {
   if (ov?.digits) digits = onlyDigits(ov.digits);
   if (ov?.kind) kind = ov.kind;
 
-  return buildCardFields(label, digits, kind, full, full);
-}
-
-function accountPaysForKey(payKey) {
-  if (isManualKey(payKey)) return [];
-  const pays = new Set();
-  getAllRows().forEach(r => {
-    const pay = (r['支付方式'] || '').trim();
-    if (!isValidPayAccount(pay)) return;
-    if (accountGroupKey(pay) === payKey) pays.add(pay);
-  });
-  return [...pays];
+  const credit = getEffectiveCreditInfo(payKey);
+  const fields = buildCardFields(label, digits, kind, full, full);
+  return credit ? { ...fields, credit } : fields;
 }
 
 function isHidden(payKey) {
-  return accountRegistry.hidden.includes(payKey);
+  const canon = registryStorageKey(payKey);
+  return (accountRegistry.hidden || []).some(k => registryStorageKey(k) === canon);
 }
 
 function accountList() {
@@ -210,7 +483,7 @@ function accountList() {
   getAllRows().forEach(r => {
     const pay = (r['支付方式'] || '').trim();
     if (!isValidPayAccount(pay)) return;
-    const key = accountGroupKey(pay);
+    const key = accountKeyForPay(pay);
     if (isHidden(key)) return;
     if (!map.has(key)) map.set(key, { pay: key, count: 0, exp: 0, inc: 0, manual: false });
     const a = map.get(key);
@@ -220,40 +493,20 @@ function accountList() {
   });
 
   accountRegistry.manual.forEach(m => {
-    const key = manualKey(m.id);
-    if (isHidden(key)) return;
+    const key = canonicalAccountKey(manualKey(m.id));
+    if (isHidden(key) || isMergedAway(manualKey(m.id))) return;
     if (!map.has(key)) map.set(key, { pay: key, count: 0, exp: 0, inc: 0, manual: true });
   });
 
   return [...map.values()].sort((a, b) => b.count - a.count || b.exp - a.exp);
 }
 
-function accountRows(payKey) {
-  const pays = accountPaysForKey(payKey);
-  return getAllRows()
-    .filter(r => pays.includes((r['支付方式'] || '').trim()))
-    .sort((a, b) => (b['日期'] + b['时间']).localeCompare(a['日期'] + a['时间']));
-}
-
-function accountStats(rows) {
-  const exp = rows.filter(r => r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0);
-  const inc = rows.filter(r => r['收支'] === '收入').reduce((s, r) => s + r['金额'], 0);
-  return { exp, inc, net: inc - exp, count: rows.length };
-}
-
-function cardStyleVars(acc) {
-  const parsed = parsePayAccount(acc.pay);
-  const face = cardFaceSrc(acc.pay);
-  if (face) return { face, c1: '', c2: '', hasFace: true };
-  const colors = parsed.brand?.colors || CARD_GRADIENTS[hashIdx(acc.pay)];
-  return { face: '', c1: colors[0], c2: colors[1], hasFace: false };
-}
-
 function accountBrandMarkHtml(payKey, size = 22) {
-  const sample = accountGroupName(payKey) || payKey;
+  const parsed = parsePayAccount(payKey);
+  const sample = accountGroupName(payKey) || parsed.label || payKey;
   const brand = matchBankBrand(sample);
-  const { label } = parsePayAccount(payKey);
-  const logoUrl = matchBankBrand(sample)?.logoUrl || null;
+  const { label } = parsed;
+  const logoUrl = brand?.logoUrl || null;
   if (logoUrl) {
     return `<img class="fund-brand-logo" src="${esc(logoUrl)}" alt="" width="${size}" height="${size}" loading="lazy" onerror="this.style.display='none'">`;
   }
@@ -266,122 +519,781 @@ function accountBrandMarkHtml(payKey, size = 22) {
   return `<span class="fund-brand-mark fund-brand-mark--fb" style="width:${size}px;height:${size}px">${esc(letter)}</span>`;
 }
 
-function renderBankCard(acc, active) {
-  const parsed = parsePayAccount(acc.pay);
-  const { cardNumMasked, cardNumFull, hasCardNum, kind, brand } = parsed;
-  const revealed = revealedCardNums.has(acc.pay);
-  const style = cardStyleVars(acc);
-  const net = acc.inc - acc.exp;
-  const displayName = accountGroupName(acc.pay) || brand?.name || parsed.label;
-  const bgStyle = style.hasFace
-    ? `background-image:url('${style.face}')`
-    : `background:linear-gradient(135deg,${style.c1} 0%,${style.c2} 100%)`;
-  const numDisplay = hasCardNum ? (revealed ? cardNumFull : cardNumMasked) : cardNumMasked;
-  const eyeBtn = hasCardNum
-    ? `<button type="button" class="fund-card-num-toggle" data-account="${esc(acc.pay)}" title="${revealed ? '隐藏卡号' : '显示卡号'}" aria-label="${revealed ? '隐藏卡号' : '显示卡号'}"><i class="ti ${revealed ? 'ti-eye-off' : 'ti-eye'}"></i></button>`
-    : '';
-  return `<div class="fund-card${active ? ' on' : ''}${style.hasFace ? ' has-face' : ''}" role="button" tabindex="0" data-account="${esc(acc.pay)}" title="点击查看流水">
-    <div class="fund-card-bg" style="${bgStyle}"></div>
-    <div class="fund-card-shade"></div>
-    <div class="fund-card-body">
-      <div class="fund-card-top">
-        <span class="fund-card-kind">${esc(kind)}</span>
-        <span class="fund-card-cnt">${fmtCount(acc.count)} 笔</span>
-      </div>
-      <div class="fund-card-num-row">
-        <span class="fund-card-num" data-masked="${esc(cardNumMasked)}" data-full="${esc(cardNumFull)}">${esc(numDisplay)}</span>
-        ${eyeBtn}
-      </div>
-      <div class="fund-card-foot">
-        <div class="fund-card-bank">${accountBrandMarkHtml(acc.pay)}<span class="fund-card-bank-name">${esc(displayName)}</span></div>
-        <div class="fund-card-net">${fmtMoneySigned(net)}</div>
-      </div>
-    </div>
-  </div>`;
+function creditInputVal(v) {
+  return v != null && v !== '' ? String(v) : '';
 }
 
-function renderTxnRow(row) {
-  const isInc = row['收支'] === '收入';
-  const title = rowTitleFn(row);
-  const desc = (row['商品说明'] || '').trim();
-  const showDesc = desc && desc !== '/' && desc !== title;
-  const cat = row['子分类'] ? `${row['分类']} · ${row['子分类']}` : row['分类'];
-  const isRf = row['退款状态'] === 'refunded';
-  return `<div class="fund-txn">
-    <div class="fund-txn-icon">${isInc ? '<i class="ti ti-arrow-down-left"></i>' : '<i class="ti ti-arrow-up-right"></i>'}</div>
-    <div class="fund-txn-main">
-      <div class="fund-txn-title">${esc(title)}${isRf ? '<span class="fund-txn-rf">退</span>' : ''}</div>
-      <div class="fund-txn-sub">${esc(cat)}${showDesc ? ` · ${esc(desc)}` : ''}</div>
-    </div>
-    <div class="fund-txn-meta">
-      <div class="fund-txn-time">${formatTimeShort(row['时间']) || '—'}</div>
-      <div class="fund-txn-src">${srcBadgeHtml(row['来源'])}</div>
-    </div>
-    <div class="fund-txn-amt ${isInc ? 'inc' : 'exp'}">${isInc ? '+' : '-'}${fmtMoney(row['金额'])}</div>
-  </div>`;
+function roundCreditAmount(n) {
+  return Math.round(n * 100) / 100;
 }
 
-function renderAccountDetail(payKey) {
-  const rows = accountRows(payKey);
-  const { exp, inc, net } = accountStats(rows);
-  const parsed = parsePayAccount(payKey);
-  const displayName = accountGroupName(payKey) || parsed.brand?.name || parsed.label;
-  const subPays = accountPaysForKey(payKey);
-  const head = document.getElementById('accountsHead');
-  if (head) {
-    const subHint = subPays.length > 1
-      ? ` · 含 ${subPays.map(p => esc(p)).join('、')}`
-      : (subPays[0] && subPays[0] !== payKey ? ` · ${esc(subPays[0])}` : '');
-    head.innerHTML = `
-      <div class="accounts-head-name">${accountBrandMarkHtml(payKey, 28)}<span>${esc(displayName)}</span></div>
-      <div class="accounts-head-sub">${esc(parsed.kind)}${parsed.last4 ? ` · 尾号 ${parsed.last4}` : ''} · 共 ${fmtCount(rows.length)} 笔${subHint}</div>`;
-  }
+function isCreditHidden(payKey) {
+  const canon = registryStorageKey(payKey);
+  return (accountRegistry.creditHidden || []).some(k => registryStorageKey(k) === canon);
+}
 
-  const kpi = document.getElementById('accountsKpi');
-  if (kpi) {
-    kpi.innerHTML = `
-      <div class="accounts-kpi-card">
-        <div class="accounts-kpi-label"><i class="ti ti-arrow-up-right"></i>支出</div>
-        <div class="accounts-kpi-value c-red">${fmtMoney(exp)}</div>
-      </div>
-      <div class="accounts-kpi-card">
-        <div class="accounts-kpi-label"><i class="ti ti-arrow-down-left"></i>收入</div>
-        <div class="accounts-kpi-value c-grn">${fmtMoney(inc)}</div>
-      </div>
-      <div class="accounts-kpi-card">
-        <div class="accounts-kpi-label"><i class="ti ti-scale"></i>净额</div>
-        <div class="accounts-kpi-value ${net >= 0 ? 'c-grn' : 'c-red'}">${fmtMoneySigned(net)}</div>
-      </div>`;
-  }
+function creditRowInput(row, field) {
+  return row?.querySelector(`[data-credit-field="${field}"]`);
+}
 
-  const list = document.getElementById('accountsList');
-  if (!list) return;
-  if (!rows.length) {
-    list.innerHTML = '<div class="accounts-empty">暂无流水</div>';
-    return;
-  }
+function syncCreditDerived(row, changedField) {
+  const limitInp = creditRowInput(row, 'limit');
+  const availInp = creditRowInput(row, 'available');
+  const debtInp = creditRowInput(row, 'debt');
+  const limit = parseCreditAmount(limitInp?.value);
+  if (limit == null) return;
 
-  const dayMap = new Map();
-  rows.forEach(r => {
-    const d = r['日期'];
-    if (!dayMap.has(d)) dayMap.set(d, []);
-    dayMap.get(d).push(r);
+  if (changedField === 'available') {
+    if (availInp?.value === '') return;
+    const available = parseCreditAmount(availInp?.value);
+    if (available != null && debtInp && document.activeElement !== debtInp) {
+      debtInp.value = creditInputVal(roundCreditAmount(Math.max(0, limit - available)));
+    }
+  } else if (changedField === 'debt') {
+    if (debtInp?.value === '') return;
+    const debt = parseCreditAmount(debtInp?.value);
+    if (debt != null && availInp && document.activeElement !== availInp) {
+      availInp.value = creditInputVal(roundCreditAmount(Math.max(0, limit - debt)));
+    }
+  } else if (changedField === 'limit') {
+    const from = row.dataset.creditCalcFrom || 'available';
+    if (from === 'debt' && debtInp?.value !== '') syncCreditDerived(row, 'debt');
+    else if (availInp?.value !== '') syncCreditDerived(row, 'available');
+    else if (debtInp?.value !== '') syncCreditDerived(row, 'debt');
+  }
+}
+
+function creditFromRowInputs(row, { pooled = false } = {}) {
+  const get = field => row.querySelector(`[data-credit-field="${field}"]`)?.value;
+  const dueDay = parseCreditDay(get('dueDay'));
+  const billDay = parseCreditDay(get('billDay'));
+  if (pooled) {
+    if ([dueDay, billDay].every(v => v == null)) return null;
+    return { dueDay, billDay };
+  }
+  const limit = parseCreditAmount(get('limit'));
+  const available = parseCreditAmount(get('available'));
+  const debt = parseCreditAmount(get('debt'));
+  if ([limit, available, debt, dueDay, billDay].every(v => v == null)) return null;
+  return { limit, available, debt, dueDay, billDay };
+}
+
+function creditFromPoolRowInputs(row) {
+  const get = field => row.querySelector(`[data-credit-field="${field}"]`)?.value;
+  const limit = parseCreditAmount(get('limit'));
+  const available = parseCreditAmount(get('available'));
+  const debt = parseCreditAmount(get('debt'));
+  if ([limit, available, debt].every(v => v == null)) return null;
+  return { limit, available, debt };
+}
+
+function applyCreditToAccount(payKey, credit) {
+  if (isManualKey(payKey)) {
+    const entry = getManualEntry(payKey);
+    if (!entry) return false;
+    entry.kind = '信用卡';
+    if (credit) entry.credit = credit;
+    else delete entry.credit;
+  } else {
+    const prev = accountRegistry.overrides[payKey] || {};
+    accountRegistry.overrides[payKey] = { ...prev, kind: '信用卡' };
+    if (credit) accountRegistry.overrides[payKey].credit = credit;
+    else delete accountRegistry.overrides[payKey].credit;
+  }
+  return true;
+}
+
+function applyCreditCardMeta(payKey, { label, digits }) {
+  if (isManualKey(payKey)) {
+    const entry = getManualEntry(payKey);
+    if (!entry) return false;
+    entry.kind = '信用卡';
+    if (label) entry.label = label;
+    if (digits) entry.digits = digits;
+    return true;
+  }
+  const prev = accountRegistry.overrides[payKey] || {};
+  accountRegistry.overrides[payKey] = { ...prev, kind: '信用卡' };
+  if (label) accountRegistry.overrides[payKey].label = label;
+  if (digits) accountRegistry.overrides[payKey].digits = digits;
+  return true;
+}
+
+function defaultCreditCardGroupId(acc) {
+  const last4 = onlyDigits(acc.last4).slice(-4);
+  if (last4 !== '6803') return 'huhan';
+  const sample = `${acc.label || ''} ${acc.pay || ''}`;
+  if (/中信银行|中信/.test(sample)) return 'chencheng';
+  const brand = matchBankBrand(sample);
+  return brand?.code === 'CITIC' ? 'chencheng' : 'huhan';
+}
+
+function creditCardGroupId(acc) {
+  const key = registryStorageKey(canonicalAccountKey(acc.pay));
+  const assigned = accountRegistry.creditGroups?.[key];
+  if (assigned && CREDIT_CARD_GROUPS.some(g => g.id === assigned)) return assigned;
+  return defaultCreditCardGroupId(acc);
+}
+
+function groupCreditCardAccounts(cards) {
+  const map = Object.fromEntries(CREDIT_CARD_GROUPS.map(g => [g.id, []]));
+  cards.forEach(c => {
+    const gid = creditCardGroupId(c);
+    if (map[gid]) map[gid].push(c);
+  });
+  return CREDIT_CARD_GROUPS.map(g => ({ ...g, cards: map[g.id] }));
+}
+
+function creditCardBankName(pay, label = '') {
+  const brand = matchBankBrand(pay) || matchBankBrand(label);
+  if (brand?.name) return brand.name;
+  const s = (label || '').trim();
+  if (!s) return '信用卡';
+  return s.replace(/信用卡$/, '').trim() || s;
+}
+
+function creditCardDisplayName({ pay, label, last4, digits }) {
+  const tail = last4
+    ? String(last4).slice(-4).padStart(4, '0')
+    : digits
+      ? onlyDigits(digits).slice(-4).padStart(4, '0')
+      : '';
+  const bank = creditCardBankName(pay, label);
+  return tail ? `${bank} ${tail}` : bank;
+}
+
+function creditCardAccounts() {
+  return mgrAccountRows()
+    .filter(r => r.kind === '信用卡' && !isCreditHidden(r.key))
+    .map(r => {
+      const parsed = parsePayAccount(r.key);
+      const digits = accountDigits(r.key);
+      const last4 = digits ? digits.slice(-4) : parsed.last4;
+      const label = r.label || parsed.label;
+      const pool = creditPoolForCard(r.key);
+      const acc = { pay: r.key, label, last4, digits };
+      return {
+        pay: r.key,
+        label,
+        last4,
+        digits,
+        displayName: creditCardDisplayName(acc),
+        credit: getEffectiveCreditInfo(r.key) || {},
+        poolId: pool?.id || null,
+        count: r.count
+      };
+    });
+}
+
+function organizeGroupCards(cards) {
+  const poolMap = new Map();
+  const standalone = [];
+  cards.forEach(c => {
+    if (c.poolId) {
+      if (!poolMap.has(c.poolId)) {
+        poolMap.set(c.poolId, { pool: findCreditPoolById(c.poolId), cards: [] });
+      }
+      poolMap.get(c.poolId).cards.push(c);
+    } else {
+      standalone.push(c);
+    }
+  });
+  const blocks = [...poolMap.values()]
+    .filter(b => b.pool)
+    .map(b => ({ type: 'pool', pool: b.pool, cards: b.cards }));
+  if (standalone.length) blocks.push({ type: 'standalone', cards: standalone });
+  return blocks;
+}
+
+function creditFieldInputs(c, extra = '', { pooled = false } = {}) {
+  const inp = (field, val, attrs = '') =>
+    `<input type="number" class="accounts-credit-inp" data-credit-field="${field}" value="${creditInputVal(val)}" ${attrs} ${extra}>`;
+  if (pooled) {
+    return {
+      limit: '<span class="accounts-credit-pool-shared">共享</span>',
+      available: '<span class="accounts-credit-pool-shared">共享</span>',
+      debt: '<span class="accounts-credit-pool-shared">共享</span>',
+      billDay: inp('billDay', c.billDay, 'min="1" max="31" step="1" placeholder="—"'),
+      dueDay: inp('dueDay', c.dueDay, 'min="1" max="31" step="1" placeholder="—"')
+    };
+  }
+  return {
+    limit: inp('limit', c.limit, 'min="0" step="0.01" placeholder="—"'),
+    available: inp('available', c.available, 'min="0" step="0.01" placeholder="—"'),
+    debt: inp('debt', c.debt, 'min="0" step="0.01" placeholder="—"'),
+    billDay: inp('billDay', c.billDay, 'min="1" max="31" step="1" placeholder="—"'),
+    dueDay: inp('dueDay', c.dueDay, 'min="1" max="31" step="1" placeholder="—"')
+  };
+}
+
+function formatCreditBrowseAmount(v) {
+  return v != null && v !== '' ? fmtMoney(v) : '—';
+}
+
+function formatCreditBrowseDay(v) {
+  return v ? `${v}日` : '—';
+}
+
+function startOfDay(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function addDays(d, n) {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return startOfDay(x);
+}
+
+function dayNum(d) {
+  return Math.floor(startOfDay(d).getTime() / 86400000);
+}
+
+function mkMonthDay(year, month, day) {
+  const dim = new Date(year, month + 1, 0).getDate();
+  return startOfDay(new Date(year, month, Math.min(day, dim)));
+}
+
+function fmtTimelineDate(d) {
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+function dueDateForBill(billDate, dueDay) {
+  const billDay = billDate.getDate();
+  let due = mkMonthDay(billDate.getFullYear(), billDate.getMonth(), dueDay);
+  if (dueDay <= billDay) due = mkMonthDay(billDate.getFullYear(), billDate.getMonth() + 1, dueDay);
+  if (due < billDate) due = mkMonthDay(billDate.getFullYear(), billDate.getMonth() + 1, dueDay);
+  return due;
+}
+
+function recentBillDate(billDay, ref = new Date()) {
+  const today = startOfDay(ref);
+  let bill = mkMonthDay(today.getFullYear(), today.getMonth(), billDay);
+  if (today < bill) bill = mkMonthDay(today.getFullYear(), today.getMonth() - 1, billDay);
+  return bill;
+}
+
+function creditInterestFreeSpan(billDay, dueDay, ref = new Date()) {
+  if (!billDay || !dueDay) return null;
+  const today = startOfDay(ref);
+  const bill = recentBillDate(billDay, today);
+  const freeStart = addDays(bill, 1);
+  const thisMonthBill = mkMonthDay(today.getFullYear(), today.getMonth(), billDay);
+  const nextBill = today < thisMonthBill
+    ? thisMonthBill
+    : mkMonthDay(bill.getFullYear(), bill.getMonth() + 1, billDay);
+  const freeEnd = dueDateForBill(nextBill, dueDay);
+  const currentDue = dueDateForBill(bill, dueDay);
+  return {
+    bill,
+    currentDue,
+    nextBill,
+    freeStart,
+    freeEnd,
+    daysRemaining: Math.max(0, dayNum(freeEnd) - dayNum(today))
+  };
+}
+
+function pctInRange(date, rangeStart, rangeEnd) {
+  const total = dayNum(rangeEnd) - dayNum(rangeStart);
+  if (total <= 0) return 0;
+  return Math.max(0, Math.min(100, ((dayNum(date) - dayNum(rangeStart)) / total) * 100));
+}
+
+function creditBillDueMarksInRange(billDay, dueDay, rangeStart, rangeEnd) {
+  if (!billDay || !dueDay) return { bills: [], dues: [] };
+  const rs = dayNum(rangeStart);
+  const re = dayNum(rangeEnd);
+  const bills = [];
+  const dues = [];
+  const dueSeen = new Set();
+
+  let y = rangeStart.getFullYear();
+  let m = rangeStart.getMonth() - 1;
+  for (let i = 0; i < 18; i++) {
+    if (m < 0) { m = 11; y--; }
+    const bill = mkMonthDay(y, m, billDay);
+    const due = dueDateForBill(bill, dueDay);
+    const bn = dayNum(bill);
+    const dn = dayNum(due);
+
+    if (bn >= rs && bn <= re) bills.push({ date: bill });
+    if (dn >= rs && dn <= re && !dueSeen.has(dn)) {
+      dueSeen.add(dn);
+      dues.push({ date: due });
+    }
+
+    m++;
+    if (m > 11) { m = 0; y++; }
+    if (bn > re + 35 && dn > re + 35) break;
+  }
+  return { bills, dues };
+}
+
+function creditTimelineRange(cards) {
+  const today = startOfDay(new Date());
+  let contentMin = null;
+  let contentMax = null;
+
+  const bump = d => {
+    if (!d) return;
+    if (contentMin == null || dayNum(d) < dayNum(contentMin)) contentMin = d;
+    if (contentMax == null || dayNum(d) > dayNum(contentMax)) contentMax = d;
+  };
+
+  cards.forEach(acc => {
+    const { billDay, dueDay } = acc.credit || {};
+    if (!billDay || !dueDay) return;
+    const span = creditInterestFreeSpan(billDay, dueDay);
+    if (!span) return;
+    bump(span.bill);
+    bump(span.freeStart);
+    bump(span.freeEnd);
   });
 
-  list.innerHTML = [...dayMap.entries()].map(([date, dayRows]) => {
-    const dayInc = dayRows.filter(r => r['收支'] === '收入').reduce((s, r) => s + r['金额'], 0);
-    const dayExp = dayRows.filter(r => r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0);
-    return `<section class="fund-day">
-      <header class="fund-day-head">
-        <span>${formatDayHeader(date)}</span>
-        <span class="fund-day-sum">
-          ${dayInc ? `<span class="inc">+${fmtMoney(dayInc)}</span>` : ''}
-          ${dayExp ? `<span class="exp">-${fmtMoney(dayExp)}</span>` : ''}
-        </span>
-      </header>
-      <div class="fund-day-rows">${dayRows.map(renderTxnRow).join('')}</div>
-    </section>`;
+  const pad = 3;
+  if (contentMin == null) {
+    return { start: addDays(today, -14), end: addDays(today, 14), today };
+  }
+
+  const leftNeed = dayNum(today) - dayNum(contentMin);
+  const rightNeed = dayNum(contentMax) - dayNum(today);
+  const halfSpan = Math.max(leftNeed, rightNeed, 10) + pad;
+
+  return {
+    start: addDays(today, -halfSpan),
+    end: addDays(today, halfSpan),
+    today
+  };
+}
+
+function creditTimelineAxisTicks(rangeStart, rangeEnd) {
+  const ticks = [];
+  const total = dayNum(rangeEnd) - dayNum(rangeStart);
+  const step = total > 50 ? 7 : total > 28 ? 5 : 3;
+  for (let i = 0; i <= total; i += step) {
+    const d = addDays(rangeStart, i);
+    ticks.push({ date: d, left: pctInRange(d, rangeStart, rangeEnd) });
+  }
+  if (!ticks.some(t => dayNum(t.date) === dayNum(rangeEnd))) {
+    ticks.push({ date: rangeEnd, left: 100 });
+  }
+  return ticks;
+}
+
+function renderCreditTimelineMarks(marks, rangeStart, rangeEnd, span) {
+  const billHtml = marks.bills.map(b => {
+    const left = pctInRange(b.date, rangeStart, rangeEnd);
+    const cur = span && dayNum(b.date) === dayNum(span.bill);
+    return `<span class="credit-tl-mark credit-tl-mark--bill${cur ? ' credit-tl-mark--cur' : ''}" style="left:${left.toFixed(2)}%" title="账单日 ${fmtTimelineDate(b.date)}"></span>`;
   }).join('');
+  const dueHtml = marks.dues.map(d => {
+    const left = pctInRange(d.date, rangeStart, rangeEnd);
+    const cur = span && dayNum(d.date) === dayNum(span.freeEnd);
+    return `<span class="credit-tl-mark credit-tl-mark--due${cur ? ' credit-tl-mark--cur' : ''}" style="left:${left.toFixed(2)}%" title="还款日 ${fmtTimelineDate(d.date)}"></span>`;
+  }).join('');
+  return billHtml + dueHtml;
+}
+
+function renderCreditTimelineRow(acc, rangeStart, rangeEnd) {
+  const c = acc.credit || {};
+  const displayName = acc.displayName || creditCardDisplayName(acc);
+  const shortName = displayName.length > 16 ? `${displayName.slice(0, 16)}…` : displayName;
+  const span = creditInterestFreeSpan(c.billDay, c.dueDay);
+  const label = `<div class="credit-tl-label">${accountBrandMarkHtml(acc.pay, 20)}<span class="credit-tl-name" title="${esc(displayName)}">${esc(shortName)}</span></div>`;
+
+  if (!span) {
+    return `<div class="credit-tl-row credit-tl-row--empty">${label}<div class="credit-tl-track"><span class="credit-tl-missing">请设置账单日与还款日</span></div></div>`;
+  }
+
+  const left = pctInRange(span.freeStart, rangeStart, rangeEnd);
+  const width = Math.max(1.5, pctInRange(span.freeEnd, rangeStart, rangeEnd) - left);
+  const marks = creditBillDueMarksInRange(c.billDay, c.dueDay, rangeStart, rangeEnd);
+  const markHtml = renderCreditTimelineMarks(marks, rangeStart, rangeEnd, span);
+
+  return `<div class="credit-tl-row">
+    ${label}
+    <div class="credit-tl-track">
+      <div class="credit-tl-bar" style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%" title="当前免息期 ${fmtTimelineDate(span.freeStart)} — ${fmtTimelineDate(span.freeEnd)}">
+        <span class="credit-tl-bar-fill"></span>
+        <span class="credit-tl-bar-text">免息 ${fmtTimelineDate(span.freeStart)}–${fmtTimelineDate(span.freeEnd)} · 还剩 ${span.daysRemaining} 天</span>
+      </div>
+      ${markHtml}
+    </div>
+  </div>`;
+}
+
+function renderCreditTimelineHtml(cards, groups) {
+  if (!cards.length) return '';
+  const { start, end, today } = creditTimelineRange(cards);
+  const todayLeft = pctInRange(today, start, end);
+  const ticks = creditTimelineAxisTicks(start, end);
+  const axis = ticks.map(t =>
+    `<span class="credit-tl-tick" style="left:${t.left.toFixed(2)}%">${fmtTimelineDate(t.date)}</span>`
+  ).join('');
+  const groupBlocks = groups.map(g => {
+    const rows = g.cards.map(c => renderCreditTimelineRow(c, start, end)).join('');
+    if (!rows) return '';
+    return `<div class="credit-tl-group">
+      <div class="credit-tl-group-name">${esc(g.name)}</div>
+      ${rows}
+    </div>`;
+  }).join('');
+
+  return `<div class="cc full accounts-credit-timeline-card">
+    <div class="accounts-credit-timeline-head">
+      <div class="ct"><i class="ti ti-timeline"></i> 免息期时间轴</div>
+      <span class="accounts-credit-timeline-hint">绿色条为当前免息期；橙线为账单日，红线为还款日；以今天为中轴</span>
+    </div>
+    <div class="credit-tl-wrap" style="--today-pct:${todayLeft.toFixed(2)}">
+      <div class="credit-tl-today-global" aria-hidden="true"><span class="credit-tl-today-line"></span></div>
+      <div class="credit-tl-axis">
+        ${axis}
+        <div class="credit-tl-today" style="left:${todayLeft.toFixed(2)}%">
+          <span class="credit-tl-today-label">今天 ${fmtTimelineDate(today)}</span>
+        </div>
+      </div>
+      <div class="credit-tl-legend">
+        <span><i class="credit-tl-legend-dot bill"></i>账单日</span>
+        <span><i class="credit-tl-legend-dot due"></i>还款日</span>
+        <span><i class="credit-tl-legend-dot free"></i>免息期</span>
+      </div>
+      <div class="credit-tl-groups">${groupBlocks}</div>
+    </div>
+  </div>`;
+}
+
+function creditNameCell(payKey, labelVal = '', { isNew = false } = {}) {
+  const logo = isNew
+    ? '<span class="fund-brand-mark fund-brand-mark--fb accounts-credit-logo-ph" style="width:24px;height:24px"><i class="ti ti-credit-card" style="font-size:12px"></i></span>'
+    : accountBrandMarkHtml(payKey, 24);
+  const labelAttr = isNew
+    ? 'placeholder="银行名称 *"'
+    : `value="${esc(labelVal)}" placeholder="银行名称"`;
+  return `<div class="accounts-credit-name-cell">${logo}<input type="text" class="accounts-credit-label" ${labelAttr}></div>`;
+}
+
+function creditNameDisplayCell(acc) {
+  const displayName = acc.displayName || creditCardDisplayName(acc);
+  return `<div class="accounts-credit-name-cell">${accountBrandMarkHtml(acc.pay, 24)}<span class="accounts-credit-val accounts-credit-val--name">${esc(displayName)}</span></div>`;
+}
+
+function creditDigitsInput(acc, { isNew = false } = {}) {
+  if (isNew) {
+    return '<input type="text" class="accounts-credit-digits accounts-credit-digits--full" placeholder="完整卡号" inputmode="numeric" maxlength="23">';
+  }
+  const formatted = acc.digits ? formatCardDigits(acc.digits) : '';
+  return `<input type="text" class="accounts-credit-digits accounts-credit-digits--full" value="${esc(formatted)}" placeholder="完整卡号" inputmode="numeric" maxlength="23">`;
+}
+
+function renderCreditCardRow(acc, { isNew = false, editing = false, pooled = false } = {}) {
+  const c = acc?.credit || {};
+  const last4 = acc?.last4 ? String(acc.last4).padStart(4, '0') : '';
+  const bindTd = editing && !isNew
+    ? `<td class="accounts-credit-bind-td"><input type="checkbox" class="accounts-credit-bind-cb" title="选择绑定"></td>`
+    : editing ? '<td class="accounts-credit-bind-td"></td>' : '';
+
+  if (!editing && !isNew) {
+    const limitCell = pooled
+      ? '<span class="accounts-credit-pool-shared">共享</span>'
+      : formatCreditBrowseAmount(c.limit);
+    const availCell = pooled
+      ? '<span class="accounts-credit-pool-shared">共享</span>'
+      : formatCreditBrowseAmount(c.available);
+    const debtCell = pooled
+      ? '<span class="accounts-credit-pool-shared">共享</span>'
+      : formatCreditBrowseAmount(c.debt);
+    return `<tr data-credit-key="${esc(acc.pay)}"${pooled ? ' class="accounts-credit-pool-card"' : ''}>
+      <td>${creditNameDisplayCell(acc)}</td>
+      <td><span class="accounts-credit-val">${esc(last4 || '—')}</span></td>
+      <td><span class="accounts-credit-val">${limitCell}</span></td>
+      <td><span class="accounts-credit-val">${availCell}</span></td>
+      <td><span class="accounts-credit-val">${debtCell}</span></td>
+      <td><span class="accounts-credit-val">${formatCreditBrowseDay(c.billDay)}</span></td>
+      <td><span class="accounts-credit-val">${formatCreditBrowseDay(c.dueDay)}</span></td>
+    </tr>`;
+  }
+
+  const fields = creditFieldInputs(c, '', { pooled });
+  if (isNew) {
+    return `<tr data-credit-new="1">
+      ${bindTd}
+      <td>${creditNameCell('', '', { isNew: true })}</td>
+      <td>${creditDigitsInput(null, { isNew: true })}</td>
+      <td>${fields.limit}</td>
+      <td>${fields.available}</td>
+      <td>${fields.debt}</td>
+      <td>${fields.billDay}</td>
+      <td>${fields.dueDay}</td>
+      <td class="accounts-credit-actions">
+        <button type="button" class="btn btn-sm" data-cancel-credit-new title="取消"><i class="ti ti-x"></i></button>
+        <button type="button" class="btn btn-sm btn-p" data-save-credit-new title="保存"><i class="ti ti-check"></i></button>
+      </td>
+    </tr>`;
+  }
+
+  const unbindBtn = pooled
+    ? `<button type="button" class="btn btn-sm" data-unbind-credit="${esc(acc.pay)}" title="移出共享额度"><i class="ti ti-unlink"></i></button>`
+    : '';
+  return `<tr data-credit-key="${esc(acc.pay)}"${pooled ? ' class="accounts-credit-pool-card"' : ''}>
+    ${bindTd}
+    <td>${creditNameDisplayCell(acc)}</td>
+    <td>${creditDigitsInput(acc)}</td>
+    <td>${fields.limit}</td>
+    <td>${fields.available}</td>
+    <td>${fields.debt}</td>
+    <td>${fields.billDay}</td>
+    <td>${fields.dueDay}</td>
+    <td class="accounts-credit-actions">
+      ${unbindBtn}
+      <button type="button" class="btn btn-sm btn-a" data-delete-credit="${esc(acc.pay)}" title="删除"><i class="ti ti-trash"></i></button>
+    </td>
+  </tr>`;
+}
+
+function renderCreditPoolHeaderRow(pool, cards, editing) {
+  const c = { limit: pool.limit, available: pool.available, debt: pool.debt };
+  const brand = matchBankBrand(pool.name || cards[0]?.label || '');
+  const logo = brand?.logoUrl
+    ? `<img class="fund-brand-logo" src="${esc(brand.logoUrl)}" alt="" width="24" height="24" loading="lazy" onerror="this.style.display='none'">`
+    : accountBrandMarkHtml(cards[0]?.pay || pool.name, 24);
+  const bindTd = editing ? '<td class="accounts-credit-bind-td"></td>' : '';
+  const actionTd = editing
+    ? `<td class="accounts-credit-actions"><button type="button" class="btn btn-sm" data-dissolve-pool="${esc(pool.id)}" title="解散额度池"><i class="ti ti-unlink"></i></button></td>`
+    : '';
+
+  if (!editing) {
+    return `<tr class="accounts-credit-pool-row" data-credit-pool="${esc(pool.id)}">
+      <td colspan="2"><div class="accounts-credit-pool-label">${logo}<span>${esc(pool.name)} · 共享额度</span><span class="accounts-credit-pool-cnt">${cards.length} 张</span></div></td>
+      <td><span class="accounts-credit-val accounts-credit-val--pool">${formatCreditBrowseAmount(c.limit)}</span></td>
+      <td><span class="accounts-credit-val accounts-credit-val--pool">${formatCreditBrowseAmount(c.available)}</span></td>
+      <td><span class="accounts-credit-val accounts-credit-val--pool">${formatCreditBrowseAmount(c.debt)}</span></td>
+      <td colspan="2"></td>
+    </tr>`;
+  }
+
+  const fields = creditFieldInputs(c);
+  return `<tr class="accounts-credit-pool-row" data-credit-pool="${esc(pool.id)}">
+    ${bindTd}
+    <td colspan="2"><div class="accounts-credit-pool-label">${logo}<input type="text" class="accounts-credit-pool-name" value="${esc(pool.name)}" placeholder="额度池名称"><span class="accounts-credit-pool-cnt">${cards.length} 张</span></div></td>
+    <td>${fields.limit}</td>
+    <td>${fields.available}</td>
+    <td>${fields.debt}</td>
+    <td colspan="2"></td>
+    ${actionTd}
+  </tr>`;
+}
+
+function renderCreditCardGroupTableBody(group, editing) {
+  const blocks = organizeGroupCards(group.cards);
+  if (!blocks.length) {
+    const colSpan = editing ? 9 : 7;
+    return `<tr><td colspan="${colSpan}" class="accounts-credit-group-empty">暂无卡片</td></tr>`;
+  }
+  return blocks.map(block => {
+    if (block.type === 'pool') {
+      const header = renderCreditPoolHeaderRow(block.pool, block.cards, editing);
+      const rows = block.cards.map(c => renderCreditCardRow(c, { editing, pooled: true })).join('');
+      return `${header}${rows}`;
+    }
+    return block.cards.map(c => renderCreditCardRow(c, { editing, pooled: false })).join('');
+  }).join('');
+}
+
+function renderCreditCardGroupTable(group, editing) {
+  const bindTh = editing ? '<th class="accounts-credit-bind-th" title="选择绑定"></th>' : '';
+  const actionTh = editing ? '<th>操作</th>' : '';
+  const addBtn = editing
+    ? `<button type="button" class="btn btn-sm btn-p" onclick="addCreditCardRow('${group.id}')"><i class="ti ti-plus"></i> 新增</button>`
+    : '';
+  const bindBtn = editing
+    ? `<button type="button" class="btn btn-sm" data-bind-credit-group="${group.id}" title="将选中的卡绑定为共享额度"><i class="ti ti-link"></i> 绑定共享额度</button>`
+    : '';
+  const body = group.cards.length
+    ? renderCreditCardGroupTableBody(group, editing)
+    : (() => {
+        const colSpan = editing ? 9 : 7;
+        return `<tr><td colspan="${colSpan}" class="accounts-credit-group-empty">暂无卡片</td></tr>`;
+      })();
+  const digitTh = editing ? '<th>卡号</th>' : '<th>尾号</th>';
+  return `<section class="accounts-credit-group" data-credit-group="${group.id}">
+    <div class="accounts-credit-group-head">
+      <h4 class="accounts-credit-group-title">${esc(group.name)} <span class="accounts-credit-group-cnt">${group.cards.length} 张</span></h4>
+      <div class="accounts-credit-group-actions">${bindBtn}${addBtn}</div>
+    </div>
+    <div class="accounts-credit-table-wrap">
+      <table class="report-table accounts-credit-table${editing ? ' is-editing' : ''}">
+        <thead><tr>
+          ${bindTh}<th>账户</th>${digitTh}<th>信用额度</th><th>可用额度</th><th>欠款</th><th>账单日</th><th>还款日</th>${actionTh}
+        </tr></thead>
+        <tbody id="accountsCreditTbody-${group.id}">${body}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function renderCreditCardSection() {
+  const el = document.getElementById('accountsCreditSection');
+  if (!el) return;
+  const cards = creditCardAccounts();
+  const groups = groupCreditCardAccounts(cards);
+  const editing = creditCardEditMode;
+  const hint = editing
+    ? '勾选多张卡可绑定共享额度；额度与可用/欠款自动互算，失焦保存'
+    : '浏览模式，点击铅笔进入编辑';
+  el.innerHTML = `${renderCreditTimelineHtml(cards, groups)}<div class="cc full accounts-credit-card${editing ? ' is-editing' : ' is-viewing'}">
+    <div class="accounts-credit-head">
+      <div class="ct"><i class="ti ti-credit-card"></i> 信用卡管理 <span class="accounts-credit-cnt">${cards.length} 张</span></div>
+      <div class="accounts-credit-head-actions">
+        <span class="accounts-credit-hint">${hint}</span>
+        <button type="button" class="btn btn-sm accounts-credit-edit-btn${editing ? ' on' : ''}" onclick="toggleCreditCardEditMode()" title="${editing ? '退出编辑' : '编辑'}" aria-label="${editing ? '退出编辑' : '编辑'}"><i class="ti ${editing ? 'ti-pencil-off' : 'ti-pencil'}"></i></button>
+      </div>
+    </div>
+    <div class="accounts-credit-groups">${groups.map(g => renderCreditCardGroupTable(g, editing)).join('')}</div>
+    ${cards.length ? '' : `<div class="accounts-credit-empty">暂无信用卡${editing ? '，可在各分组下新增卡片' : ''}，或在账户管理中将账户设为信用卡。</div>`}
+  </div>`;
+}
+
+export function toggleCreditCardEditMode() {
+  creditCardEditMode = !creditCardEditMode;
+  renderCreditCardSection();
+}
+
+function saveCreditCardRow(row) {
+  const payKey = row?.dataset?.creditKey;
+  if (!payKey) return;
+  const labelInp = row.querySelector('.accounts-credit-label');
+  const parsed = parsePayAccount(payKey);
+  const label = labelInp?.value?.trim() || creditCardBankName(payKey, parsed.label);
+  const digits = onlyDigits(row.querySelector('.accounts-credit-digits')?.value);
+  if (labelInp && !label) {
+    alert('请填写银行名称');
+    labelInp.focus();
+    return;
+  }
+  const pooled = !!creditPoolForCard(payKey);
+  const credit = creditFromRowInputs(row, { pooled });
+  if (!applyCreditCardMeta(payKey, { label, digits })) return;
+  if (pooled) {
+    const prev = getRawCreditInfo(payKey) || {};
+    applyCreditToAccount(payKey, credit ? { ...prev, ...credit } : prev.billDay != null || prev.dueDay != null ? { billDay: prev.billDay, dueDay: prev.dueDay } : null);
+  } else {
+    applyCreditToAccount(payKey, credit);
+  }
+  flushAccountPersist();
+  renderAccountsPage();
+}
+
+function saveCreditPoolRow(row) {
+  const poolId = row?.dataset?.creditPool;
+  if (!poolId) return;
+  const pool = findCreditPoolById(poolId);
+  if (!pool) return;
+  const name = row.querySelector('.accounts-credit-pool-name')?.value?.trim();
+  if (name) pool.name = name;
+  const credit = creditFromPoolRowInputs(row);
+  if (credit) {
+    pool.limit = credit.limit;
+    pool.available = credit.available;
+    pool.debt = credit.debt;
+  }
+  flushAccountPersist();
+  renderAccountsPage();
+}
+
+export function bindSelectedCreditCards(groupId) {
+  const tbody = document.getElementById(`accountsCreditTbody-${groupId}`);
+  if (!tbody) return;
+  const keys = [...tbody.querySelectorAll('tr[data-credit-key] .accounts-credit-bind-cb:checked')]
+    .map(cb => cb.closest('tr')?.dataset?.creditKey)
+    .filter(Boolean);
+  if (keys.length < 2) {
+    alert('请至少勾选 2 张信用卡');
+    return;
+  }
+  if (!bindCreditCards(keys)) return;
+  flushAccountPersist();
+  renderAccountsPage();
+}
+
+export function unbindCreditCardFromPool(payKey) {
+  if (!payKey) return;
+  const pool = creditPoolForCard(payKey);
+  if (!pool) return;
+  const name = parsePayAccount(payKey).label || payKey;
+  if (!confirm(`将「${name}」移出「${pool.name}」共享额度？`)) return;
+  unbindCreditCard(payKey);
+  flushAccountPersist();
+  renderAccountsPage();
+}
+
+export function dissolveCreditPoolById(poolId) {
+  const pool = findCreditPoolById(poolId);
+  if (!pool) return;
+  if (!confirm(`解散「${pool.name}」共享额度？\n额度信息将保留在其中一张卡上。`)) return;
+  dissolveCreditPool(poolId, { restoreTo: pool.cards[0] });
+  flushAccountPersist();
+  renderAccountsPage();
+}
+
+function saveNewCreditCardRow(row) {
+  const label = row.querySelector('.accounts-credit-label')?.value?.trim();
+  if (!label) {
+    alert('请填写银行名称');
+    row.querySelector('.accounts-credit-label')?.focus();
+    return;
+  }
+  const digits = onlyDigits(row.querySelector('.accounts-credit-digits')?.value);
+  const credit = creditFromRowInputs(row);
+  const entry = { id: `m${Date.now()}`, label, digits, kind: '信用卡' };
+  if (credit) entry.credit = credit;
+  accountRegistry.manual.push(entry);
+  flushAccountPersist();
+  renderAccountsPage();
+}
+
+export function addCreditCardRow(groupId = 'huhan') {
+  if (!creditCardEditMode) {
+    creditCardEditMode = true;
+    renderCreditCardSection();
+  }
+  const tbody = document.getElementById(`accountsCreditTbody-${groupId}`);
+  if (!tbody) {
+    renderCreditCardSection();
+    addCreditCardRow(groupId);
+    return;
+  }
+  const existing = document.querySelector('[data-credit-new]');
+  if (existing) {
+    existing.querySelector('.accounts-credit-label')?.focus();
+    return;
+  }
+  tbody.insertAdjacentHTML('beforeend', renderCreditCardRow(null, { isNew: true, editing: true }));
+  tbody.querySelector('[data-credit-new] .accounts-credit-label')?.focus();
+}
+
+export function deleteCreditCard(payKey) {
+  if (!payKey) return;
+  const parsed = parsePayAccount(payKey);
+  const name = parsed.label || payKey;
+  if (!confirm(`确定从信用卡列表移除「${name}」？\n手动添加的卡片将彻底删除；账单账户仅从此列表隐藏。`)) return;
+
+  if (isManualKey(payKey)) {
+    const id = payKey.slice(MANUAL_PREFIX.length);
+    accountRegistry.manual = accountRegistry.manual.filter(m => m.id !== id);
+  } else if (!isCreditHidden(payKey)) {
+    if (!accountRegistry.creditHidden) accountRegistry.creditHidden = [];
+    accountRegistry.creditHidden.push(registryStorageKey(payKey));
+  }
+
+  removeCardFromCreditPools(payKey);
+  flushAccountPersist();
+  renderAccountsPage();
+}
+
+function cancelNewCreditCardRow(row) {
+  row?.remove();
 }
 
 function mgrAccountRows() {
@@ -392,8 +1304,8 @@ function mgrAccountRows() {
   getAllRows().forEach(r => {
     const pay = (r['支付方式'] || '').trim();
     if (!isValidPayAccount(pay)) return;
-    const key = accountGroupKey(pay);
-    if (seen.has(key) || isHidden(key)) return;
+    const key = accountKeyForPay(pay);
+    if (seen.has(key) || isHidden(key) || isMergedAway(key)) return;
     seen.add(key);
     const parsed = parsePayAccount(key);
     rows.push({
@@ -402,20 +1314,25 @@ function mgrAccountRows() {
       digits: accountDigits(key),
       kind: parsed.kind,
       manual: false,
-      count: countMap.get(key) || 0
+      count: countMap.get(key) || 0,
+      mergedCount: Object.values(accountRegistry.merges || {}).filter(t => t === key).length
     });
   });
 
   accountRegistry.manual.forEach(m => {
-    const key = manualKey(m.id);
-    if (isHidden(key)) return;
+    const rawKey = manualKey(m.id);
+    const key = canonicalAccountKey(rawKey);
+    if (isHidden(key) || isMergedAway(rawKey)) return;
+    if (seen.has(key)) return;
+    seen.add(key);
     rows.push({
       key,
       label: m.label || '账户',
       digits: onlyDigits(m.digits),
       kind: m.kind || '支付账户',
       manual: true,
-      count: 0
+      count: 0,
+      mergedCount: Object.values(accountRegistry.merges || {}).filter(t => t === key).length
     });
   });
 
@@ -435,13 +1352,17 @@ function renderAccountsMgrList() {
     const tag = row.manual
       ? '<span class="acct-mgr-tag manual">手动</span>'
       : '<span class="acct-mgr-tag auto">账单</span>';
+    const mergedTag = row.mergedCount
+      ? `<span class="acct-mgr-tag merged">已合并 ${row.mergedCount}</span>`
+      : '';
     return `<div class="acct-mgr-row">
       <div class="acct-mgr-main">
-        <div class="acct-mgr-name">${esc(row.label)} ${tag}</div>
+        <div class="acct-mgr-name">${esc(row.label)} ${tag}${mergedTag}</div>
         <div class="acct-mgr-meta">${esc(row.kind)} · ${esc(digits)}${row.count ? ` · ${fmtCount(row.count)} 笔` : ''}</div>
       </div>
       <div class="acct-mgr-actions">
         <button type="button" class="btn btn-sm" data-edit-account="${esc(row.key)}" title="编辑"><i class="ti ti-edit"></i></button>
+        <button type="button" class="btn btn-sm" data-merge-account="${esc(row.key)}" title="合并到其他账户"><i class="ti ti-arrows-join"></i></button>
         <button type="button" class="btn btn-sm btn-a" data-del-account="${esc(row.key)}" title="删除"><i class="ti ti-trash"></i></button>
       </div>
     </div>`;
@@ -461,7 +1382,10 @@ function fillAccountsMgrForm(payKey) {
     labelInp.value = '';
     digitsInp.value = '';
     kindInp.value = '借记卡';
+    fillCreditForm(null);
     if (titleEl) titleEl.textContent = '新增账户';
+    hideAccountMergePanel();
+    syncAccountsMgrCreditFields();
     return;
   }
 
@@ -473,7 +1397,54 @@ function fillAccountsMgrForm(payKey) {
   labelInp.value = manual?.label || ov?.label || parsed.label;
   digitsInp.value = formatCardDigits(rawDigits);
   kindInp.value = manual?.kind || ov?.kind || parsed.kind || '支付账户';
+  fillCreditForm(getEffectiveCreditInfo(payKey));
   if (titleEl) titleEl.textContent = isManualKey(payKey) ? '编辑手动账户' : '编辑账户';
+  hideAccountMergePanel();
+  syncAccountsMgrCreditFields();
+}
+
+function fillCreditForm(credit) {
+  const set = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.value = val != null && val !== '' ? String(val) : '';
+  };
+  set('acctMgrCreditLimit', credit?.limit);
+  set('acctMgrCreditAvail', credit?.available);
+  set('acctMgrCreditDebt', credit?.debt);
+  set('acctMgrDueDay', credit?.dueDay);
+  set('acctMgrBillDay', credit?.billDay);
+}
+
+function hideAccountMergePanel() {
+  const panel = document.getElementById('acctMgrMerge');
+  if (panel) panel.classList.add('hide');
+  const srcInp = document.getElementById('acctMgrMergeSource');
+  if (srcInp) srcInp.value = '';
+}
+
+function showAccountMergePanel(sourceKey) {
+  const panel = document.getElementById('acctMgrMerge');
+  const srcInp = document.getElementById('acctMgrMergeSource');
+  const targetSel = document.getElementById('acctMgrMergeTarget');
+  const nameEl = document.getElementById('acctMergeSourceName');
+  if (!panel || !srcInp || !targetSel) return;
+
+  const parsed = parsePayAccount(sourceKey);
+  const options = mgrAccountRows()
+    .filter(r => r.key !== sourceKey && canonicalAccountKey(r.key) !== canonicalAccountKey(sourceKey))
+    .map(r => `<option value="${esc(r.key)}">${esc(r.label)}（${esc(r.kind)}）</option>`)
+    .join('');
+
+  if (!options) {
+    alert('没有其他可合并的账户');
+    return;
+  }
+
+  srcInp.value = sourceKey;
+  if (nameEl) nameEl.textContent = parsed.label || sourceKey;
+  targetSel.innerHTML = options;
+  panel.classList.remove('hide');
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 export function openAccountsMgr() {
@@ -505,6 +1476,9 @@ export function saveAccountsMgr() {
     return;
   }
 
+  const credit = kind === '信用卡' ? creditFieldsFromInputs() : null;
+  const pool = payKey ? creditPoolForCard(payKey) : null;
+
   if (payKey) {
     if (isManualKey(payKey)) {
       const entry = getManualEntry(payKey);
@@ -512,20 +1486,48 @@ export function saveAccountsMgr() {
         entry.label = label;
         entry.digits = digits;
         entry.kind = kind;
+        if (pool && credit) {
+          pool.limit = credit.limit;
+          pool.available = credit.available;
+          pool.debt = credit.debt;
+          const prev = getRawCreditInfo(payKey) || {};
+          entry.credit = credit.billDay != null || credit.dueDay != null
+            ? { billDay: credit.billDay ?? prev.billDay, dueDay: credit.dueDay ?? prev.dueDay }
+            : prev.billDay != null || prev.dueDay != null ? { billDay: prev.billDay, dueDay: prev.dueDay } : undefined;
+          if (!entry.credit) delete entry.credit;
+        } else if (credit) entry.credit = credit;
+        else delete entry.credit;
       }
     } else {
-      accountRegistry.overrides[payKey] = { label, digits, kind };
+      const prev = accountRegistry.overrides[payKey] || {};
+      accountRegistry.overrides[payKey] = { ...prev, label, digits, kind };
+      if (pool && credit) {
+        pool.limit = credit.limit;
+        pool.available = credit.available;
+        pool.debt = credit.debt;
+        const prevCredit = getRawCreditInfo(payKey) || {};
+        const cardCredit = credit.billDay != null || credit.dueDay != null
+          ? { billDay: credit.billDay ?? prevCredit.billDay, dueDay: credit.dueDay ?? prevCredit.dueDay }
+          : prevCredit.billDay != null || prevCredit.dueDay != null
+            ? { billDay: prevCredit.billDay, dueDay: prevCredit.dueDay }
+            : null;
+        if (cardCredit) accountRegistry.overrides[payKey].credit = cardCredit;
+        else delete accountRegistry.overrides[payKey].credit;
+      } else if (credit) accountRegistry.overrides[payKey].credit = credit;
+      else delete accountRegistry.overrides[payKey].credit;
     }
   } else {
-    accountRegistry.manual.push({
-      id: `m${Date.now()}`,
-      label,
-      digits,
-      kind
-    });
+    const entry = { id: `m${Date.now()}`, label, digits, kind };
+    if (credit) entry.credit = credit;
+    accountRegistry.manual.push(entry);
   }
 
-  onPersist();
+  if (kind === '信用卡' && payKey && accountRegistry.creditHidden?.length) {
+    const canon = canonicalAccountKey(payKey);
+    accountRegistry.creditHidden = accountRegistry.creditHidden.filter(k => canonicalAccountKey(k) !== canon);
+  }
+
+  flushAccountPersist();
   renderAccountsMgrList();
   resetAccountsMgrForm();
   renderAccountsPage();
@@ -536,11 +1538,52 @@ export function editAccountsMgr(payKey) {
   document.getElementById('acctMgrForm')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+export function startAccountMerge(payKey) {
+  showAccountMergePanel(payKey);
+}
+
+export function cancelAccountMerge() {
+  hideAccountMergePanel();
+}
+
+export function confirmAccountMerge() {
+  const sourceKey = document.getElementById('acctMgrMergeSource')?.value?.trim() || '';
+  const targetKey = document.getElementById('acctMgrMergeTarget')?.value?.trim() || '';
+  if (!sourceKey || !targetKey) {
+    alert('请选择要合并到的账户');
+    return;
+  }
+
+  const src = canonicalAccountKey(sourceKey);
+  const tgt = canonicalAccountKey(targetKey);
+  if (src === tgt) {
+    alert('不能合并到自身');
+    return;
+  }
+
+  const srcName = parsePayAccount(sourceKey).label || sourceKey;
+  const tgtName = parsePayAccount(targetKey).label || targetKey;
+  if (!confirm(`将「${srcName}」合并到「${tgtName}」？\n合并后流水会汇总显示，原账户将从列表隐藏。`)) return;
+
+  Object.keys(accountRegistry.merges).forEach(k => {
+    if (accountRegistry.merges[k] === src || accountRegistry.merges[k] === sourceKey) {
+      accountRegistry.merges[k] = tgt;
+    }
+  });
+  accountRegistry.merges[src] = tgt;
+
+  hideAccountMergePanel();
+  flushAccountPersist();
+  renderAccountsMgrList();
+  if (document.getElementById('acctMgrKey')?.value === sourceKey) resetAccountsMgrForm();
+  renderAccountsPage();
+}
+
 export function deleteAccountsMgr(payKey) {
   if (!payKey) return;
   const parsed = parsePayAccount(payKey);
   const name = parsed.label || payKey;
-  if (!confirm(`确定删除账户「${name}」？\n仅从资金账户页隐藏，不会删除账目流水。`)) return;
+  if (!confirm(`确定删除账户「${name}」？\n仅从信用账户页隐藏，不会删除账目流水。`)) return;
 
   if (isManualKey(payKey)) {
     const id = payKey.slice(MANUAL_PREFIX.length);
@@ -550,55 +1593,21 @@ export function deleteAccountsMgr(payKey) {
   }
 
   delete accountRegistry.overrides[payKey];
-  revealedCardNums.delete(payKey);
-  if (activeAccount === payKey) activeAccount = null;
+  delete accountRegistry.merges[payKey];
+  if (accountRegistry.creditHidden) {
+    accountRegistry.creditHidden = accountRegistry.creditHidden.filter(k => k !== payKey);
+  }
+  Object.keys(accountRegistry.merges).forEach(k => {
+    if (accountRegistry.merges[k] === payKey) delete accountRegistry.merges[k];
+  });
 
-  onPersist();
+  flushAccountPersist();
   renderAccountsMgrList();
   if (document.getElementById('acctMgrKey')?.value === payKey) resetAccountsMgrForm();
   renderAccountsPage();
 }
 
-export function selectFundAccount(pay) {
-  activeAccount = pay;
-  renderAccountsPage();
-}
-
 export function setupAccountsEvents() {
-  const cards = document.getElementById('accountsCards');
-  if (cards && !cards._bound) {
-    cards._bound = true;
-    cards.addEventListener('click', e => {
-      const toggle = e.target.closest('.fund-card-num-toggle');
-      if (toggle) {
-        e.stopPropagation();
-        e.preventDefault();
-        const pay = toggle.dataset.account;
-        if (!pay) return;
-        if (revealedCardNums.has(pay)) revealedCardNums.delete(pay);
-        else revealedCardNums.add(pay);
-        const card = toggle.closest('.fund-card');
-        const numEl = card?.querySelector('.fund-card-num');
-        const icon = toggle.querySelector('i');
-        const show = revealedCardNums.has(pay);
-        if (numEl) numEl.textContent = show ? numEl.dataset.full : numEl.dataset.masked;
-        if (icon) icon.className = `ti ${show ? 'ti-eye-off' : 'ti-eye'}`;
-        toggle.title = show ? '隐藏卡号' : '显示卡号';
-        toggle.setAttribute('aria-label', toggle.title);
-        return;
-      }
-      const card = e.target.closest('.fund-card[data-account]');
-      if (!card) return;
-      selectFundAccount(card.dataset.account);
-    });
-    cards.addEventListener('keydown', e => {
-      const card = e.target.closest('.fund-card[data-account]');
-      if (!card || (e.key !== 'Enter' && e.key !== ' ')) return;
-      e.preventDefault();
-      selectFundAccount(card.dataset.account);
-    });
-  }
-
   const mgrList = document.getElementById('acctMgrList');
   if (mgrList && !mgrList._bound) {
     mgrList._bound = true;
@@ -608,29 +1617,98 @@ export function setupAccountsEvents() {
         editAccountsMgr(editBtn.dataset.editAccount);
         return;
       }
+      const mergeBtn = e.target.closest('[data-merge-account]');
+      if (mergeBtn) {
+        startAccountMerge(mergeBtn.dataset.mergeAccount);
+        return;
+      }
       const delBtn = e.target.closest('[data-del-account]');
       if (delBtn) deleteAccountsMgr(delBtn.dataset.delAccount);
+    });
+  }
+
+  const kindSel = document.getElementById('acctMgrKind');
+  if (kindSel && !kindSel._bound) {
+    kindSel._bound = true;
+    kindSel.addEventListener('change', syncAccountsMgrCreditFields);
+  }
+
+  const creditSec = document.getElementById('accountsCreditSection');
+  if (creditSec && !creditSec._bound) {
+    creditSec._bound = true;
+    creditSec.addEventListener('input', e => {
+      if (!creditCardEditMode) return;
+      const inp = e.target;
+      if (!inp.matches('[data-credit-field]')) return;
+      const row = inp.closest('tr[data-credit-key], tr[data-credit-new], tr[data-credit-pool]');
+      if (!row) return;
+      const field = inp.dataset.creditField;
+      if (field === 'available' || field === 'debt') row.dataset.creditCalcFrom = field;
+      if (['limit', 'available', 'debt'].includes(field)) syncCreditDerived(row, field);
+    });
+    creditSec.addEventListener('focusout', e => {
+      if (!creditCardEditMode) return;
+      const poolRow = e.target.closest('tr[data-credit-pool]');
+      if (poolRow && e.target.matches('.accounts-credit-inp, .accounts-credit-pool-name')) {
+        setTimeout(() => {
+          const active = document.activeElement;
+          const activePoolRow = active?.closest('tr[data-credit-pool]');
+          if (activePoolRow === poolRow && active.matches('.accounts-credit-inp, .accounts-credit-pool-name')) return;
+          saveCreditPoolRow(poolRow);
+        }, 0);
+        return;
+      }
+      const row = e.target.closest('tr[data-credit-key]');
+      if (!row) return;
+      if (!e.target.matches('.accounts-credit-inp, .accounts-credit-label, .accounts-credit-digits')) return;
+      setTimeout(() => {
+        const active = document.activeElement;
+        const activeRow = active?.closest('tr[data-credit-key]');
+        if (activeRow === row && active.matches('.accounts-credit-inp, .accounts-credit-label, .accounts-credit-digits')) return;
+        saveCreditCardRow(row);
+      }, 0);
+    });
+    creditSec.addEventListener('keydown', e => {
+      if (!creditCardEditMode) return;
+      if (e.key === 'Enter' && e.target.matches('.accounts-credit-inp, .accounts-credit-label, .accounts-credit-digits')) {
+        e.preventDefault();
+        e.target.blur();
+      }
+    });
+    creditSec.addEventListener('click', e => {
+      if (!creditCardEditMode) return;
+      const bindBtn = e.target.closest('[data-bind-credit-group]');
+      if (bindBtn) {
+        bindSelectedCreditCards(bindBtn.dataset.bindCreditGroup);
+        return;
+      }
+      const unbindBtn = e.target.closest('[data-unbind-credit]');
+      if (unbindBtn?.dataset.unbindCredit) {
+        unbindCreditCardFromPool(unbindBtn.dataset.unbindCredit);
+        return;
+      }
+      const dissolveBtn = e.target.closest('[data-dissolve-pool]');
+      if (dissolveBtn?.dataset.dissolvePool) {
+        dissolveCreditPoolById(dissolveBtn.dataset.dissolvePool);
+        return;
+      }
+      const saveBtn = e.target.closest('[data-save-credit-new]');
+      if (saveBtn) {
+        const row = saveBtn.closest('tr[data-credit-new]');
+        if (row) saveNewCreditCardRow(row);
+        return;
+      }
+      const cancelBtn = e.target.closest('[data-cancel-credit-new]');
+      if (cancelBtn) {
+        cancelNewCreditCardRow(cancelBtn.closest('tr[data-credit-new]'));
+        return;
+      }
+      const delBtn = e.target.closest('[data-delete-credit]');
+      if (delBtn?.dataset.deleteCredit) deleteCreditCard(delBtn.dataset.deleteCredit);
     });
   }
 }
 
 export function renderAccountsPage() {
-  const cardsEl = document.getElementById('accountsCards');
-  const panelEl = document.getElementById('accountsPanel');
-  if (!cardsEl) return;
-
-  const accounts = accountList();
-  if (!accounts.length) {
-    cardsEl.innerHTML = '<div class="accounts-empty accounts-empty--full"><i class="ti ti-credit-card-off"></i>暂无资金账户。导入账单后会自动收录，或点击右上角设置手动添加。</div>';
-    panelEl?.classList.add('hide');
-    return;
-  }
-
-  if (!activeAccount || !accounts.some(a => a.pay === activeAccount)) {
-    activeAccount = accounts[0].pay;
-  }
-
-  cardsEl.innerHTML = accounts.map(a => renderBankCard(a, a.pay === activeAccount)).join('');
-  panelEl?.classList.remove('hide');
-  renderAccountDetail(activeAccount);
+  renderCreditCardSection();
 }

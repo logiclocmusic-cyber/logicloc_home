@@ -60,7 +60,7 @@ export function readState() {
     renqingAvatars: meta.renqingAvatars || {},
     accountCardFaces: meta.accountCardFaces || {},
     accountLogos: meta.accountLogos || {},
-    accountRegistry: meta.accountRegistry || { overrides: {}, hidden: [], manual: [] },
+    accountRegistry: meta.accountRegistry || { overrides: {}, hidden: [], manual: [], merges: {}, creditHidden: [], creditPools: [], creditGroups: {} },
     txnPairs: meta.txnPairs || [],
     stateVersion: meta.stateVersion || 0
   };
@@ -101,7 +101,7 @@ export function writeState(state, opts = {}) {
       renqingAvatars: state.renqingAvatars || {},
       accountCardFaces: state.accountCardFaces || {},
       accountLogos: state.accountLogos || {},
-      accountRegistry: state.accountRegistry || { overrides: {}, hidden: [], manual: [] },
+      accountRegistry: state.accountRegistry || { overrides: {}, hidden: [], manual: [], merges: {}, creditHidden: [] },
       txnPairs: state.txnPairs || [],
       stateVersion: curVer + 1
     };

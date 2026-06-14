@@ -47,8 +47,12 @@ import {
 } from './renqing.js';
 import {
   initAccounts, loadAccountsState, getAccountsState, renderAccountsPage,
-  selectFundAccount, setupAccountsEvents,
-  openAccountsMgr, closeAccountsMgr, resetAccountsMgrForm, saveAccountsMgr
+  consumeRegistryMigrationPersist,
+  setupAccountsEvents,
+  openAccountsMgr, closeAccountsMgr, resetAccountsMgrForm, saveAccountsMgr,
+  editAccountsMgr, startAccountMerge, cancelAccountMerge, confirmAccountMerge,
+  addCreditCardRow, deleteCreditCard, toggleCreditCardEditMode,
+  bindSelectedCreditCards, unbindCreditCardFromPool, dissolveCreditPoolById
 } from './accounts.js';
 
 let CATS = [...DEFAULT_CATS];
@@ -63,6 +67,7 @@ let activeSrc = 'all', refunded = new Set(), excluded = new Set(), charts = {};
 let filterUnsetSubOnly = false;
 let detRows = [], detSort = 'a-';
 let detIsIncome = false;
+let detFilterUnsetSubOnly = false;
 let detContext = null;
 let detSelectedIds = new Set();
 let nextId = 1;
@@ -394,6 +399,7 @@ async function loadData() {
     loadGearState(state);
     loadRenqingState(state);
     loadAccountsState(state);
+    if (consumeRegistryMigrationPersist()) await persistNow();
     loadTxnPairs(state);
 
     allData.forEach(r => {
@@ -943,6 +949,7 @@ function renderRfView() {
 function showAllDetail(cat) {
   detSort = 'a-';
   detIsIncome = false;
+  detFilterUnsetSubOnly = false;
   detContext = { type: 'expense', cat };
   detSelectedIds.clear();
   const ad = activeExpanded().filter(r => r['收支'] === '支出' && r['分类'] === cat);
@@ -954,12 +961,14 @@ function showAllDetail(cat) {
   renderDetailBody(ad);
   updateDetBulkBar();
   syncDetModalLayout();
+  syncDetFilterBar();
   document.getElementById('moDet').classList.remove('hide');
 }
 
 function showDetail(month, cat) {
   detSort = 'a-';
   detIsIncome = false;
+  detFilterUnsetSubOnly = false;
   detContext = { type: 'expense', month, cat };
   detSelectedIds.clear();
   const rows = activeExpanded().filter(r => r['收支'] === '支出' && r['日期'].startsWith(month) && r['分类'] === cat);
@@ -971,12 +980,14 @@ function showDetail(month, cat) {
   renderDetailBody(rows);
   updateDetBulkBar();
   syncDetModalLayout();
+  syncDetFilterBar();
   document.getElementById('moDet').classList.remove('hide');
 }
 
 function showIncomeDetail(month, cat) {
   detSort = 'a-';
   detIsIncome = true;
+  detFilterUnsetSubOnly = false;
   detContext = { type: 'income', month, cat };
   detSelectedIds.clear();
   const rows = incomeCatRows(cat).filter(r => r['日期'].startsWith(month));
@@ -991,6 +1002,29 @@ function showIncomeDetail(month, cat) {
   renderDetailBody(rows);
   updateDetBulkBar();
   syncDetModalLayout();
+  syncDetFilterBar();
+  document.getElementById('moDet').classList.remove('hide');
+}
+
+function showCatReportDetail(month, cat, sub) {
+  detSort = 'a-';
+  detIsIncome = false;
+  detFilterUnsetSubOnly = false;
+  detContext = { type: 'catreport', month, cat, sub: sub || '' };
+  detSelectedIds.clear();
+  const rows = getDetailRows();
+  const exp = rows.filter(r => r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0);
+  const inc = rows.filter(r => r['收支'] === '收入').reduce((s, r) => s + r['金额'], 0);
+  const net = inc - exp;
+  const subLabel = sub ? ` · ${sub}` : '';
+  document.getElementById('detTitle').innerHTML = `<span class="inline-cat-icon" style="margin-right:6px">${catIconHtml(cat, { size: 18 })}</span>${catLabel(cat)} · ${fmtMonthLabel(month)}${subLabel}`;
+  document.getElementById('detSummary').textContent = `共 ${fmtCount(rows.length)} 笔 · 支出 ${fmtMoney(exp)} · 收入 ${fmtMoney(inc)}`;
+  document.getElementById('detTotal').textContent = fmtMoneySigned(net);
+  document.getElementById('detTotal').style.color = net >= 0 ? 'var(--grn-t)' : 'var(--red-t)';
+  renderDetailBody(rows);
+  updateDetBulkBar();
+  syncDetModalLayout();
+  syncDetFilterBar();
   document.getElementById('moDet').classList.remove('hide');
 }
 
@@ -998,17 +1032,46 @@ function closeDetModal() {
   document.getElementById('moDet').classList.add('hide');
   document.getElementById('moDet').classList.remove('det-income');
   detSelectedIds.clear();
+  detFilterUnsetSubOnly = false;
   detContext = null;
+  syncDetFilterBar();
   updateDetBulkBar();
 }
 
 function syncDetModalLayout() {
-  document.getElementById('moDet')?.classList.toggle('det-income', !!detIsIncome);
+  const wide = !!detIsIncome || detContext?.type === 'catreport';
+  document.getElementById('moDet')?.classList.toggle('det-income', wide);
+}
+
+function syncDetFilterBar() {
+  const btn = document.getElementById('detUnsetSubFilterBtn');
+  if (!btn) return;
+  const show = detContext?.type === 'catreport';
+  btn.style.display = show ? '' : 'none';
+  btn.classList.toggle('on', !!detFilterUnsetSubOnly);
+}
+
+function toggleDetUnsetSubFilter(btn) {
+  detFilterUnsetSubOnly = !detFilterUnsetSubOnly;
+  if (btn) btn.classList.toggle('on', detFilterUnsetSubOnly);
+  else syncDetFilterBar();
+  refreshDetailModal();
+}
+
+function detShowsTypeCol() {
+  return detIsIncome || detContext?.type === 'catreport';
 }
 
 function getDetailRows() {
   if (!detContext) return detRows;
   const ad = activeExpanded();
+  if (detContext.type === 'catreport') {
+    const { month, cat, sub } = detContext;
+    let rows = ad.filter(r => r['分类'] === cat && r['日期'].startsWith(month));
+    if (sub) rows = rows.filter(r => (r['子分类'] || '未分类') === sub);
+    if (detFilterUnsetSubOnly) rows = rows.filter(r => rowHasUnsetSub(r, subcatsFor));
+    return rows;
+  }
   if (detContext.type === 'income') {
     const { month, cat } = detContext;
     const match = r => r['分类'] === cat && r['日期'].startsWith(month);
@@ -1023,13 +1086,22 @@ function getDetailRows() {
 function refreshDetailModal() {
   if (!detContext || document.getElementById('moDet').classList.contains('hide')) return;
   const rows = getDetailRows();
-  const netted = detContext.type === 'income' && incomeCatIsNetted(detContext.cat);
-  const total = netted ? incomeCatNet(rows) : rows.reduce((s, r) => s + r['金额'], 0);
-  const typeLabel = detIsIncome ? (netted ? '（含对冲支出）' : '收入') : '支出';
-  document.getElementById('detSummary').textContent = `共 ${fmtCount(rows.length)} 笔${typeLabel}`;
-  document.getElementById('detTotal').textContent = netted ? fmtMoneySigned(total) : fmtMoney(total);
-  if (detIsIncome) {
-    document.getElementById('detTotal').style.color = total >= 0 ? 'var(--grn-t)' : 'var(--red-t)';
+  if (detContext.type === 'catreport') {
+    const exp = rows.filter(r => r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0);
+    const inc = rows.filter(r => r['收支'] === '收入').reduce((s, r) => s + r['金额'], 0);
+    const net = inc - exp;
+    document.getElementById('detSummary').textContent = `共 ${fmtCount(rows.length)} 笔 · 支出 ${fmtMoney(exp)} · 收入 ${fmtMoney(inc)}`;
+    document.getElementById('detTotal').textContent = fmtMoneySigned(net);
+    document.getElementById('detTotal').style.color = net >= 0 ? 'var(--grn-t)' : 'var(--red-t)';
+  } else {
+    const netted = detContext.type === 'income' && incomeCatIsNetted(detContext.cat);
+    const total = netted ? incomeCatNet(rows) : rows.reduce((s, r) => s + r['金额'], 0);
+    const typeLabel = detIsIncome ? (netted ? '（含对冲支出）' : '收入') : '支出';
+    document.getElementById('detSummary').textContent = `共 ${fmtCount(rows.length)} 笔${typeLabel}`;
+    document.getElementById('detTotal').textContent = netted ? fmtMoneySigned(total) : fmtMoney(total);
+    if (detIsIncome) {
+      document.getElementById('detTotal').style.color = total >= 0 ? 'var(--grn-t)' : 'var(--red-t)';
+    }
   }
   renderDetailBody(rows);
   updateDetBulkBar();
@@ -1071,8 +1143,10 @@ function renderDetailBody(rows) {
   const sorted = sortDetRows(detRows);
   const amtSortIcon = detSort === 'a-' ? '↓' : '↑';
   const allChecked = sorted.length > 0 && sorted.every(r => detSelectedIds.has(r.id));
-  const incomeCols = detIsIncome ? ' det-cols-income' : '';
-  const typeHdr = detIsIncome ? '<div class="det-th det-th-type">收支</div>' : '';
+  const showTypeCol = detShowsTypeCol();
+  const signedAmt = showTypeCol;
+  const incomeCols = showTypeCol ? ' det-cols-income' : '';
+  const typeHdr = showTypeCol ? '<div class="det-th det-th-type">收支</div>' : '';
   el.innerHTML = `
     <div class="det-head det-cols det-cols-actions${incomeCols}">
       <div class="det-th det-th-check"><input type="checkbox" class="cb" id="detSelAll" ${allChecked ? 'checked' : ''} onchange="toggleDetSelectAll(this)"></div>
@@ -1090,12 +1164,12 @@ function renderDetailBody(rows) {
       const showDesc = d && d !== '/' && d !== p;
       const isR = r['退款状态'] === 'refunded';
       const isSel = detSelectedIds.has(r.id);
-      const typeCell = detIsIncome
+      const typeCell = showTypeCol
         ? `<div class="det-type">${typeBadge(r['收支'], r['退款状态'], r['分类'])}</div>`
         : '';
       const isInc = r['收支'] === '收入';
-      const amtCls = detIsIncome ? (isInc ? ' det-amt-inc' : ' det-amt-exp') : '';
-      const amtTxt = detIsIncome
+      const amtCls = signedAmt ? (isInc ? ' det-amt-inc' : ' det-amt-exp') : '';
+      const amtTxt = signedAmt
         ? `${isInc ? '+' : '-'}¥${r['金额'].toFixed(2)}`
         : `¥${r['金额'].toFixed(2)}`;
       return `<div class="det-row det-cols det-cols-actions${incomeCols}${i % 2 ? ' alt' : ''}${isSel ? ' selected' : ''}">
@@ -1367,6 +1441,343 @@ function catReportSubcatSum(rows, sub, type) {
     .reduce((s, r) => s + r['金额'], 0);
 }
 
+function catReportSubMonthPair(catRows, month, sub) {
+  const rows = catRows.filter(r =>
+    r['日期'].startsWith(month) && (r['子分类'] || '未分类') === sub
+  );
+  return {
+    exp: rows.filter(r => r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0),
+    inc: rows.filter(r => r['收支'] === '收入').reduce((s, r) => s + r['金额'], 0)
+  };
+}
+
+function catReportAllSubcats(expSubcats, incSubcats) {
+  const seen = new Set();
+  const list = [];
+  [...expSubcats, ...incSubcats].forEach(s => {
+    if (!seen.has(s)) { seen.add(s); list.push(s); }
+  });
+  return list;
+}
+
+function catReportStackSliceAt(chart, dataIndex) {
+  const pick = k => +(chart.data.datasets.find(d => d._kind === k)?.data[dataIndex] ?? 0);
+  return {
+    net: pick('exp'),
+    offset: pick('inc-offset'),
+    surplus: pick('inc-surplus'),
+    incOnly: pick('inc')
+  };
+}
+
+function catReportStackSlice(ctx) {
+  return catReportStackSliceAt(ctx.chart, ctx.dataIndex);
+}
+
+function catReportSlotStack(ctx) {
+  return `slot-${ctx.dataIndex}`;
+}
+
+function catReportSlotRadius(ctx, radius = 5) {
+  const { chart, datasetIndex, dataIndex } = ctx;
+  const kind = chart.data.datasets[datasetIndex]._kind;
+  const slice = catReportStackSliceAt(chart, dataIndex);
+  const layers = [];
+  if (slice.net > 0) layers.push('exp');
+  if (slice.offset > 0) layers.push('inc-offset');
+  if (slice.surplus > 0) layers.push('inc-surplus');
+  if (slice.incOnly > 0) layers.push('inc');
+  const idx = layers.indexOf(kind);
+  if (idx < 0) return 0;
+  return {
+    topLeft: idx === layers.length - 1 ? radius : 0,
+    topRight: idx === layers.length - 1 ? radius : 0,
+    bottomLeft: idx === 0 ? radius : 0,
+    bottomRight: idx === 0 ? radius : 0
+  };
+}
+
+function catReportBarOpts(radius) {
+  return {
+    stack: catReportSlotStack,
+    borderRadius: ctx => catReportSlotRadius(ctx, radius),
+    borderSkipped: false,
+    barPercentage: 0.85,
+    categoryPercentage: 0.72,
+    maxBarThickness: 42
+  };
+}
+
+const CAT_REPORT_HOLLOW_LW = 2;
+const CAT_REPORT_HOLLOW_R = 5;
+
+/** 手绘镂空框，避免 Chart.js 边框在衔接处留下黑线 */
+const catReportHollowBarPlugin = {
+  id: 'catReportHollowBar',
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart;
+    const slots = chart.options._catReportSlots || [];
+    chart.data.datasets.forEach((ds, dsIndex) => {
+      if (ds._kind !== 'inc-offset') return;
+      const meta = chart.getDatasetMeta(dsIndex);
+      if (meta.hidden) return;
+
+      meta.data.forEach((bar, index) => {
+        if (!bar || bar.skip || !ds.data[index]) return;
+
+        const slot = slots[index];
+        const color = slot
+          ? EXPENSE_SUB_COLORS[slot.si % EXPENSE_SUB_COLORS.length]
+          : '#FDA4AF';
+        const { net, surplus } = catReportStackSliceAt(chart, index);
+
+        const { x, y, base, width } = bar;
+        const left = x - width / 2;
+        const right = x + width / 2;
+        const top = Math.min(y, base);
+        const bottom = Math.max(y, base);
+        const topRounded = surplus <= 0;
+        const radius = topRounded ? CAT_REPORT_HOLLOW_R : 0;
+
+        const half = CAT_REPORT_HOLLOW_LW / 2;
+        const xL = left + half;
+        const xR = right - half;
+        const yT = top + half;
+        const yJoin = net > 0 ? bottom + 1 : bottom - half;
+        const r = topRounded ? Math.min(radius, (xR - xL) / 2, (yJoin - yT) / 2) : 0;
+        const fillColor = color;
+
+        ctx.save();
+        if (net > 0) {
+          ctx.fillStyle = fillColor;
+          ctx.fillRect(left, bottom - 1, width, 2);
+        }
+        ctx.strokeStyle = color;
+        ctx.lineWidth = CAT_REPORT_HOLLOW_LW;
+        ctx.lineCap = 'butt';
+        ctx.lineJoin = 'miter';
+        ctx.beginPath();
+
+        if (net <= 0) {
+          const yB = bottom - half;
+          if (r > 0) {
+            ctx.moveTo(xL, yB);
+            ctx.lineTo(xL, yT + r);
+            ctx.arcTo(xL, yT, xL + r, yT, r);
+            ctx.lineTo(xR - r, yT);
+            ctx.arcTo(xR, yT, xR, yT + r, r);
+            ctx.lineTo(xR, yB);
+            ctx.closePath();
+          } else {
+            ctx.rect(xL, yT, xR - xL, yB - yT);
+          }
+        } else if (r > 0) {
+          ctx.moveTo(xL, yJoin);
+          ctx.lineTo(xL, yT + r);
+          ctx.arcTo(xL, yT, xL + r, yT, r);
+          ctx.lineTo(xR - r, yT);
+          ctx.arcTo(xR, yT, xR, yT + r, r);
+          ctx.lineTo(xR, yJoin);
+        } else {
+          ctx.moveTo(xL, yJoin);
+          ctx.lineTo(xL, yT);
+          ctx.lineTo(xR, yT);
+          ctx.lineTo(xR, yJoin);
+        }
+
+        ctx.stroke();
+        ctx.restore();
+      });
+    });
+  }
+};
+
+/** 柱顶显示总金额 */
+const catReportBarValueLabelsPlugin = {
+  id: 'catReportBarValueLabels',
+  afterDatasetsDraw(chart) {
+    const { ctx } = chart;
+    const expDs = chart.data.datasets.find(d => d._kind === 'exp');
+    if (!expDs) return;
+    const meta = chart.getDatasetMeta(chart.data.datasets.indexOf(expDs));
+
+    meta.data.forEach((bar, index) => {
+      if (!bar || bar.skip) return;
+
+      let total = 0;
+      let topY = bar.y;
+      chart.data.datasets.forEach((ds, dsIndex) => {
+        const v = ds.data[index];
+        if (!(v > 0)) return;
+        total += v;
+        const b = chart.getDatasetMeta(dsIndex).data[index];
+        if (b && !b.skip) topY = Math.min(topY, b.y);
+      });
+      if (!total) return;
+
+      const text = fmtMoney(total, { integer: total >= 1000 });
+      ctx.save();
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.font = '600 10px system-ui, -apple-system, "PingFang SC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(text, bar.x, topY - 5);
+      ctx.restore();
+    });
+  }
+};
+
+function catReportSubHasMonthData(catRows, month, sub) {
+  const { exp, inc } = catReportSubMonthPair(catRows, month, sub);
+  return exp > 0 || inc > 0;
+}
+
+function catReportSubChartSlots(months, catRows, sub, si) {
+  return months.map(m => {
+    const { exp, inc } = catReportSubMonthPair(catRows, m, sub);
+    return { month: m, sub, si, exp, inc };
+  });
+}
+
+function catReportBuildSubChartDatasets(months, catRows, sub, si) {
+  const n = months.length;
+  const expData = new Array(n).fill(null);
+  const offsetData = new Array(n).fill(null);
+  const surplusData = new Array(n).fill(null);
+  const incData = new Array(n).fill(null);
+
+  months.forEach((m, i) => {
+    const { exp, inc } = catReportSubMonthPair(catRows, m, sub);
+    if (exp <= 0 && inc <= 0) return;
+    if (exp > 0 && inc > 0) {
+      expData[i] = +Math.max(0, exp - inc).toFixed(2);
+      offsetData[i] = +Math.min(inc, exp).toFixed(2);
+      const surplus = +Math.max(0, inc - exp).toFixed(2);
+      if (surplus > 0) surplusData[i] = surplus;
+    } else if (exp > 0) {
+      expData[i] = +exp.toFixed(2);
+    } else if (inc > 0) {
+      incData[i] = +inc.toFixed(2);
+    }
+  });
+
+  const barOpts = catReportBarOpts(5);
+  const expColor = EXPENSE_SUB_COLORS[si % EXPENSE_SUB_COLORS.length];
+  const incColor = INCOME_SUB_COLORS[si % INCOME_SUB_COLORS.length];
+
+  return [
+    {
+      label: '支出',
+      data: expData,
+      backgroundColor: expColor,
+      _kind: 'exp',
+      ...barOpts
+    },
+    {
+      label: '收入抵扣',
+      data: offsetData,
+      backgroundColor: 'rgba(0,0,0,0)',
+      hoverBackgroundColor: 'rgba(0,0,0,0)',
+      borderWidth: 0,
+      borderRadius: 0,
+      _kind: 'inc-offset',
+      stack: catReportSlotStack,
+      borderSkipped: false,
+      barPercentage: 0.85,
+      categoryPercentage: 0.72,
+      maxBarThickness: 42
+    },
+    {
+      label: '盈余收入',
+      data: surplusData,
+      backgroundColor: incColor,
+      _kind: 'inc-surplus',
+      ...barOpts
+    },
+    {
+      label: '收入',
+      data: incData,
+      backgroundColor: incColor,
+      _kind: 'inc',
+      ...barOpts
+    }
+  ];
+}
+
+function destroyCatReportCharts() {
+  if (!charts.catReport) {
+    charts.catReport = {};
+    return;
+  }
+  if (typeof charts.catReport.destroy === 'function') {
+    charts.catReport.destroy();
+  } else {
+    Object.values(charts.catReport).forEach(c => c?.destroy?.());
+  }
+  charts.catReport = {};
+}
+
+function catReportSubChartKey(sub) {
+  return sub.replace(/[^\w\u4e00-\u9fff-]/g, '_');
+}
+
+function renderCatReportSubCharts(months, catRows, cat, allSubcats, expSet, incSet) {
+  const wrap = document.getElementById('catReportSubCharts');
+  if (!wrap) return;
+
+  destroyCatReportCharts();
+
+  if (!months.length) {
+    wrap.innerHTML = '<div class="catreport-sub-charts-empty">该分类暂无月度数据</div>';
+    return;
+  }
+
+  const activeSubcats = allSubcats.filter(sub =>
+    months.some(m => catReportSubHasMonthData(catRows, m, sub))
+  );
+
+  if (!activeSubcats.length) {
+    wrap.innerHTML = '<div class="catreport-sub-charts-empty">该分类暂无子分类数据</div>';
+    return;
+  }
+
+  wrap.innerHTML = activeSubcats.map(sub => {
+    const si = allSubcats.indexOf(sub);
+    const expColor = EXPENSE_SUB_COLORS[si % EXPENSE_SUB_COLORS.length];
+    const incColor = INCOME_SUB_COLORS[si % INCOME_SUB_COLORS.length];
+    const hasBoth = expSet.has(sub) && incSet.has(sub);
+    const badges = hasBoth
+      ? '<span class="catreport-sub-row-badges"><span class="catreport-leg-dot" style="background:' + expColor + '"></span>净支出 <span class="catreport-leg-dot hollow" style="border-color:' + expColor + '"></span>收入抵扣</span>'
+      : (expSet.has(sub)
+        ? '<span class="catreport-sub-row-badges">支出</span>'
+        : '<span class="catreport-sub-row-badges">收入</span>');
+    const key = catReportSubChartKey(sub);
+    return `<section class="catreport-sub-row">
+      <div class="catreport-sub-row-head">
+        <span class="catreport-leg-dot" style="background:${expSet.has(sub) ? expColor : incColor}"></span>
+        <span class="catreport-sub-row-title">${sub}</span>
+        ${badges}
+      </div>
+      <div class="catreport-sub-row-chart"><canvas id="catSubChart-${key}" data-sub="${sub}"></canvas></div>
+    </section>`;
+  }).join('');
+
+  activeSubcats.forEach(sub => {
+    const si = allSubcats.indexOf(sub);
+    const canvas = document.getElementById(`catSubChart-${catReportSubChartKey(sub)}`);
+    if (!canvas) return;
+    const datasets = catReportBuildSubChartDatasets(months, catRows, sub, si);
+    const chartOpts = catReportChartOptions(months, cat, sub);
+    chartOpts._catReportSlots = catReportSubChartSlots(months, catRows, sub, si);
+    charts.catReport[sub] = new Chart(canvas, {
+      type: 'bar',
+      data: { labels: months.map(fmtMonthLabel), datasets },
+      options: chartOpts,
+      plugins: [catReportHollowBarPlugin, catReportBarValueLabelsPlugin]
+    });
+  });
+}
+
 function populateCatReportSelect() {
   const sel = document.getElementById('catReportSel');
   if (!sel) return;
@@ -1380,139 +1791,13 @@ function onCatReportChange() {
   renderCatReport();
 }
 
-function catReportSparkLabels(months) {
-  const multiYear = new Set(months.map(m => m.slice(0, 4))).size > 1;
-  return months.map(m => {
-    const mo = parseInt(m.split('-')[1], 10);
-    return multiYear ? `${m.slice(2, 4)}/${mo}` : `${mo}`;
-  });
-}
-
-function catReportSparkOptions() {
+function catReportChartOptions(months, cat, sub) {
   return {
     responsive: true,
     maintainAspectRatio: false,
-    layout: { padding: { top: 4, bottom: 0, left: 0, right: 0 } },
-    plugins: { legend: { display: false }, tooltip: { enabled: false } },
-    scales: {
-      x: { display: false, grid: { display: false } },
-      y: { display: false, beginAtZero: true, grid: { display: false } }
-    },
-    animation: { duration: 350 }
-  };
-}
-
-function catReportSubMonthValues(catRows, months, sub, type) {
-  return months.map(m =>
-    +catReportSubcatSum(catRows.filter(r => r['日期'].startsWith(m)), sub, type).toFixed(2)
-  );
-}
-
-function catReportSubChangeBadge(values) {
-  if (values.length < 2) return { html: '', cls: 'flat' };
-  const last = values[values.length - 1];
-  const prev = values[values.length - 2];
-  const diff = last - prev;
-  if (!last && !prev) return { html: '<span class="catreport-sub-change flat">—</span>', cls: 'flat' };
-  if (diff === 0) return { html: '<span class="catreport-sub-change flat">持平 →</span>', cls: 'flat' };
-  const up = diff > 0;
-  const cls = up ? 'up' : 'down';
-  const arrow = up ? '↗' : '↘';
-  return {
-    html: `<span class="catreport-sub-change ${cls}">${fmtMoneySigned(diff)} ${arrow}</span>`,
-    cls
-  };
-}
-
-function renderCatReportSubTrends(months, catRows, expSubcats, incSubcats) {
-  const wrap = document.getElementById('catReportSubTrends');
-  if (!wrap) return;
-
-  if (charts.catReportSubs) Object.values(charts.catReportSubs).forEach(c => c?.destroy?.());
-  charts.catReportSubs = {};
-
-  if (!months.length) {
-    wrap.innerHTML = '<div class="catreport-sub-empty">暂无子分类月度数据</div>';
-    return;
-  }
-
-  const items = [];
-  expSubcats.forEach((sub, si) => {
-    items.push({ sub, type: '支出', stack: 'exp', color: EXPENSE_SUB_COLORS[si % EXPENSE_SUB_COLORS.length] });
-  });
-  incSubcats.forEach((sub, si) => {
-    items.push({ sub, type: '收入', stack: 'inc', color: INCOME_SUB_COLORS[si % INCOME_SUB_COLORS.length] });
-  });
-
-  if (!items.length) {
-    wrap.innerHTML = '<div class="catreport-sub-empty">该分类暂无子分类数据</div>';
-    return;
-  }
-
-  const lastMonth = months[months.length - 1];
-  const sorted = [...items].sort((a, b) => {
-    const av = catReportSubcatSum(catRows.filter(r => r['日期'].startsWith(lastMonth)), a.sub, a.type);
-    const bv = catReportSubcatSum(catRows.filter(r => r['日期'].startsWith(lastMonth)), b.sub, b.type);
-    return bv - av || a.type.localeCompare(b.type, 'zh') || a.sub.localeCompare(b.sub, 'zh-CN');
-  });
-
-  wrap.innerHTML = sorted.map((item, i) => {
-    const key = `${item.stack}-${item.sub}`.replace(/[^\w\u4e00-\u9fff-]/g, '_');
-    const typeCls = item.type === '支出' ? 'exp' : 'inc';
-    return `<article class="catreport-sub-card">
-      <div class="catreport-sub-card-main">
-        <div class="catreport-sub-card-label">
-          <span class="catreport-sub-type ${typeCls}">${item.type}</span>
-          <span>${item.sub}</span>
-        </div>
-        <div class="catreport-sub-card-value" id="catSubVal-${i}" style="color:${item.color}"></div>
-        <div class="catreport-sub-card-foot">
-          <span id="catSubChg-${i}"></span>
-          <span class="catreport-sub-period">${fmtMonthLabel(lastMonth)}</span>
-        </div>
-      </div>
-      <div class="catreport-sub-spark"><canvas id="catSubSpark-${i}" data-key="${key}"></canvas></div>
-    </article>`;
-  }).join('');
-
-  sorted.forEach((item, i) => {
-    const values = catReportSubMonthValues(catRows, months, item.sub, item.type);
-    const lastVal = values[values.length - 1] || 0;
-    const valEl = document.getElementById(`catSubVal-${i}`);
-    if (valEl) valEl.textContent = fmtMoney(lastVal, { integer: lastVal >= 1000 });
-
-    const chgEl = document.getElementById(`catSubChg-${i}`);
-    if (chgEl) chgEl.innerHTML = catReportSubChangeBadge(values).html;
-
-    const canvas = document.getElementById(`catSubSpark-${i}`);
-    if (!canvas) return;
-    const hi = values.length - 1;
-    const datasets = [{
-      data: values,
-      backgroundColor: values.map((v, idx) =>
-        idx === hi && v > 0 ? item.color : 'rgba(148,163,184,0.22)'
-      ),
-      borderRadius: 4,
-      borderSkipped: false,
-      barPercentage: 0.82,
-      categoryPercentage: 0.9,
-      maxBarThickness: 14
-    }];
-
-    const chartKey = canvas.dataset.key || `sub-${i}`;
-    charts.catReportSubs[chartKey] = new Chart(canvas, {
-      type: 'bar',
-      data: { labels: catReportSparkLabels(months), datasets },
-      options: catReportSparkOptions()
-    });
-  });
-}
-
-function catReportChartOptions(months, cat) {
-  return {
-    responsive: true,
-    maintainAspectRatio: false,
+    layout: { padding: { top: 20 } },
     interaction: { mode: 'index', intersect: false },
+    _catReportSub: sub,
     plugins: {
       legend: { display: false },
       tooltip: {
@@ -1524,27 +1809,74 @@ function catReportChartOptions(months, cat) {
         borderWidth: 1,
         padding: 12,
         displayColors: true,
+        usePointStyle: true,
         boxPadding: 4,
         callbacks: {
           ...chartMoneyTooltip.callbacks,
+          title(tooltipItems) {
+            const chart = tooltipItems[0]?.chart;
+            const idx = tooltipItems[0]?.dataIndex;
+            const slot = chart?.options?._catReportSlots?.[idx];
+            const month = slot?.month || months[idx];
+            return month ? fmtMonthLabel(month) : (tooltipItems[0]?.label || '');
+          },
+          label(ctx) {
+            const v = ctx.parsed?.y ?? 0;
+            if (!v) return null;
+            const prefix = ctx.dataset?.label ? `${ctx.dataset.label}: ` : '';
+            return prefix + fmtMoney(v);
+          },
+          labelColor(ctx) {
+            if (ctx.dataset._kind === 'inc-offset') {
+              const slot = ctx.chart?.options?._catReportSlots?.[ctx.dataIndex];
+              const c = slot
+                ? EXPENSE_SUB_COLORS[slot.si % EXPENSE_SUB_COLORS.length]
+                : '#FDA4AF';
+              return {
+                borderColor: c,
+                backgroundColor: 'rgba(0,0,0,0)',
+                borderWidth: 2,
+                pointStyle: 'circle'
+              };
+            }
+            const bg = ctx.dataset.backgroundColor;
+            return {
+              borderColor: bg,
+              backgroundColor: bg,
+              borderWidth: 0,
+              pointStyle: 'circle'
+            };
+          },
           footer(items) {
-            const exp = items.filter(i => i.dataset._kind === 'exp').reduce((s, i) => s + (i.parsed?.y || 0), 0);
-            const inc = items.filter(i => i.dataset._kind === 'inc').reduce((s, i) => s + (i.parsed?.y || 0), 0);
+            const exp = items
+              .filter(i => i.dataset._kind === 'exp' || i.dataset._kind === 'inc-offset')
+              .reduce((s, i) => s + (i.parsed?.y || 0), 0);
+            const inc = items
+              .filter(i => i.dataset._kind === 'inc' || i.dataset._kind === 'inc-offset' || i.dataset._kind === 'inc-surplus')
+              .reduce((s, i) => s + (i.parsed?.y || 0), 0);
             if (!exp && !inc) return '';
-            const net = inc - exp;
-            return `净额 ${fmtMoneySigned(net)}`;
+            return `净额 ${fmtMoneySigned(inc - exp)}`;
           }
+        },
+        filter(item) {
+          return (item.parsed?.y ?? 0) > 0;
         }
       }
     },
     scales: {
       x: {
-        stacked: false,
+        stacked: true,
         grid: { color: 'rgba(255,255,255,0.06)' },
-        ticks: { color: 'rgba(255,255,255,0.55)', font: { size: 11 }, maxRotation: 45 }
+        ticks: {
+          color: 'rgba(255,255,255,0.55)',
+          font: { size: 10 },
+          maxRotation: 0,
+          autoSkip: true,
+          maxTicksLimit: 12
+        }
       },
       y: {
-        stacked: false,
+        stacked: true,
         beginAtZero: true,
         grid: { color: 'rgba(255,255,255,0.08)' },
         ticks: { color: 'rgba(255,255,255,0.55)', callback: fmtChartAxis }
@@ -1556,14 +1888,52 @@ function catReportChartOptions(months, cat) {
       if (!hit.length) return;
       const el = hit[0];
       const month = months[el.index];
-      const kind = chart.data.datasets[el.datasetIndex]?._kind;
-      if (kind === 'inc') showIncomeDetail(month, cat);
-      else showDetail(month, cat);
+      const subName = chart.options._catReportSub || sub || '';
+      if (month) showCatReportDetail(month, cat, subName);
     },
     onHover(evt, elements) {
       evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
     }
   };
+}
+
+function catReportSubKpiCard(sub, exp, inc, color) {
+  const net = inc - exp;
+  const valCls = net >= 0 ? 'c-grn' : 'c-red';
+  const subLine = inc > 0
+    ? `支出 ${fmtMoney(exp)} · 收入 ${fmtMoney(inc)}`
+    : `支出 ${fmtMoney(exp)}`;
+  return `<div class="catreport-sub-kpi">
+    <span class="catreport-sub-kpi-dot" style="background:${color}"></span>
+    <div class="catreport-sub-kpi-body">
+      <div class="catreport-sub-kpi-label">${sub}</div>
+      <div class="catreport-sub-kpi-val ${valCls}">${fmtMoneySigned(net)}</div>
+      <div class="catreport-sub-kpi-sub">${subLine}</div>
+    </div>
+  </div>`;
+}
+
+function renderCatReportSubKpis(catRows, allSubcats) {
+  const items = allSubcats
+    .map((sub, si) => {
+      const exp = catRows.filter(r => r['收支'] === '支出' && (r['子分类'] || '未分类') === sub)
+        .reduce((s, r) => s + r['金额'], 0);
+      const inc = catRows.filter(r => r['收支'] === '收入' && (r['子分类'] || '未分类') === sub)
+        .reduce((s, r) => s + r['金额'], 0);
+      if (!exp && !inc) return null;
+      const color = EXPENSE_SUB_COLORS[si % EXPENSE_SUB_COLORS.length];
+      return { sub, exp, inc, color, net: inc - exp };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.exp - a.exp || b.inc - a.inc);
+
+  const kpiEl = document.getElementById('catReportKpi');
+  if (!kpiEl) return;
+  if (!items.length) {
+    kpiEl.innerHTML = '<div class="catreport-sub-kpi-empty">暂无子分类数据</div>';
+    return;
+  }
+  kpiEl.innerHTML = items.map(it => catReportSubKpiCard(it.sub, it.exp, it.inc, it.color)).join('');
 }
 
 function renderCatReport() {
@@ -1574,32 +1944,19 @@ function renderCatReport() {
   const catRows = catReportRows(cat);
   const months = [...new Set(catRows.map(r => r['日期'].slice(0, 7)))].sort();
   const titleEl = document.getElementById('catReportChartTitle');
-  if (titleEl) titleEl.textContent = `${catLabel(cat)} · 每月各子分类收支对比`;
-
-  const totalExp = catRows.filter(r => r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0);
-  const totalInc = catRows.filter(r => r['收支'] === '收入').reduce((s, r) => s + r['金额'], 0);
-  const totalNet = totalInc - totalExp;
-
-  const kpiEl = document.getElementById('catReportKpi');
-  if (kpiEl) {
-    kpiEl.innerHTML = [
-      kpiCard('累计支出', fmtMoney(totalExp), `${months.length} 个月`, 'ti-arrow-down-right', 'pink', 'c-red'),
-      kpiCard('累计收入', fmtMoney(totalInc), `${months.length} 个月`, 'ti-arrow-up-right', 'green', 'c-grn'),
-      kpiCard('净额', fmtMoneySigned(totalNet), totalNet >= 0 ? '收入大于支出' : '支出大于收入', 'ti-scale', 'blue', totalNet >= 0 ? 'c-blu' : 'c-red')
-    ].join('');
-  }
+  if (titleEl) titleEl.textContent = `${catLabel(cat)} · 各子分类月度收支`;
 
   const expSubcats = catReportSubcats(cat, catRows, '支出');
   const incSubcats = catReportSubcats(cat, catRows, '收入');
+  const allSubcats = catReportAllSubcats(expSubcats, incSubcats);
+  const expSet = new Set(expSubcats);
+  const incSet = new Set(incSubcats);
+
+  renderCatReportSubKpis(catRows, allSubcats);
+
   const legEl = document.getElementById('catReportLeg');
   if (legEl) {
-    const expLeg = expSubcats.map((sub, si) =>
-      `<span class="catreport-leg-item"><span class="catreport-leg-dot" style="background:${EXPENSE_SUB_COLORS[si % EXPENSE_SUB_COLORS.length]}"></span>支出·${sub}</span>`
-    ).join('');
-    const incLeg = incSubcats.map((sub, si) =>
-      `<span class="catreport-leg-item"><span class="catreport-leg-dot" style="background:${INCOME_SUB_COLORS[si % INCOME_SUB_COLORS.length]}"></span>收入·${sub}</span>`
-    ).join('');
-    legEl.innerHTML = (expLeg + incLeg) || '<span>暂无子分类数据</span>';
+    legEl.innerHTML = '<span class="catreport-leg-item"><span class="catreport-leg-dot" style="background:#FDA4AF"></span>实心=净支出</span><span class="catreport-leg-item"><span class="catreport-leg-dot hollow" style="border-color:#FDA4AF"></span>镂空=收入抵扣</span>';
   }
 
   const tbody = document.getElementById('catReportTableBody');
@@ -1621,50 +1978,7 @@ function renderCatReport() {
     }
   }
 
-  if (charts.catReport) charts.catReport.destroy();
-  const ctx = document.getElementById('catReportChart');
-  if (!ctx) return;
-  renderCatReportSubTrends(months, catRows, expSubcats, incSubcats);
-
-  if (!months.length) {
-    charts.catReport = null;
-    return;
-  }
-
-  const datasets = [];
-  const barRadius = { topLeft: 5, topRight: 5, bottomLeft: 0, bottomRight: 0 };
-  expSubcats.forEach((sub, si) => {
-    datasets.push({
-      label: `支出 · ${sub}`,
-      data: months.map(m => +catReportSubcatSum(catRows.filter(r => r['日期'].startsWith(m)), sub, '支出').toFixed(2)),
-      backgroundColor: EXPENSE_SUB_COLORS[si % EXPENSE_SUB_COLORS.length],
-      _kind: 'exp',
-      borderRadius: barRadius,
-      borderSkipped: false,
-      barPercentage: 0.9,
-      categoryPercentage: 0.8
-    });
-  });
-  incSubcats.forEach((sub, si) => {
-    datasets.push({
-      label: `收入 · ${sub}`,
-      data: months.map(m => +catReportSubcatSum(catRows.filter(r => r['日期'].startsWith(m)), sub, '收入').toFixed(2)),
-      backgroundColor: INCOME_SUB_COLORS[si % INCOME_SUB_COLORS.length],
-      _kind: 'inc',
-      borderRadius: barRadius,
-      borderSkipped: false,
-      barPercentage: 0.9,
-      categoryPercentage: 0.8
-    });
-  });
-
-  if (!datasets.length) return;
-
-  charts.catReport = new Chart(ctx, {
-    type: 'bar',
-    data: { labels: months.map(fmtMonthLabel), datasets },
-    options: catReportChartOptions(months, cat)
-  });
+  renderCatReportSubCharts(months, catRows, cat, allSubcats, expSet, incSet);
 }
 
 function incomeCatIsNetted(cat) {
@@ -1910,7 +2224,7 @@ function sw(name, el) {
   document.querySelectorAll('.ni').forEach(n => n.classList.remove('on'));
   document.getElementById('view-' + name).classList.add('on');
   el.classList.add('on');
-  document.getElementById('vt').textContent = { ledger: '明细列表', catbrowse: '分类检索', catreport: '分类报表', renqing: '人情往来', accounts: '资金账户', charts: '统计图表', monitor: '统计监控', gear: '装备库', report: '收支报告', income: '收入数据', company: '公司成本', refunds: '退款管理', import: '导入预览' }[name];
+  document.getElementById('vt').textContent = { ledger: '明细列表', catbrowse: '分类检索', catreport: '分类报表', renqing: '人情往来', accounts: '信用账户', charts: '统计图表', monitor: '统计监控', gear: '装备库', report: '收支报告', income: '收入数据', company: '公司成本', refunds: '退款管理', import: '导入预览' }[name];
   if (name === 'charts') setTimeout(renderCharts, 60);
   if (name === 'report') setTimeout(renderReport, 60);
   if (name === 'income') setTimeout(renderIncomeData, 60);
@@ -2963,11 +3277,8 @@ async function initAppInner() {
   setupRenqingUpload();
   initAccounts({
     getAllRows: () => allData,
-    formatDayHeader,
-    formatTimeShort,
-    srcBadgeHtml: srcBadge,
-    rowTitle: rowDisplayTitle,
-    onPersist: persist
+    onPersist: persist,
+    persistNow: persistNow
   });
   setupAccountsEvents();
   initGear({ getAllData: () => allData, onPersist: persist });
@@ -2995,9 +3306,12 @@ Object.assign(window, {
   toggleSelect, toggleSelectAll, clearSelection, applyBulkCat, applyBulkSubCat, bulkToggleRefund,
   resetImportPreview, confirmImport, onImportSrcChange, toggleDupImport, toggleAllDupImport, resetAllLedger,
   openBatchSrc, closeBatchSrc, saveBatchSrc, onCatReportChange, selectRenqingPerson, triggerRenqingAvatarUpload,
-  updRenqingSubCat, updRenqingSplitSub, selectFundAccount,
+  updRenqingSubCat, updRenqingSplitSub,
   openAccountsMgr, closeAccountsMgr, resetAccountsMgrForm, saveAccountsMgr,
-  goP, toggleRf, toggleExclude, updCat, updSubCat, updCatDet, showAllDetail, showDetail, showIncomeDetail, closeDetModal, toggleDetSort,
+  editAccountsMgr, startAccountMerge, cancelAccountMerge, confirmAccountMerge,
+  addCreditCardRow, deleteCreditCard, toggleCreditCardEditMode,
+  bindSelectedCreditCards, unbindCreditCardFromPool, dissolveCreditPoolById,
+  goP, toggleRf, toggleExclude, updCat, updSubCat, updCatDet, showAllDetail, showDetail, showIncomeDetail, showCatReportDetail, closeDetModal, toggleDetSort, toggleDetUnsetSubFilter,
   toggleDetSelect, toggleDetSelectAll, clearDetSelection, applyDetBulkCat, applyDetBulkSubCat, detBulkToggleRefund,
   openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload,
   openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload,

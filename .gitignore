@@ -3,6 +3,7 @@ dist/
 data/*.db
 data/*.db-wal
 data/*.db-shm
+data/last-cloud-pull.json
 data/invoices/
 .DS_Store
 .env

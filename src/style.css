@@ -894,7 +894,7 @@ body{
   .renqing-txn-amt{text-align:left}
 }
 
-/* 资金账户 */
+/* 信用账户 */
 .accounts-page-head{
   display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:4px;
 }
@@ -907,6 +907,187 @@ body{
 }
 .accounts-settings-btn:hover{background:var(--surf3);border-color:var(--primary-l);color:var(--primary-t)}
 .accounts-settings-btn:active{transform:scale(.96)}
+.accounts-toolbar{margin-bottom:14px}
+.accounts-sel-label{
+  display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--txt2);
+}
+.accounts-sel-label select{
+  min-width:220px;padding:8px 10px;border:1px solid var(--bdr);border-radius:var(--r);
+  background:var(--surf);font:inherit;font-size:13px;color:var(--txt);
+}
+.accounts-credit-timeline-card{margin-bottom:14px}
+.accounts-credit-timeline-head{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;
+}
+.accounts-credit-timeline-head .ct{margin-bottom:0}
+.accounts-credit-timeline-hint{font-size:11.5px;color:var(--txt3)}
+.credit-tl-wrap{position:relative;padding:8px 0 4px}
+.credit-tl-today-global{
+  position:absolute;top:36px;bottom:8px;left:calc(168px + (100% - 168px) * var(--today-pct) / 100);
+  width:0;transform:translateX(-50%);z-index:3;pointer-events:none;
+}
+.credit-tl-today-global .credit-tl-today-line{
+  position:absolute;left:0;top:0;bottom:0;width:2px;transform:translateX(-50%);
+  background:var(--red);border-radius:1px;box-shadow:0 0 0 2px rgba(239,68,68,.15);
+}
+.credit-tl-axis{
+  position:relative;height:28px;margin:0 0 8px 168px;border-bottom:1px solid var(--bdr2);z-index:2;
+}
+.credit-tl-tick{
+  position:absolute;bottom:0;transform:translateX(-50%);font-size:10px;color:var(--txt3);
+  white-space:nowrap;padding-bottom:6px;
+}
+.credit-tl-tick::after{
+  content:'';position:absolute;left:50%;bottom:0;width:1px;height:5px;background:var(--bdr2);
+  transform:translateX(-50%);
+}
+.credit-tl-today{
+  position:absolute;top:-4px;bottom:-8px;transform:translateX(-50%);z-index:4;pointer-events:none;
+}
+.credit-tl-today-label{
+  position:absolute;top:-18px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:700;
+  color:var(--red-t);white-space:nowrap;background:var(--surf);padding:0 4px;
+}
+.credit-tl-legend{
+  display:flex;gap:14px;flex-wrap:wrap;margin:0 0 10px 168px;font-size:11px;color:var(--txt3);
+}
+.credit-tl-legend-dot{
+  display:inline-block;width:2px;height:12px;border-radius:1px;margin-right:6px;vertical-align:-2px;
+}
+.credit-tl-legend-dot.bill{background:var(--amb)}
+.credit-tl-legend-dot.due{background:var(--red)}
+.credit-tl-legend-dot.free{background:linear-gradient(90deg,var(--grn-bg),var(--grn))}
+.credit-tl-groups{display:flex;flex-direction:column;gap:12px}
+.credit-tl-group{display:flex;flex-direction:column;gap:6px}
+.credit-tl-group-name{
+  font-size:12px;font-weight:700;color:var(--txt2);padding-left:4px;margin-bottom:2px;
+}
+.credit-tl-row{display:flex;align-items:center;gap:10px;min-height:36px}
+.credit-tl-label{
+  width:158px;flex-shrink:0;display:flex;align-items:center;gap:6px;min-width:0;
+}
+.credit-tl-label .fund-brand-logo,.credit-tl-label .fund-brand-mark{flex-shrink:0;border-radius:5px}
+.credit-tl-name{
+  font-size:12px;font-weight:600;color:var(--txt);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.credit-tl-last4{font-size:10px;color:var(--txt3);font-variant-numeric:tabular-nums;flex-shrink:0}
+.credit-tl-track{
+  position:relative;flex:1;height:32px;background:var(--surf2);border-radius:8px;border:1px solid var(--bdr);overflow:visible;
+}
+.credit-tl-bar{
+  position:absolute;top:6px;height:20px;border-radius:6px;overflow:hidden;min-width:24px;z-index:1;
+}
+.credit-tl-bar-fill{
+  display:block;width:100%;height:100%;
+  background:linear-gradient(90deg,rgba(34,197,94,.22),rgba(34,197,94,.42));
+  border:1px solid rgba(34,197,94,.35);
+  border-radius:6px;
+}
+.credit-tl-bar-text{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:600;color:var(--grn-t);padding:0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.credit-tl-mark{
+  position:absolute;top:4px;bottom:4px;width:2px;border-radius:1px;transform:translateX(-50%);z-index:2;
+}
+.credit-tl-mark--cur{width:3px;z-index:3;box-shadow:0 0 0 2px var(--surf),0 0 0 3px rgba(15,23,42,.08)}
+.credit-tl-mark--bill{background:var(--amb)}
+.credit-tl-mark--due{background:var(--red)}
+.credit-tl-row--empty .credit-tl-track{display:flex;align-items:center;justify-content:center}
+.credit-tl-missing{font-size:11px;color:var(--txt3)}
+@media(max-width:768px){
+  .credit-tl-axis,.credit-tl-legend{margin-left:0}
+  .credit-tl-today-global{left:calc((100% - 0px) * var(--today-pct) / 100)}
+  .credit-tl-row{flex-direction:column;align-items:stretch;gap:4px}
+  .credit-tl-label{width:auto}
+}
+.accounts-credit-card{margin-bottom:16px}
+.accounts-credit-head{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px;
+}
+.accounts-credit-head .ct{margin-bottom:0}
+.accounts-credit-head-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.accounts-credit-cnt{
+  font-size:11px;font-weight:600;color:var(--amb-t);background:var(--amb-bg);
+  padding:1px 7px;border-radius:99px;margin-left:4px;vertical-align:middle;
+}
+.accounts-credit-hint{font-size:11.5px;color:var(--txt3)}
+.accounts-credit-groups{display:flex;flex-direction:column;gap:16px}
+.accounts-credit-group-head{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;
+}
+.accounts-credit-group-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.accounts-credit-group-title{
+  font-size:14px;font-weight:700;color:var(--txt);display:flex;align-items:center;gap:6px;margin:0;
+}
+.accounts-credit-group-cnt{
+  font-size:11px;font-weight:600;color:var(--primary-t);background:var(--primary-bg);
+  padding:1px 7px;border-radius:99px;
+}
+.accounts-credit-group-empty{
+  text-align:center;font-size:12.5px;color:var(--txt3);padding:14px 10px!important;
+}
+.accounts-credit-empty{
+  font-size:13px;color:var(--txt3);text-align:center;padding:20px 12px;line-height:1.55;
+}
+.accounts-credit-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.accounts-credit-table{min-width:820px}
+.accounts-credit-table td{padding:6px 10px;vertical-align:middle}
+.accounts-credit-table th:nth-child(n+3):not(:last-child),
+.accounts-credit-table td:nth-child(n+3):not(:last-child){text-align:right}
+.accounts-credit-table th:last-child,.accounts-credit-table td:last-child{text-align:center;width:72px}
+.accounts-credit-actions{display:flex;justify-content:center;gap:4px}
+.accounts-credit-edit-btn.on{background:var(--primary-bg);border-color:var(--primary-l);color:var(--primary-t)}
+.accounts-credit-card.is-viewing .accounts-credit-table th:nth-child(n+3),
+.accounts-credit-card.is-viewing .accounts-credit-table td:nth-child(n+3){text-align:right}
+.accounts-credit-val{
+  display:inline-block;font-size:13px;color:var(--txt);font-variant-numeric:tabular-nums;line-height:1.4;
+}
+.accounts-credit-val--name{font-weight:600}
+.accounts-credit-card.is-viewing .accounts-credit-table td:first-child .accounts-credit-val--name{
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;
+}
+.accounts-credit-name-cell{display:flex;align-items:center;gap:8px;min-width:0}
+.accounts-credit-name-cell .fund-brand-logo,
+.accounts-credit-name-cell .fund-brand-mark{flex-shrink:0;border-radius:6px;object-fit:contain}
+.accounts-credit-name-cell .accounts-credit-label{flex:1;min-width:88px}
+.accounts-credit-logo-ph{display:inline-flex;align-items:center;justify-content:center;background:var(--surf3);color:var(--txt3);border-radius:6px}
+.accounts-credit-label,.accounts-credit-digits{
+  width:100%;min-width:88px;padding:6px 8px;border:1px solid var(--bdr);
+  border-radius:8px;background:var(--surf);font:inherit;font-size:12.5px;color:var(--txt);
+  transition:border-color .12s,box-shadow .12s;
+}
+.accounts-credit-label:focus,.accounts-credit-digits:focus{
+  outline:none;border-color:var(--primary-l);box-shadow:0 0 0 3px var(--primary-bg);
+}
+.accounts-credit-digits{max-width:72px;font-variant-numeric:tabular-nums;text-align:center}
+.accounts-credit-digits--full{max-width:none;min-width:168px;text-align:left;letter-spacing:.03em}
+.accounts-credit-table.is-editing{min-width:920px}
+.accounts-credit-inp{
+  width:100%;min-width:72px;max-width:110px;padding:6px 8px;border:1px solid var(--bdr);
+  border-radius:8px;background:var(--surf);font:inherit;font-size:12.5px;color:var(--txt);
+  font-variant-numeric:tabular-nums;text-align:right;transition:border-color .12s,box-shadow .12s;
+}
+.accounts-credit-inp:focus{
+  outline:none;border-color:var(--primary-l);box-shadow:0 0 0 3px var(--primary-bg);
+}
+.accounts-credit-inp::placeholder{color:var(--txt3)}
+.accounts-credit-bind-th,.accounts-credit-bind-td{width:36px;text-align:center;padding:6px 4px!important}
+.accounts-credit-bind-cb{cursor:pointer}
+.accounts-credit-pool-row{background:var(--primary-bg)}
+.accounts-credit-pool-row td{border-top:2px solid var(--primary-l)}
+.accounts-credit-pool-card td{background:rgba(0,0,0,.015)}
+.accounts-credit-pool-label{display:flex;align-items:center;gap:8px;font-weight:700;color:var(--txt)}
+.accounts-credit-pool-label .fund-brand-logo,.accounts-credit-pool-label .fund-brand-mark{flex-shrink:0;border-radius:6px}
+.accounts-credit-pool-cnt{font-size:11px;font-weight:500;color:var(--txt3)}
+.accounts-credit-pool-name{
+  flex:1;min-width:88px;padding:4px 8px;border:1px solid var(--bdr);border-radius:6px;
+  background:var(--surf);font-size:13px;font-weight:600
+}
+.accounts-credit-pool-name:focus{outline:none;border-color:var(--primary-l)}
+.accounts-credit-pool-shared{font-size:12px;color:var(--txt3);font-style:italic}
+.accounts-credit-val--pool{font-weight:700;color:var(--primary-t)}
+.accounts-credit-table.is-editing th:last-child,.accounts-credit-table.is-editing td:last-child{width:88px}
 .acct-mgr-body{padding:20px!important}
 .acct-mgr-hint{font-size:12.5px;color:var(--txt3);line-height:1.55;margin:0 0 14px}
 .acct-mgr-list{
@@ -928,7 +1109,18 @@ body{
 }
 .acct-mgr-tag.auto{color:var(--blu-t);background:var(--blu-bg)}
 .acct-mgr-tag.manual{color:var(--primary-t);background:var(--primary-bg)}
+.acct-mgr-tag.merged{color:var(--amb-t);background:var(--amb-bg)}
 .acct-mgr-actions{display:flex;gap:6px;flex-shrink:0}
+.acct-mgr-merge{
+  margin-bottom:16px;padding:14px;border:1px solid rgba(217,119,6,.25);border-radius:var(--r-lg);background:var(--amb-bg);
+}
+.acct-mgr-merge-title{font-size:13px;font-weight:700;color:var(--amb-t);display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.acct-mgr-merge-hint{font-size:12px;color:var(--txt3);line-height:1.5;margin:0 0 10px}
+.acct-mgr-merge-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
+.acct-mgr-credit{
+  margin-bottom:12px;padding:12px;border:1px dashed var(--bdr);border-radius:var(--r);background:var(--surf);
+}
+.acct-mgr-credit-title{font-size:12px;font-weight:700;color:var(--txt2);margin-bottom:8px}
 .acct-mgr-form{
   padding:14px;border:1px solid var(--bdr);border-radius:var(--r-lg);background:var(--surf2);
 }
@@ -988,6 +1180,10 @@ body{
 }
 .fund-card-num-toggle:hover{background:rgba(255,255,255,.28)}
 .fund-card-num-toggle:active{transform:scale(.94)}
+.fund-card-credit{
+  font-size:10.5px;line-height:1.4;opacity:.88;margin-top:2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
 .fund-card-foot{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-top:auto}
 .fund-card-bank{
   display:flex;align-items:center;gap:8px;min-width:0;max-width:65%;
@@ -1014,6 +1210,7 @@ body{
 .accounts-head-name .fund-brand-logo{width:28px;height:28px;border-radius:8px;background:var(--surf2);box-shadow:none}
 .accounts-head-name .fund-brand-mark{border-radius:8px}
 .accounts-head-sub{font-size:12px;color:var(--txt3);margin-top:2px}
+.accounts-head-credit{font-size:12px;color:var(--amb-t);margin-top:4px;line-height:1.45}
 .accounts-kpi{
   display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:18px;
 }
@@ -1060,6 +1257,24 @@ body{
 
 /* 分类报表 */
 .catreport-toolbar{display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+.catreport-sub-kpis{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));
+  gap:14px;margin-bottom:20px;
+}
+.catreport-sub-kpi{
+  background:var(--surf);border-radius:var(--rl);padding:16px 18px;
+  box-shadow:var(--shadow-sm);border:1px solid var(--bdr);
+  display:flex;gap:12px;align-items:flex-start;min-width:0;
+}
+.catreport-sub-kpi-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:6px}
+.catreport-sub-kpi-body{min-width:0;flex:1}
+.catreport-sub-kpi-label{font-size:12px;font-weight:600;color:var(--txt2)}
+.catreport-sub-kpi-val{font-size:20px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums;line-height:1.2}
+.catreport-sub-kpi-sub{font-size:11px;color:var(--txt3);margin-top:4px}
+.catreport-sub-kpi-empty{
+  grid-column:1/-1;text-align:center;padding:20px;color:var(--txt3);font-size:13px;
+  border:1px dashed var(--bdr);border-radius:12px;background:var(--surf2);
+}
 .catreport-cat-label{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600;color:var(--txt2)}
 .catreport-cat-label select{
   min-width:180px;padding:8px 12px;border:1px solid var(--bdr);border-radius:10px;
@@ -1071,10 +1286,20 @@ body{
 }
 .catreport-chart-card .ct{color:#fff}
 .catreport-chart-card .ct i{color:#a5b4fc}
-.catreport-chart-wrap{position:relative;height:360px;padding:4px 0 8px}
+.catreport-sub-charts{padding:4px 8px 12px;display:flex;flex-direction:column;gap:4px}
+.catreport-sub-row{padding:14px 4px 6px;border-top:1px solid rgba(255,255,255,.08)}
+.catreport-sub-row:first-child{border-top:none;padding-top:6px}
+.catreport-sub-row-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:0 6px;flex-wrap:wrap}
+.catreport-sub-row-title{font-size:13px;font-weight:600;color:rgba(255,255,255,.92)}
+.catreport-sub-row-badges{display:flex;align-items:center;gap:6px;font-size:10px;color:rgba(255,255,255,.55)}
+.catreport-sub-row-chart{position:relative;height:168px}
+.catreport-sub-charts-empty{
+  text-align:center;padding:36px 16px;color:rgba(255,255,255,.45);font-size:13px;
+}
 .catreport-legend{display:flex;flex-wrap:wrap;gap:8px 14px;font-size:11px;color:rgba(255,255,255,.78);max-width:520px;justify-content:flex-end}
 .catreport-leg-item{display:flex;align-items:center;gap:5px}
 .catreport-leg-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.catreport-leg-dot.hollow{background:transparent;border:1.5px solid currentColor;box-sizing:border-box}
 .catreport-sub-trends-card{margin-bottom:18px}
 .catreport-sub-trends{
   display:grid;grid-template-columns:repeat(auto-fill,minmax(272px,1fr));gap:14px;
@@ -1110,6 +1335,15 @@ body{
 .catreport-sub-change.flat{color:var(--txt3);background:var(--surf2)}
 .catreport-sub-period{font-size:10.5px;color:var(--txt3)}
 .catreport-sub-spark{width:108px;height:54px;flex-shrink:0;position:relative}
+.spark-tip{
+  position:absolute;z-index:120;pointer-events:none;opacity:0;
+  transition:opacity .12s ease;background:#1e293b;color:#fff;
+  border-radius:8px;padding:5px 9px;display:flex;flex-direction:column;gap:1px;
+  line-height:1.25;white-space:nowrap;box-shadow:0 6px 18px rgba(15,23,42,.28);
+}
+.spark-tip.show{opacity:1}
+.spark-tip-m{font-size:10px;font-weight:500;color:rgba(255,255,255,.72)}
+.spark-tip-v{font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums}
 .catreport-sub-empty{
   grid-column:1/-1;text-align:center;padding:28px 16px;color:var(--txt3);font-size:13px;
   border:1px dashed var(--bdr);border-radius:12px;background:var(--surf2);
@@ -1516,7 +1750,7 @@ body{
   min-width:620px;
 }
 .det-cols-actions.det-cols-income{
-  grid-template-columns:36px 76px minmax(96px,112px) minmax(120px,1fr) minmax(88px,100px) 52px minmax(100px,128px) 48px;
+  grid-template-columns:36px 76px minmax(96px,112px) minmax(96px,1fr) minmax(108px,max-content) 52px minmax(100px,128px) 48px;
   min-width:860px;
 }
 .det-head{background:var(--surf2);border-bottom:1px solid var(--bdr);position:sticky;top:0;z-index:1}
@@ -1552,9 +1786,13 @@ body{
 .det-peer-sub{font-size:11px;color:var(--txt3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
 .det-cat{
   display:flex;flex-direction:column;align-items:center;gap:1px;padding:6px 8px;
-  overflow:visible;min-width:0;
+  overflow:visible;min-width:0;width:max-content;max-width:100%;justify-self:center;
+}
+.det-cat .cs{
+  width:auto;min-width:0;max-width:100%;flex:none;text-align:center;text-align-last:center;
 }
 .det-cat .cs-main,.det-cat .cat-pick-btn{font-size:12px;font-weight:600;height:auto;min-height:20px;padding:2px 6px}
+.det-cat .cat-pick-btn .cat-pick-label{max-width:none}
 .det-cat .cs-sub{font-size:10px;height:auto;min-height:16px;color:var(--txt3);padding:1px 14px 1px 4px}
 .det-type{padding:10px 6px;display:flex;align-items:center;justify-content:center}
 .det-th-type{text-align:center}

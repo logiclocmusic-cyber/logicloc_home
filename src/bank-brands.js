@@ -1,6 +1,6 @@
 /** 从支付方式文本匹配银行品牌色与 Logo（bank.logo 正方形图标） */
 
-const BANK_LOGO_BASE = 'https://cdn.jsdelivr.net/gh/burningmyself/bank.logo@master/resource/logo';
+const BANK_LOGO_BASE = 'https://gcore.jsdelivr.net/gh/burningmyself/bank.logo@master/resource/logo';
 
 /** 支付宝银行代码 → bank.logo 文件名（少数不一致） */
 const LOGO_CODE_ALIAS = {
@@ -47,10 +47,25 @@ const MERGE_GROUPS = [
   { code: 'WECHAT', key: '__grp:微信支付', name: '微信支付' },
 ];
 
+/** 支付宝等账单中同一卡常带 &促销后缀，取 & 前本体作为账户键 */
+function payAccountBaseKey(payText) {
+  const s = (payText || '').trim();
+  if (!s) return s;
+  for (const ch of ['&', '＆']) {
+    const i = s.indexOf(ch);
+    if (i > 0) {
+      const base = s.slice(0, i).trim();
+      if (base && isValidPayAccount(base)) return base;
+    }
+  }
+  return s;
+}
+
 export function accountGroupKey(payText) {
   const brand = matchBankBrand(payText);
   const merged = MERGE_GROUPS.find(g => g.code === brand?.code);
-  return merged ? merged.key : (payText || '').trim();
+  if (merged) return merged.key;
+  return payAccountBaseKey(payText);
 }
 
 export function accountGroupName(key) {
