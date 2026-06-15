@@ -1042,37 +1042,141 @@ function renderCreditCardRow(acc, { isNew = false, editing = false, pooled = fal
   </tr>`;
 }
 
-function renderCreditPoolHeaderRow(pool, cards, editing) {
-  const c = { limit: pool.limit, available: pool.available, debt: pool.debt };
-  const brand = matchBankBrand(pool.name || cards[0]?.label || '');
-  const logo = brand?.logoUrl
-    ? `<img class="fund-brand-logo" src="${esc(brand.logoUrl)}" alt="" width="24" height="24" loading="lazy" onerror="this.style.display='none'">`
-    : accountBrandMarkHtml(cards[0]?.pay || pool.name, 24);
+function sumCreditGroupTotals(cards) {
+  let limit = 0;
+  let available = 0;
+  let debt = 0;
+  let hasLimit = false;
+  let hasAvailable = false;
+  let hasDebt = false;
+  organizeGroupCards(cards).forEach(block => {
+    if (block.type === 'pool') {
+      const c = block.pool || {};
+      if (c.limit != null && c.limit !== '') {
+        limit += Number(c.limit) || 0;
+        hasLimit = true;
+      }
+      if (c.available != null && c.available !== '') {
+        available += Number(c.available) || 0;
+        hasAvailable = true;
+      }
+      if (c.debt != null && c.debt !== '') {
+        debt += Number(c.debt) || 0;
+        hasDebt = true;
+      }
+      return;
+    }
+    block.cards.forEach(acc => {
+      const c = acc.credit || {};
+      if (c.limit != null && c.limit !== '') {
+        limit += Number(c.limit) || 0;
+        hasLimit = true;
+      }
+      if (c.available != null && c.available !== '') {
+        available += Number(c.available) || 0;
+        hasAvailable = true;
+      }
+      if (c.debt != null && c.debt !== '') {
+        debt += Number(c.debt) || 0;
+        hasDebt = true;
+      }
+    });
+  });
+  return {
+    limit: hasLimit ? limit : null,
+    available: hasAvailable ? available : null,
+    debt: hasDebt ? debt : null
+  };
+}
+
+function renderCreditGroupSummaryRow(group, editing) {
+  const totals = sumCreditGroupTotals(group.cards);
   const bindTd = editing ? '<td class="accounts-credit-bind-td"></td>' : '';
-  const actionTd = editing
-    ? `<td class="accounts-credit-actions"><button type="button" class="btn btn-sm" data-dissolve-pool="${esc(pool.id)}" title="解散额度池"><i class="ti ti-unlink"></i></button></td>`
-    : '';
-
-  if (!editing) {
-    return `<tr class="accounts-credit-pool-row" data-credit-pool="${esc(pool.id)}">
-      <td colspan="2"><div class="accounts-credit-pool-label">${logo}<span>${esc(pool.name)} · 共享额度</span><span class="accounts-credit-pool-cnt">${cards.length} 张</span></div></td>
-      <td><span class="accounts-credit-val accounts-credit-val--pool">${formatCreditBrowseAmount(c.limit)}</span></td>
-      <td><span class="accounts-credit-val accounts-credit-val--pool">${formatCreditBrowseAmount(c.available)}</span></td>
-      <td><span class="accounts-credit-val accounts-credit-val--pool">${formatCreditBrowseAmount(c.debt)}</span></td>
-      <td colspan="3"></td>
-    </tr>`;
-  }
-
-  const fields = creditFieldInputs(c);
-  return `<tr class="accounts-credit-pool-row" data-credit-pool="${esc(pool.id)}">
+  const actionTd = editing ? '<td></td>' : '';
+  const tailCols = editing ? '<td colspan="2"></td>' : '<td colspan="3"></td>';
+  return `<tr class="accounts-credit-sum-row">
     ${bindTd}
-    <td colspan="2"><div class="accounts-credit-pool-label">${logo}<input type="text" class="accounts-credit-pool-name" value="${esc(pool.name)}" placeholder="额度池名称"><span class="accounts-credit-pool-cnt">${cards.length} 张</span></div></td>
-    <td>${fields.limit}</td>
-    <td>${fields.available}</td>
-    <td>${fields.debt}</td>
-    <td colspan="3"></td>
+    <td colspan="2"><span class="accounts-credit-sum-label">合计</span></td>
+    <td><span class="accounts-credit-val accounts-credit-val--sum">${formatCreditBrowseAmount(totals.limit)}</span></td>
+    <td><span class="accounts-credit-val accounts-credit-val--sum">${formatCreditBrowseAmount(totals.available)}</span></td>
+    <td><span class="accounts-credit-val accounts-credit-val--sum">${formatCreditBrowseAmount(totals.debt)}</span></td>
+    ${tailCols}
     ${actionTd}
   </tr>`;
+}
+
+function renderCreditPoolAmountCells(pool, rowSpan, editing) {
+  const c = { limit: pool.limit, available: pool.available, debt: pool.debt };
+  if (editing) {
+    const fields = creditFieldInputs(c);
+    return `<td rowspan="${rowSpan}" class="accounts-credit-pool-amt">${fields.limit}</td>
+      <td rowspan="${rowSpan}" class="accounts-credit-pool-amt">${fields.available}</td>
+      <td rowspan="${rowSpan}" class="accounts-credit-pool-amt">${fields.debt}</td>`;
+  }
+  return `<td rowspan="${rowSpan}" class="accounts-credit-pool-amt"><span class="accounts-credit-val accounts-credit-val--pool">${formatCreditBrowseAmount(c.limit)}</span></td>
+    <td rowspan="${rowSpan}" class="accounts-credit-pool-amt"><span class="accounts-credit-val accounts-credit-val--pool">${formatCreditBrowseAmount(c.available)}</span></td>
+    <td rowspan="${rowSpan}" class="accounts-credit-pool-amt"><span class="accounts-credit-val accounts-credit-val--pool">${formatCreditBrowseAmount(c.debt)}</span></td>`;
+}
+
+function renderCreditPoolAccountTd(acc, pool, editing, isFirst) {
+  const sharedIc = '<i class="ti ti-link accounts-credit-pool-shared-ic" title="共享额度"></i>';
+  const poolNameInp = editing && isFirst
+    ? `<input type="hidden" class="accounts-credit-pool-name" value="${esc(pool.name)}">`
+    : '';
+  return `<td><div class="accounts-credit-pool-name-wrap">${creditNameDisplayCell(acc)}${sharedIc}${poolNameInp}</div></td>`;
+}
+
+function renderCreditPoolViewRows(pool, cards) {
+  const n = cards.length;
+  return cards.map((acc, i) => {
+    const c = acc.credit || {};
+    const last4 = acc.last4 ? String(acc.last4).padStart(4, '0') : '';
+    const amtCells = i === 0 ? renderCreditPoolAmountCells(pool, n, false) : '';
+    const rowCls = `accounts-credit-pool-card${i === 0 ? ' accounts-credit-pool-card--first' : ''}`;
+    return `<tr data-credit-key="${esc(acc.pay)}" class="${rowCls}" data-credit-pool="${esc(pool.id)}">
+      ${renderCreditPoolAccountTd(acc, pool, false, i === 0)}
+      <td><span class="accounts-credit-val">${esc(last4 || '—')}</span></td>
+      ${amtCells}
+      <td><span class="accounts-credit-val">${formatCreditBrowseDay(c.billDay)}</span></td>
+      <td><span class="accounts-credit-val">${formatCreditBrowseDay(c.dueDay)}</span></td>
+      <td class="accounts-credit-tl-td">${renderInlineCreditTimeline(acc)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderCreditPoolEditRows(pool, cards) {
+  const n = cards.length;
+  return cards.map((acc, i) => {
+    const fields = creditFieldInputs(acc.credit || {}, '', { pooled: true });
+    const bindTd = `<td class="accounts-credit-bind-td"><input type="checkbox" class="accounts-credit-bind-cb" title="选择绑定"></td>`;
+    const amtCells = i === 0 ? renderCreditPoolAmountCells(pool, n, true) : '';
+    const isLast = i === n - 1;
+    const dissolveBtn = isLast
+      ? `<button type="button" class="btn btn-sm" data-dissolve-pool="${esc(pool.id)}" title="解散额度池"><i class="ti ti-unlink"></i></button>`
+      : '';
+    const unbindBtn = `<button type="button" class="btn btn-sm" data-unbind-credit="${esc(acc.pay)}" title="移出共享额度"><i class="ti ti-unlink"></i></button>`;
+    const rowCls = `accounts-credit-pool-card${i === 0 ? ' accounts-credit-pool-card--first' : ''}`;
+    return `<tr data-credit-key="${esc(acc.pay)}" class="${rowCls}" data-credit-pool="${esc(pool.id)}">
+      ${bindTd}
+      ${renderCreditPoolAccountTd(acc, pool, true, i === 0)}
+      <td>${creditDigitsInput(acc)}</td>
+      ${amtCells}
+      <td>${fields.billDay}</td>
+      <td>${fields.dueDay}</td>
+      <td class="accounts-credit-actions">
+        ${unbindBtn}
+        ${dissolveBtn}
+        <button type="button" class="btn btn-sm btn-a" data-delete-credit="${esc(acc.pay)}" title="删除"><i class="ti ti-trash"></i></button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function renderCreditPoolBlock(pool, cards, editing) {
+  if (cards.length < 2) {
+    return cards.map(c => renderCreditCardRow(c, { editing, pooled: false })).join('');
+  }
+  return editing ? renderCreditPoolEditRows(pool, cards) : renderCreditPoolViewRows(pool, cards);
 }
 
 function renderCreditCardGroupTableBody(group, editing) {
@@ -1083,9 +1187,7 @@ function renderCreditCardGroupTableBody(group, editing) {
   }
   return blocks.map(block => {
     if (block.type === 'pool') {
-      const header = renderCreditPoolHeaderRow(block.pool, block.cards, editing);
-      const rows = block.cards.map(c => renderCreditCardRow(c, { editing, pooled: true })).join('');
-      return `${header}${rows}`;
+      return renderCreditPoolBlock(block.pool, block.cards, editing);
     }
     return block.cards.map(c => renderCreditCardRow(c, { editing, pooled: false })).join('');
   }).join('');
@@ -1124,7 +1226,7 @@ function renderCreditCardGroupTable(group, editing) {
         <col class="accounts-credit-col-tl">
       </colgroup>`;
   const body = group.cards.length
-    ? renderCreditCardGroupTableBody(group, editing)
+    ? `${renderCreditCardGroupTableBody(group, editing)}${renderCreditGroupSummaryRow(group, editing)}`
     : (() => {
         const colSpan = editing ? 10 : 8;
         return `<tr><td colspan="${colSpan}" class="accounts-credit-group-empty">暂无卡片</td></tr>`;
@@ -1203,9 +1305,11 @@ function saveCreditPoolRow(row) {
   if (!poolId) return;
   const pool = findCreditPoolById(poolId);
   if (!pool) return;
-  const name = row.querySelector('.accounts-credit-pool-name')?.value?.trim();
-  if (name) pool.name = name;
-  const credit = creditFromPoolRowInputs(row);
+  const tbody = row.closest('tbody');
+  const firstRow = tbody?.querySelector(`tr[data-credit-pool="${poolId}"]`);
+  const nameInp = tbody?.querySelector(`tr[data-credit-pool="${poolId}"] .accounts-credit-pool-name`);
+  if (nameInp?.value?.trim()) pool.name = nameInp.value.trim();
+  const credit = firstRow ? creditFromPoolRowInputs(firstRow) : null;
   if (credit) {
     pool.limit = credit.limit;
     pool.available = credit.available;

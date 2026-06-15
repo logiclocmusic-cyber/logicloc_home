@@ -244,7 +244,7 @@ export const ImportTimeline = (() => {
   }
 
   function formatLabel(fmt) {
-    return { wechat: '微信', alipay: '支付宝', bank: '银行', manual: '手动' }[fmt] || fmt || '';
+    return { wechat: '微信', alipay: '支付宝', bank: '银行', ccb: '建设银行', manual: '手动' }[fmt] || fmt || '';
   }
 
   function renderHistoryItem(h) {

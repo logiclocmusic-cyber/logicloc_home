@@ -30,6 +30,44 @@ db.exec(`
   );
 `);
 
+try { db.exec('ALTER TABLE company_invoices ADD COLUMN printed INTEGER DEFAULT 0'); } catch { /* exists */ }
+
+export function normalizeInvoiceNo(value) {
+  return String(value || '').replace(/\s+/g, '').trim();
+}
+
+export function findInvoiceByNo(invoiceNo, excludeId = null) {
+  const key = normalizeInvoiceNo(invoiceNo);
+  if (!key) return null;
+  const rows = db.prepare(`
+    SELECT * FROM company_invoices
+    WHERE invoice_no IS NOT NULL AND TRIM(invoice_no) != ''
+  `).all();
+  for (const row of rows) {
+    if (excludeId != null && row.id === excludeId) continue;
+    if (normalizeInvoiceNo(row.invoice_no) === key) return rowToInvoice(row);
+  }
+  return null;
+}
+
+export function formatDuplicateInvoiceMessage(inv) {
+  const no = inv?.invoiceNo || '—';
+  const extras = [];
+  if (inv?.vendor) extras.push(`销售方：${inv.vendor}`);
+  if (inv?.invoiceDate) extras.push(`开票日期：${inv.invoiceDate}`);
+  const tail = extras.length ? `（${extras.join('，')}）` : '';
+  return `发票号码 ${no} 已上传过${tail}，请勿重复上传。`;
+}
+
+function assertInvoiceNoUnique(invoiceNo, excludeId = null) {
+  const dup = findInvoiceByNo(invoiceNo, excludeId);
+  if (!dup) return;
+  const err = new Error(formatDuplicateInvoiceMessage(dup));
+  err.status = 409;
+  err.duplicate = dup;
+  throw err;
+}
+
 function rowToInvoice(row) {
   if (!row) return null;
   let items = [];
@@ -47,6 +85,7 @@ function rowToInvoice(row) {
     items,
     notes: row.notes || '',
     status: row.status || 'confirmed',
+    printed: !!row.printed,
     fileUrl: row.file_path ? `/invoice-files/${row.file_path}` : null,
     fileName: row.file_name || '',
     mimeType: row.mime_type || '',
@@ -84,6 +123,7 @@ export function saveInvoiceFile(id, base64, mime, fileName) {
 }
 
 export function createInvoice(data) {
+  assertInvoiceNoUnique(data.invoiceNo);
   const stmt = db.prepare(`
     INSERT INTO company_invoices (
       vendor, buyer, invoice_no, invoice_date, amount, tax_amount, total,
@@ -113,28 +153,31 @@ export function createInvoice(data) {
 export function updateInvoice(id, data) {
   const existing = getInvoice(id);
   if (!existing) return null;
+  if ('invoiceNo' in data) assertInvoiceNoUnique(data.invoiceNo, id);
+  const existingFilePath = existing.fileUrl ? existing.fileUrl.replace('/invoice-files/', '') : null;
   db.prepare(`
     UPDATE company_invoices SET
       vendor = ?, buyer = ?, invoice_no = ?, invoice_date = ?,
       amount = ?, tax_amount = ?, total = ?, category = ?,
-      items = ?, notes = ?, status = ?, file_path = ?, file_name = ?, mime_type = ?,
+      items = ?, notes = ?, status = ?, printed = ?, file_path = ?, file_name = ?, mime_type = ?,
       updated_at = datetime('now')
     WHERE id = ?
   `).run(
-    data.vendor ?? existing.vendor,
-    data.buyer ?? existing.buyer,
-    data.invoiceNo ?? existing.invoiceNo,
-    data.invoiceDate ?? existing.invoiceDate,
-    data.amount ?? existing.amount,
-    data.taxAmount ?? existing.taxAmount,
-    data.total ?? existing.total,
-    data.category ?? existing.category,
-    JSON.stringify(data.items ?? existing.items),
-    data.notes ?? existing.notes,
-    data.status ?? existing.status,
-    data.filePath ?? (existing.fileUrl ? existing.fileUrl.replace('/invoice-files/', '') : null),
-    data.fileName ?? existing.fileName,
-    data.mimeType ?? existing.mimeType,
+    'vendor' in data ? data.vendor : existing.vendor,
+    'buyer' in data ? data.buyer : existing.buyer,
+    'invoiceNo' in data ? data.invoiceNo : existing.invoiceNo,
+    'invoiceDate' in data ? data.invoiceDate : existing.invoiceDate,
+    'amount' in data ? data.amount : existing.amount,
+    'taxAmount' in data ? data.taxAmount : existing.taxAmount,
+    'total' in data ? data.total : existing.total,
+    'category' in data ? data.category : existing.category,
+    JSON.stringify('items' in data ? data.items : existing.items),
+    'notes' in data ? data.notes : existing.notes,
+    'status' in data ? data.status : existing.status,
+    'printed' in data ? (data.printed ? 1 : 0) : (existing.printed ? 1 : 0),
+    'filePath' in data ? data.filePath : existingFilePath,
+    'fileName' in data ? data.fileName : existing.fileName,
+    'mimeType' in data ? data.mimeType : existing.mimeType,
     id
   );
   return getInvoice(id);

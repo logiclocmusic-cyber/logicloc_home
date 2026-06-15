@@ -82,7 +82,9 @@ export const MONITOR_CATS = ['餐饮美食','水电煤气','通讯费用','交�
 /** 收入数据页展示的分类 */
 export const INCOME_DATA_CATS = ['闲置转让', '乐极客收入', '红包奖励', '工资收入'];
 export const EXCLUDE_CATS = new Set(['转账']);
-export const OFFSET_CATS = new Set(['代拍代购','闲置转让','餐饮美食','探店置换','人情往来','乐极客收入']);
+export const OFFSET_CATS = new Set(['代拍代购','闲置转让','餐饮美食','探店置换','乐极客收入']);
+/** 默认不计入首页总收支统计的分类（可在「编辑分类」中调整） */
+export const DEFAULT_CAT_STATS_EXCLUDE = new Set(['人情往来']);
 export const MONITOR_EMOJIS = {
   '餐饮美食': iconRef('1F374'),
   '水电煤气': iconRef('1F4A1'),
@@ -100,11 +102,14 @@ export const DEFAULT_SOURCES = [
   { name:'京东-胡晗', color:'#e53935' },
   { name:'微信-陈橙', color:'#ff6d00' },
   { name:'支付宝-陈橙', color:'#9c27b0' },
+  { name:'建行-陈橙', color:'#0066b3' },
   { name:'小河帮公司', color:'#795548' },
   { name:'乐极客公司', color:'#0097a7' },
   { name:'银行-储蓄卡', color:'#795548' },
   { name:'银行-信用卡', color:'#0097a7' }
 ];
+
+export const DEFAULT_IMPORT_SOURCE = '建行-陈橙';
 
 export const STORAGE_KEYS = {
   data: 'family_ledger_data',

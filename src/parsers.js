@@ -157,12 +157,27 @@ export const Parsers = (() => {
       };
     }
     const s = String(raw).replace(/\//g, '-').trim();
+    const compact = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+    if (compact) {
+      return {
+        date: `${compact[1]}-${compact[2]}-${compact[3]}`,
+        time: '00:00'
+      };
+    }
     const m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?/);
     if (!m) return { date: '', time: '00:00' };
     const date = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
     let time = m[4] || '00:00';
     if (time.length === 5) time += ':00';
     return { date, time: time.slice(0, 8) };
+  }
+
+  function parseSignedAmount(raw) {
+    if (raw == null || raw === '') return { amount: 0, sign: 0 };
+    const n = parseFloat(String(raw).replace(/[¥,，元\s]/g, ''));
+    if (isNaN(n) || n === 0) return { amount: 0, sign: 0 };
+    if (n < 0) return { amount: Math.abs(n), sign: -1 };
+    return { amount: n, sign: 1 };
   }
 
   function parseAmount(raw) {
@@ -188,6 +203,128 @@ export const Parsers = (() => {
     const h = (parts[0] || '0').padStart(2, '0');
     const m = (parts[1] || '0').padStart(2, '0');
     return `${h}:${m}`;
+  }
+
+  function isMidnightPlaceholder(time) {
+    return normalizeTimeForDedup(time) === '00:00';
+  }
+
+  function timeToMinutes(time) {
+    const t = normalizeTimeForDedup(time);
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+  }
+
+  function timesHighlyConsistent(a, b) {
+    const na = normalizeTimeForDedup(a);
+    const nb = normalizeTimeForDedup(b);
+    if (na === nb) return true;
+    if (isMidnightPlaceholder(a) || isMidnightPlaceholder(b)) return false;
+    return Math.abs(timeToMinutes(a) - timeToMinutes(b)) <= 5;
+  }
+
+  function sourcePlatform(source) {
+    const s = String(source || '');
+    if (s.startsWith('微信')) return 'wechat';
+    if (s.startsWith('支付宝')) return 'alipay';
+    if (s.startsWith('银行') || s.startsWith('建行')) return 'bank';
+    if (s.startsWith('京东')) return 'jd';
+    return s || 'other';
+  }
+
+  function peersLooselyMatch(a, b) {
+    const pa = String(a || '').replace(/\*/g, '').trim();
+    const pb = String(b || '').replace(/\*/g, '').trim();
+    if (!pa || !pb) return false;
+    if (pa === pb) return true;
+    const generic = /^(转账|转账支取|消费|充值|还款|利息|汇兑|银联|支付|其他|无名|未知)$/;
+    if (generic.test(pa) || generic.test(pb)) return false;
+    if (pa.length < 2 || pb.length < 2) return false;
+    if (pa.includes(pb) || pb.includes(pa)) return true;
+    const na = pa.replace(/[\s*]/g, '');
+    const nb = pb.replace(/[\s*]/g, '');
+    return na.length >= 2 && nb.length >= 2 && (na.includes(nb) || nb.includes(na));
+  }
+
+  function paymentSuggestsCrossRecord(row, other) {
+    const pay = String(row['支付方式'] || '');
+    const otherPlat = sourcePlatform(other['来源']);
+    const rowPlat = sourcePlatform(row['来源']);
+    if (otherPlat === 'bank' && rowPlat === 'wechat' && /银行|建行|工商|农业|交通|储蓄|信用|借记|贷记|\(\d{4}\)/.test(pay)) return true;
+    if (otherPlat === 'wechat' && rowPlat === 'bank' && /微信/.test(`${other['商品说明'] || ''}${other['备注'] || ''}${other['交易对方'] || ''}`)) return true;
+    if (otherPlat === 'bank' && rowPlat === 'alipay' && /支付宝|花呗|余额宝/.test(pay)) return true;
+    if (otherPlat === 'alipay' && rowPlat === 'bank' && /银行|建行|工商|农业|交通|储蓄|信用|借记|贷记|\(\d{4}\)/.test(other['支付方式'] || '')) return true;
+    return false;
+  }
+
+  function descSuggestsSameTxn(a, b) {
+    const ad = `${a['商品说明'] || ''}${a['摘要'] || ''}`;
+    const bd = `${b['商品说明'] || ''}${b['摘要'] || ''}`;
+    if (/转账/.test(ad) && /转账/.test(bd)) return true;
+    return peersLooselyMatch(ad, bd);
+  }
+
+  function isCrossSourceMatch(a, b) {
+    if (!a?.['日期'] || !b?.['日期'] || a['日期'] !== b['日期']) return false;
+    if (a['收支'] !== b['收支']) return false;
+    if (Number(a['金额'] || 0).toFixed(2) !== Number(b['金额'] || 0).toFixed(2)) return false;
+    if (sourcePlatform(a['来源']) === sourcePlatform(b['来源'])) return false;
+
+    const aMid = isMidnightPlaceholder(a['时间']);
+    const bMid = isMidnightPlaceholder(b['时间']);
+    const peerHint = peersLooselyMatch(a['交易对方'], b['交易对方'])
+      || peersLooselyMatch(a['商品说明'], b['交易对方'])
+      || peersLooselyMatch(b['商品说明'], a['交易对方']);
+    const payHint = paymentSuggestsCrossRecord(a, b) || paymentSuggestsCrossRecord(b, a);
+    const descHint = descSuggestsSameTxn(a, b);
+
+    if (!aMid && !bMid) return timesHighlyConsistent(a['时间'], b['时间']);
+    if (payHint && (peerHint || descHint)) return true;
+    return false;
+  }
+
+  function crossSourceBucketKey(row) {
+    if (!row?.['日期'] || row['金额'] == null) return '';
+    return [row['日期'], row['收支'], Number(row['金额'] || 0).toFixed(2)].join('|');
+  }
+
+  function buildCrossSourceIndex(records) {
+    const buckets = new Map();
+    for (const row of records || []) {
+      const key = crossSourceBucketKey(row);
+      if (!key) continue;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(row);
+    }
+    return buckets;
+  }
+
+  function addToCrossSourceIndex(index, row) {
+    const key = crossSourceBucketKey(row);
+    if (!key) return;
+    if (!index.has(key)) index.set(key, []);
+    index.get(key).push(row);
+  }
+
+  function findCrossSourceDuplicate(row, index) {
+    const key = crossSourceBucketKey(row);
+    if (!key) return null;
+    for (const cand of index.get(key) || []) {
+      if (row.id != null && cand.id != null && row.id === cand.id) continue;
+      if (isCrossSourceMatch(row, cand)) return cand;
+    }
+    return null;
+  }
+
+  function summarizeDupMatch(row) {
+    return {
+      id: row.id,
+      来源: row['来源'] || '',
+      日期: row['日期'] || '',
+      时间: row['时间'] || '',
+      交易对方: row['交易对方'] || '',
+      金额: row['金额']
+    };
   }
 
   /** 业务去重键：兼容旧数据（无秒、无交易单号）与新导入账单 */
@@ -250,7 +387,38 @@ export const Parsers = (() => {
     };
   }
 
-  const PLATFORM_PREFIX = { wechat: '微信', alipay: '支付宝', bank: '银行', jd: '京东' };
+  const PLATFORM_PREFIX = { wechat: '微信', alipay: '支付宝', bank: '银行', ccb: '建行', jd: '京东' };
+  const FORMAT_LABELS = { wechat: '微信支付', alipay: '支付宝', bank: '银行流水', ccb: '建设银行流水' };
+
+  function isCcbBankStatement(rows) {
+    const head = rows.slice(0, 8).map(r => r.join(',')).join('\n');
+    return /中国建设银行/.test(head)
+      && /交易日期/.test(head)
+      && /交易金额/.test(head)
+      && /对方账号与户名/.test(head);
+  }
+
+  function findCcbHeaderRow(rows) {
+    for (let i = 0; i < Math.min(rows.length, 80); i++) {
+      const joined = rows[i].join(',');
+      if (/序号/.test(joined) && /摘要/.test(joined) && /交易日期/.test(joined) && /交易金额/.test(joined)) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  function parseCcbPeer(raw) {
+    const s = cleanField(raw);
+    if (!s) return '';
+    const slash = s.indexOf('/');
+    return slash >= 0 ? (s.slice(slash + 1).trim() || s) : s;
+  }
+
+  function isBankRefundRow(summary, extra = '') {
+    const s = `${summary || ''} ${extra || ''}`;
+    return /消费退货|退货|退款|撤销|冲正|退汇|返还/.test(s);
+  }
 
   function detectFormat(rows) {
     const sample = rows.slice(0, 50).map(r => r.join(',')).join('\n');
@@ -258,6 +426,7 @@ export const Parsers = (() => {
     if (/支付宝.*账单|支付宝（中国）|支付宝支付科技|导出信息：|支付宝账户：/.test(sample)) return 'alipay';
     if (/交易时间,交易分类,交易对方/.test(sample)) return 'alipay';
     if (/交易时间,交易类型,交易对方/.test(sample)) return 'wechat';
+    if (isCcbBankStatement(rows)) return 'ccb';
     if (/记账日期|交易日期|摘要|对方户名|借贷/.test(sample)) return 'bank';
     return 'unknown';
   }
@@ -273,8 +442,8 @@ export const Parsers = (() => {
       for (let j = 0; j < row.length; j++) {
         const cell = String(row[j] ?? '').trim();
         const next = String(row[j + 1] ?? '').trim();
-        if (/微信昵称|^姓名$|支付宝账户|账户名称|户名/.test(cell) && next) hints.add(next);
-        const kv = cell.match(/^(微信昵称|姓名|支付宝账户|账户名称|户名)[：:]\s*(.+)$/);
+        if (/微信昵称|^姓名$|支付宝账户|账户名称|户名|客户名称/.test(cell) && next) hints.add(next);
+        const kv = cell.match(/^(微信昵称|姓名|支付宝账户|账户名称|户名|客户名称)[：:]\s*(.+)$/);
         if (kv?.[2]) hints.add(kv[2].trim());
       }
       const joined = row.join(',');
@@ -310,7 +479,7 @@ export const Parsers = (() => {
         if (person.length >= 2 && person.includes(h) && h.length >= 2) score += 25;
       }
 
-      if (format === 'bank') {
+      if (format === 'bank' || format === 'ccb') {
         if (/信用|信用卡/.test(hints.join(' ')) && /信用/.test(s.name)) score += 30;
         if (/储蓄|借记/.test(hints.join(' ')) && /储蓄/.test(s.name)) score += 30;
       }
@@ -448,6 +617,42 @@ export const Parsers = (() => {
     return out;
   }
 
+  function parseCcbBank(rows, sourceName) {
+    const hi = findCcbHeaderRow(rows);
+    if (hi < 0) throw new Error('未识别到建设银行流水表头，请确认导出的是「个人活期账户全部交易明细」');
+
+    const map = colMap(rows[hi]);
+    const out = [];
+
+    for (let i = hi + 1; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row.length) continue;
+
+      const seq = pick(map, row, '序号');
+      if (!seq || !/^\d+$/.test(seq)) continue;
+
+      const dt = parseDateTime(pick(map, row, '交易日期'));
+      const { amount, sign } = parseSignedAmount(pick(map, row, '交易金额'));
+      if (!amount || !dt.date) continue;
+
+      const summary = pick(map, row, '摘要');
+      const place = pick(map, row, '交易地点/附言', '交易地点', '附言');
+      if (isBankRefundRow(summary, place)) continue;
+
+      const type = sign < 0 ? '支出' : '收入';
+      const peer = parseCcbPeer(pick(map, row, '对方账号与户名', '对方户名', '交易对方'));
+      const desc = [summary, place].filter(v => v && v !== '***').join(' · ') || summary || peer;
+      const note = pick(map, row, '账户余额') ? `余额 ${pick(map, row, '账户余额')}` : '';
+
+      out.push(makeRow({
+        date: dt.date, time: dt.time, source: sourceName,
+        peer, desc, type, amount, pay: sourceName, note,
+        rawCategory: summary
+      }));
+    }
+    return out;
+  }
+
   function parseBank(rows, sourceName) {
     const hi = findHeaderRow(rows, ['交易日期']) >= 0
       ? findHeaderRow(rows, ['交易日期'])
@@ -473,7 +678,11 @@ export const Parsers = (() => {
       let amount = parseAmount(pick(map, row, '交易金额', '金额', '发生额'));
       let type = '支出';
 
-      if (income && !expense) { amount = income; type = '收入'; }
+      const signed = parseSignedAmount(pick(map, row, '交易金额'));
+      if (signed.amount && signed.sign) {
+        amount = signed.amount;
+        type = signed.sign < 0 ? '支出' : '收入';
+      } else if (income && !expense) { amount = income; type = '收入'; }
       else if (expense && !income) { amount = expense; type = '支出'; }
       else if (!amount) continue;
       else {
@@ -481,10 +690,13 @@ export const Parsers = (() => {
         type = parseType(flag, 0);
       }
 
-      const peer = pick(map, row, '对方户名', '交易对方', '对方账号', '对方名称');
+      const peer = pick(map, row, '对方户名', '交易对方', '对方账号与户名', '对方账号', '对方名称');
+      const summary = pick(map, row, '摘要', '交易类型', '业务类型');
+      const noteExtra = pick(map, row, '备注', '附言', '交易地点/附言');
+      if (isBankRefundRow(summary, noteExtra)) continue;
       const desc = pick(map, row, '摘要', '用途', '备注', '交易说明', '商品说明') || peer;
       const pay = pick(map, row, '交易渠道', '支付方式', '交易类型') || sourceName;
-      const note = pick(map, row, '备注', '附言');
+      const note = noteExtra;
       const orderId = pick(map, row, '交易流水号', '流水号', '交易单号');
 
       out.push(makeRow({
@@ -512,6 +724,7 @@ export const Parsers = (() => {
     switch (format) {
       case 'wechat': records = parseWeChat(rows, resolvedSource); break;
       case 'alipay': records = parseAlipay(rows, resolvedSource); break;
+      case 'ccb': records = parseCcbBank(rows, resolvedSource); break;
       case 'bank': records = parseBank(rows, resolvedSource); break;
       default:
         throw new Error('无法识别账单格式，请手动选择：微信 / 支付宝 / 银行流水');
@@ -522,8 +735,9 @@ export const Parsers = (() => {
   }
 
   return {
-    parseFile, detectFormat, resolveSourceName, extractFileHints,
+    parseFile, detectFormat, resolveSourceName, extractFileHints, FORMAT_LABELS,
     txnHash, txnDedupKey, buildDedupSet, addToDedupSet, isDuplicate,
+    buildCrossSourceIndex, addToCrossSourceIndex, findCrossSourceDuplicate, summarizeDupMatch,
     readText, parseCSV, readRows, isExcelFile
   };
 })();

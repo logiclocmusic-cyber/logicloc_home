@@ -3,8 +3,8 @@ import { Categorizer } from './categorizer.js';
 import { ImportTimeline } from './import-timeline.js';
 import { Parsers } from './parsers.js';
 import {
-  DEFAULT_CATS, DEFAULT_EMOJIS, LEGACY_DEFAULT_EMOJIS, DEFAULT_SOURCES, DEFAULT_SUBCATS, CAT_COLORS,
-  MONITOR_CATS, EXCLUDE_CATS, OFFSET_CATS, MONITOR_EMOJIS, INCOME_DATA_CATS
+  DEFAULT_CATS, DEFAULT_EMOJIS, LEGACY_DEFAULT_EMOJIS, DEFAULT_SOURCES, DEFAULT_IMPORT_SOURCE, DEFAULT_SUBCATS, CAT_COLORS,
+  MONITOR_CATS, EXCLUDE_CATS, OFFSET_CATS, DEFAULT_CAT_STATS_EXCLUDE, MONITOR_EMOJIS, INCOME_DATA_CATS
 } from './config.js';
 import { renderCatIcon, iconRef } from './cat-icons.js';
 import { fetchState, saveState, resetLedger, deleteImportBatchApi, changeImportBatchSourceApi, checkHealth } from './api.js';
@@ -20,7 +20,8 @@ import {
 } from './gear.js';
 import {
   renderCompanyCostPage, setupCompanyCost,
-  openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload
+  openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload,
+  toggleInvoicePrinted, downloadInvoiceFile, printInvoiceFile
 } from './company-cost.js';
 import {
   initSplits, hasSplits, expandRowForStats, rowMatchesCat, rowSearchHaystack,
@@ -60,6 +61,7 @@ let EMOJIS = { ...DEFAULT_EMOJIS };
 let SUBCATS = { ...DEFAULT_SUBCATS };
 let SOURCES = JSON.parse(JSON.stringify(DEFAULT_SOURCES));
 let OFFSET_CATS_SET = OFFSET_CATS;
+let CAT_STATS_EXCLUDE = new Set(DEFAULT_CAT_STATS_EXCLUDE);
 
 let allData = [], filteredData = [], curPage = 1;
 let PG = 30;
@@ -84,7 +86,17 @@ function renderImportHistoryUI() {
   ImportTimeline.renderHistoryAll(importHistory, SOURCES.map(s => s.name));
 }
 
+function ensureCcbChenchengSource() {
+  if (SOURCES.find(s => s.name === DEFAULT_IMPORT_SOURCE)) return false;
+  const def = DEFAULT_SOURCES.find(s => s.name === DEFAULT_IMPORT_SOURCE);
+  SOURCES.push(def ? { ...def } : { name: DEFAULT_IMPORT_SOURCE, color: '#0066b3' });
+  return true;
+}
+
 function renderImportPage() {
+  if (!importActiveSource && !pendingImport && SOURCES.some(s => s.name === DEFAULT_IMPORT_SOURCE)) {
+    importActiveSource = DEFAULT_IMPORT_SOURCE;
+  }
   populateImportSources();
   updateImportUploadState();
   syncImportHistory();
@@ -195,7 +207,21 @@ function peerDescCell(row) {
   const d = (row['商品说明'] || '').trim();
   const showDesc = d && d !== '/' && d !== main && (!product || d !== peer);
   const title = showDesc ? `${main} · ${d}` : main;
-  return `<div class="td peer-desc" title="${title}"><div class="peer-main">${main}</div>${showDesc ? `<div class="peer-sub">${d}</div>` : ''}</div>`;
+  const dupTag = row._dupSuspect
+    ? '<span class="ledger-dup-flag" title="疑似与其他来源账单重复，可手动删除或标记不计入"><i class="ti ti-copy"></i></span>'
+    : '';
+  return `<div class="td peer-desc" title="${title}"><div class="peer-main">${dupTag}${main}</div>${showDesc ? `<div class="peer-sub">${d}</div>` : ''}</div>`;
+}
+
+function dupReasonLabel(reason) {
+  return { file: '文件内重复', existing: '与已有账目重复', cross: '跨来源疑似重复' }[reason] || '重复';
+}
+
+function dupMatchMeta(row) {
+  if (!row._dupMatch) return '';
+  const m = row._dupMatch;
+  const peer = (m['交易对方'] || '—').trim();
+  return ` · 匹配 ${m['来源']} ${m['日期']} ${formatTimeShort(m['时间'])} ${peer}`;
 }
 
 function renderImportRecordTable(records) {
@@ -243,8 +269,14 @@ function catCellHtml(row) {
 function catLabel(c) { return c; }
 function catColor(c) { const i = CATS.indexOf(c); return i >= 0 ? CAT_COLORS[i] : '#98a2b3'; }
 function srcColor(s) { const f = SOURCES.find(x => x.name === s); return f ? f.color : '#98a2b3'; }
+function isCatExcludedFromStats(cat) {
+  return CAT_STATS_EXCLUDE.has(cat);
+}
+
 function isCountedInStats(r) {
-  return r['退款状态'] !== 'refunded' && r['统计状态'] !== 'excluded';
+  return r['退款状态'] !== 'refunded'
+    && r['统计状态'] !== 'excluded'
+    && !isCatExcludedFromStats(r['分类']);
 }
 
 function activeData() { return allData.filter(isCountedInStats); }
@@ -296,7 +328,7 @@ function buildState() {
     transactions: allData,
     refunded: [...refunded],
     excluded: [...excluded],
-    categories: { cats: CATS, emojis: EMOJIS, subcats: SUBCATS },
+    categories: { cats: CATS, emojis: EMOJIS, subcats: SUBCATS, statsExclude: [...CAT_STATS_EXCLUDE] },
     sources: SOURCES,
     rules: { peerRules: Categorizer.peerRules, keywordRules: Categorizer.keywordRules },
     importHistory,
@@ -387,9 +419,15 @@ async function loadData() {
       if (babySubs && !babySubs.includes('母婴装备')) {
         SUBCATS['母婴亲子'] = [...babySubs, '母婴装备'];
       }
+      if (Array.isArray(state.categories.statsExclude)) {
+        CAT_STATS_EXCLUDE = new Set(state.categories.statsExclude);
+      } else {
+        CAT_STATS_EXCLUDE = new Set(DEFAULT_CAT_STATS_EXCLUDE);
+      }
     }
 
     if (state.sources) SOURCES = state.sources;
+    if (ensureCcbChenchengSource()) await persistNow();
     stateVersion = state.stateVersion || 0;
     allData = state.transactions || [];
     const maxId = allData.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0);
@@ -438,12 +476,12 @@ async function loadData() {
 function updateSubtitle() {
   const el = document.getElementById('subtitle');
   if (!allData.length) {
-    if (el) el.textContent = '家庭记账 · 导入账单开始使用';
+    if (el) el.textContent = '导入账单开始使用';
     return;
   }
   const dates = allData.map(r => r['日期']).filter(Boolean).sort();
   const range = `${dates[0]} 至 ${dates[dates.length - 1]}`;
-  if (el) el.textContent = `家庭记账 · ${range} · ${fmtCount(allData.length)} 笔`;
+  if (el) el.innerHTML = `${range}<br>${fmtCount(allData.length)} 笔`;
 }
 
 function kpiCard(label, value, sub, icon, iconCls, valCls) {
@@ -464,12 +502,14 @@ function renderKPI() {
   const net = inc - exp;
   const rfc = allData.filter(r => r['退款状态'] === 'refunded').length;
   const pending = allData.filter(r => Categorizer.isPending(r) && isCountedInStats(r)).length;
+  const manualEx = allData.filter(r => r['统计状态'] === 'excluded').length;
+  const catEx = allData.filter(r => isCatExcludedFromStats(r['分类']) && r['退款状态'] !== 'refunded' && r['统计状态'] !== 'excluded').length;
   const h = [
     kpiCard('实际支出', fmtMoney(exp), `${fmtCount(ad.filter(r => r['收支'] === '支出').length)} 笔`, 'ti-arrow-down-right', 'pink', 'c-red'),
     kpiCard('总收入', fmtMoney(inc), `${fmtCount(ad.filter(r => r['收支'] === '收入').length)} 笔`, 'ti-arrow-up-right', 'green', 'c-grn'),
     kpiCard('净结余', fmtMoneySigned(net), net >= 0 ? '收入大于支出' : '支出大于收入', 'ti-scale', 'blue', net >= 0 ? 'c-blu' : 'c-red'),
     kpiCard('待确认分类', fmtCount(pending), '自动分类需复核', 'ti-tag-starred', 'amber', 'c-amb'),
-    kpiCard('总笔数', fmtCount(allData.length), `已退款 ${fmtCount(rfc)} 笔 · 不计入 ${fmtCount(allData.filter(r => r['统计状态'] === 'excluded').length)} 笔`, 'ti-list-numbers', 'lav', '')
+    kpiCard('总笔数', fmtCount(allData.length), `已退款 ${fmtCount(rfc)} 笔 · 不计入 ${fmtCount(manualEx + catEx)} 笔`, 'ti-list-numbers', 'lav', '')
   ].join('');
   const kpi2 = document.getElementById('kpi2');
   if (kpi2) kpi2.innerHTML = h;
@@ -2389,7 +2429,7 @@ function renderDuplicateReview() {
       <input type="checkbox" ${r._dupSelected ? 'checked' : ''} onchange="toggleDupImport('${r._importUid}', this.checked)">
       <div class="import-dup-main">
         <div class="import-dup-title">${peer} · ${sign}¥${Number(r['金额'] || 0).toFixed(2)}</div>
-        <div class="import-dup-meta">${r['日期']} ${r['时间'] || ''} · ${r._dupReason === 'file' ? '文件内重复' : '与已有账目重复'}</div>
+        <div class="import-dup-meta">${r['日期']} ${r['时间'] || ''} · ${dupReasonLabel(r._dupReason)}${dupMatchMeta(r)}</div>
       </div>
     </label>`;
   }).join('');
@@ -2423,9 +2463,11 @@ async function handleImportFile(file) {
     const classified = Categorizer.classifyAll(records, CATS);
     const existingDedup = Parsers.buildDedupSet(allData);
     const fileDedup = new Set(existingDedup);
+    const crossIndex = Parsers.buildCrossSourceIndex(allData);
     const newRecords = [];
     const duplicateRecords = [];
     let dup = 0;
+    let crossDup = 0;
 
     classified.forEach(r => {
       r._importUid = `improw_${Math.random().toString(36).slice(2, 10)}`;
@@ -2436,8 +2478,18 @@ async function handleImportFile(file) {
         duplicateRecords.push(r);
         return;
       }
+      const crossMatch = Parsers.findCrossSourceDuplicate(r, crossIndex);
+      if (crossMatch) {
+        dup++;
+        crossDup++;
+        r._dupReason = 'cross';
+        r._dupMatch = Parsers.summarizeDupMatch(crossMatch);
+        duplicateRecords.push(r);
+        return;
+      }
       r._hash = Parsers.txnHash(r);
       Parsers.addToDedupSet(fileDedup, r);
+      Parsers.addToCrossSourceIndex(crossIndex, r);
       r.id = nextId++;
       newRecords.push(r);
     });
@@ -2450,6 +2502,7 @@ async function handleImportFile(file) {
       allRecords: classified,
       format,
       dup,
+      crossDup,
       sourceName,
       fileName: file.name,
       startMonth: range.months[0] || '',
@@ -2458,10 +2511,10 @@ async function handleImportFile(file) {
 
     const pending = newRecords.filter(r => Categorizer.isPending(r)).length;
     document.getElementById('importPreview').innerHTML =
-      `识别格式：<strong>${{ wechat: '微信支付', alipay: '支付宝', bank: '银行流水' }[format] || format}</strong><br>` +
+      `识别格式：<strong>${Parsers.FORMAT_LABELS[format] || format}</strong><br>` +
       `来源：<strong>${sourceName}</strong><br>` +
       `时间范围：<strong>${range.months[0] ? ImportTimeline.yearMonthLabel(range.months[0]) : '—'}</strong> 至 <strong>${range.months.length ? ImportTimeline.yearMonthLabel(range.months[range.months.length - 1]) : '—'}</strong><br>` +
-      `解析 ${classified.length} 笔 · 新增 ${newRecords.length} 笔 · 重复 ${dup} 笔${dup ? '（可在下方勾选导入）' : ''} · 待确认 ${pending} 笔`;
+      `解析 ${classified.length} 笔 · 新增 ${newRecords.length} 笔 · 重复 ${dup} 笔${crossDup ? `（含跨来源 ${crossDup} 笔）` : ''}${dup ? '（可在下方勾选导入）' : ''} · 待确认 ${pending} 笔`;
 
     document.getElementById('importStats').innerHTML = `
       <div class="import-stat"><div class="n">${newRecords.length}</div><div class="l">将导入</div></div>
@@ -2499,6 +2552,13 @@ function confirmImport() {
     if (!r.id) {
       r.id = nextId++;
       r._hash = Parsers.txnHash(r);
+    }
+    if (r._dupReason === 'cross' && r._dupMatch) {
+      r._dupSuspect = r._dupMatch.id;
+      const tag = `疑似重复(${r._dupMatch['来源']} ${r._dupMatch['日期']} ${formatTimeShort(r._dupMatch['时间'])})`;
+      if (!String(r['备注'] || '').includes('疑似重复')) {
+        r['备注'] = r['备注'] ? `${r['备注']} · ${tag}` : tag;
+      }
     }
   });
 
@@ -2854,6 +2914,10 @@ function renderCatList() {
         <button type="button" class="cat-sub-toggle${open ? ' open' : ''}" title="子分类${subs.length ? `（${subs.length}）` : ''}" onclick="toggleCatSub(${i})"><i class="ti ti-chevron-right"></i></button>
         <button type="button" class="cat-emoji-btn" data-i="${i}" data-emoji="${em}" title="设置图标" onclick="pickCatEmoji(event,${i})">${catIconHtml(c, { size: 22 })}</button>
         <input class="ni2" value="${c}" data-i="${i}">
+        <label class="cat-stats-exclude" title="不计入首页总收支、图表等统计">
+          <input type="checkbox" class="cat-stats-exclude-cb" data-i="${i}"${CAT_STATS_EXCLUDE.has(c) ? ' checked' : ''}>
+          <span>不计入统计</span>
+        </label>
         <button class="db" onclick="delCat(${i})">✕</button>
       </div>
       <div class="cat-sub-panel${open ? ' open' : ''}">
@@ -2868,6 +2932,7 @@ function delCat(i) {
   CATS.splice(i, 1);
   delete EMOJIS[c];
   delete SUBCATS[c];
+  CAT_STATS_EXCLUDE.delete(c);
   catSubExpanded.delete(c);
   renderCatList();
 }
@@ -2905,6 +2970,10 @@ function saveCat() {
         catSubExpanded.delete(old);
         catSubExpanded.add(nv);
       }
+      if (CAT_STATS_EXCLUDE.has(old)) {
+        CAT_STATS_EXCLUDE.delete(old);
+        CAT_STATS_EXCLUDE.add(nv);
+      }
       CATS[i] = nv;
     }
   });
@@ -2921,9 +2990,18 @@ function saveCat() {
   CATS.forEach((c, i) => {
     if (emojiByIndex[i] != null) EMOJIS[c] = emojiByIndex[i];
   });
+  const nextExclude = new Set();
+  document.querySelectorAll('#catList .cat-stats-exclude-cb').forEach(cb => {
+    if (!cb.checked) return;
+    const i = parseInt(cb.dataset.i, 10);
+    if (CATS[i]) nextExclude.add(CATS[i]);
+  });
+  CAT_STATS_EXCLUDE = nextExclude;
   persist();
   buildCatFilter();
   applyF();
+  renderKPI();
+  renderMonitor();
   closeCat();
   refreshActiveViews();
 }
@@ -3315,6 +3393,7 @@ Object.assign(window, {
   toggleDetSelect, toggleDetSelectAll, clearDetSelection, applyDetBulkCat, applyDetBulkSubCat, detBulkToggleRefund,
   openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload,
   openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload,
+  toggleInvoicePrinted, downloadInvoiceFile, printInvoiceFile,
   openSplitEditor, closeSplitEditor, addSplitLine, saveSplitEdit: handleSaveSplit,
   clearSplit: handleClearSplit, clearSplitFromModal, toggleSplitExpand: handleToggleSplitExpand,
   updSplitCat: handleUpdSplitCat, updSplitSub: handleUpdSplitSub,

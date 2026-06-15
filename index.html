@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>家庭记账本</title>
+<title>Loc's Home</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.2.0/dist/tabler-icons.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 </head>
@@ -12,7 +12,7 @@
   <div class="login-card">
     <div class="login-logo">
       <div class="logo-mark"><span class="c1"></span><span class="c2"></span><span class="c3"></span></div>
-      <h1>家庭记账本</h1>
+      <h1>Loc's Home</h1>
       <p>登录后管理家庭账本</p>
     </div>
     <form id="loginForm" class="login-form">
@@ -29,12 +29,12 @@
     <div class="sb-logo">
       <div class="logo-mark"><span class="c1"></span><span class="c2"></span><span class="c3"></span></div>
       <div class="sb-logo-text">
-        <h1>家庭记账本</h1>
-        <span id="subtitle">家庭记账 · 导入账单开始使用</span>
+        <h1>Loc's Home</h1>
       </div>
     </div>
     <button type="button" class="sb-toggle" id="sbToggle" title="折叠侧栏"><i class="ti ti-chevrons-left"></i></button>
   </div>
+  <span id="subtitle" class="sb-subtitle">导入账单开始使用</span>
   <div class="nav-label">主菜单</div>
   <nav class="nav">
     <button class="ni on" onclick="sw('ledger',this)" title="明细列表"><span class="ni-icon lav"><i class="ti ti-list-details"></i></span><span class="ni-label">明细列表</span></button>
@@ -286,24 +286,64 @@
   </div>
 
   <div class="page view" id="view-company">
-    <div class="inv-head">
-      <p class="inv-intro">上传公司成本发票，由 DeepSeek AI 自动识别销售方、金额、日期等信息，识别后可手动校对保存。</p>
-      <span class="inv-summary" id="invSummary">上传发票图片，AI 自动识别内容</span>
-    </div>
-    <div class="inv-drop" id="invDropZone">
-      <i class="ti ti-cloud-upload"></i>
-      <p>拖拽发票图片到此处，或点击上传</p>
-      <span>支持 JPG、PNG、PDF，最大 10MB</span>
-    </div>
-    <div class="inv-table-wrap">
-      <table class="inv-table">
-        <thead>
-          <tr>
-            <th>日期</th><th>销售方</th><th>发票号</th><th>类型</th><th>金额</th><th>附件</th><th>操作</th>
-          </tr>
-        </thead>
-        <tbody id="invTableBody"></tbody>
-      </table>
+    <div class="inv-vault">
+      <div class="inv-vault-head">
+        <div class="inv-vault-title">
+          <h2>INVOICE VAULT <span>发票库</span></h2>
+          <p class="inv-vault-sub inv-intro">按公司分别查看、打印、下载发票</p>
+        </div>
+        <button type="button" class="btn inv-upload-btn" onclick="triggerInvoiceUpload()"><i class="ti ti-upload"></i> 上传发票</button>
+      </div>
+
+      <div class="inv-year-cards" id="invYearCards"></div>
+
+      <div class="inv-section">
+        <div class="inv-section-head">
+          <h3>成本发票 <span class="inv-section-tag">进项</span></h3>
+        </div>
+        <div class="inv-company-tabs" id="invCompanyTabs"></div>
+
+        <div class="inv-toolbar">
+          <div class="inv-toolbar-left">
+            <div class="inv-search">
+              <i class="ti ti-search"></i>
+              <input type="search" id="invSearch" placeholder="搜索发票号 / 销售方 / 文件名" autocomplete="off">
+            </div>
+            <select id="invFilterYear" class="inv-filter-sel" aria-label="年份筛选"></select>
+            <select id="invFilterQuarter" class="inv-filter-sel" aria-label="季度筛选">
+              <option value="">全部季度</option>
+              <option value="1">Q1</option>
+              <option value="2">Q2</option>
+              <option value="3">Q3</option>
+              <option value="4">Q4</option>
+            </select>
+            <select id="invFilterStatus" class="inv-filter-sel" aria-label="打印状态">
+              <option value="">全部状态</option>
+              <option value="printed">已打印</option>
+              <option value="unprinted">未打印</option>
+            </select>
+          </div>
+          <div class="inv-toolbar-stats" id="invSummary">共 0 张</div>
+        </div>
+
+        <div class="inv-table-wrap">
+          <table class="inv-table inv-vault-table">
+            <thead>
+              <tr>
+                <th>开票日期</th>
+                <th>项目</th>
+                <th>发票号码 / 销售方</th>
+                <th>购买方</th>
+                <th class="r">税额</th>
+                <th class="r">价税合计</th>
+                <th class="c">打印</th>
+                <th class="c">操作</th>
+              </tr>
+            </thead>
+            <tbody id="invTableBody"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -345,7 +385,7 @@
           <div class="drop-zone" id="dropZone">
             <i class="ti ti-upload"></i>
             <p id="dropZoneHint">请先选择导入来源</p>
-            <span>支持微信 / 支付宝 / 银行流水（CSV、Excel），格式自动识别</span>
+            <span>支持微信 / 支付宝 / 银行流水（含建设银行明细，CSV、Excel），格式自动识别</span>
           </div>
           <input type="file" id="importBillFile" accept=".csv,.txt,.xlsx,.xls" style="display:none">
         </div>
@@ -353,7 +393,7 @@
         <div class="import-preview" id="importPreview">选择来源并上传文件后将显示解析摘要</div>
         <div class="import-dup-panel" id="importDupPanel" style="display:none">
           <div class="import-dup-head">
-            <h5><i class="ti ti-copy"></i> 重复项目 <span class="panel-sub">默认不导入，可勾选需要导入的项</span></h5>
+            <h5><i class="ti ti-copy"></i> 重复项目 <span class="panel-sub">默认不导入；含与微信/支付宝/银行交叉重复项，可勾选后导入并打标</span></h5>
             <div class="import-dup-actions">
               <button type="button" class="btn btn-sm" onclick="toggleAllDupImport(true)">全选</button>
               <button type="button" class="btn btn-sm" onclick="toggleAllDupImport(false)">全不选</button>
@@ -443,7 +483,7 @@
   <div class="mbox wide">
     <div class="mh"><h3>编辑分类</h3><button class="mclose" onclick="closeCat()"><i class="ti ti-x"></i></button></div>
     <div class="mb">
-      <p class="cat-edit-hint">点击圆形图标可自定义 emoji；左侧箭头展开子分类（逗号分隔）。</p>
+      <p class="cat-edit-hint">点击圆形图标可自定义 emoji；左侧箭头展开子分类（逗号分隔）。勾选「不计入统计」的分类不会进入首页总收支、图表等汇总（如人情往来）。</p>
       <div class="cl" id="catList"></div>
       <div class="arow cat-add-row">
         <button type="button" class="cat-emoji-btn" id="nnEmoji" data-emoji="icon:1F4CC" title="新分类图标" onclick="pickNewCatEmoji(event)"></button>

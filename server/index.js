@@ -1,3 +1,4 @@
+import './loadEnv.js';
 import express from 'express';
 import cors from 'cors';
 import { writeFileSync, mkdirSync } from 'fs';
@@ -5,7 +6,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { readState, writeState, mergeTransactions, resetLedger, deleteImportBatchById, changeImportBatchSource, getStats } from './db.js';
 import { initAuth, login, logout, getUserFromToken, parseAuthHeader } from './auth.js';
-import { scanInvoiceImage, getAiStatus } from './deepseek.js';
+import { scanInvoiceImage, getAiStatus, normalizeInvoiceFields } from './deepseek.js';
 import {
   listInvoices, getInvoice, createInvoice, updateInvoice, deleteInvoice,
   saveInvoiceFile, INVOICE_DIR
@@ -200,18 +201,8 @@ app.post('/api/invoices/scan', requireAuth, async (req, res) => {
     if (!data) return res.status(400).json({ error: '请上传发票图片' });
     const raw = String(data).replace(/^data:[^;]+;base64,/, '');
     const result = await scanInvoiceImage(raw, mime || 'image/jpeg');
-    const p = result.parsed;
     res.json({
-      vendor: p.vendor || '',
-      buyer: p.buyer || '',
-      invoiceNo: p.invoiceNo || p.invoice_no || '',
-      invoiceDate: p.invoiceDate || p.invoice_date || '',
-      amount: p.amount ?? null,
-      taxAmount: p.taxAmount ?? p.tax_amount ?? null,
-      total: p.total ?? null,
-      category: p.category || '其他',
-      items: p.items || [],
-      notes: p.notes || '',
+      ...normalizeInvoiceFields(result.parsed, { sourceText: result.ocrText || '' }),
       rawAi: result.raw
     });
   } catch (err) {
@@ -222,7 +213,8 @@ app.post('/api/invoices/scan', requireAuth, async (req, res) => {
 app.post('/api/invoices', requireAuth, (req, res) => {
   try {
     const { data, mime, fileName, rawAi, ...fields } = req.body || {};
-    let invoice = createInvoice({ ...fields, rawAi });
+    const normalized = normalizeInvoiceFields(fields);
+    let invoice = createInvoice({ ...normalized, rawAi });
     if (data) {
       const saved = saveInvoiceFile(invoice.id, data, mime, fileName);
       invoice = updateInvoice(invoice.id, {
@@ -233,16 +225,28 @@ app.post('/api/invoices', requireAuth, (req, res) => {
     }
     res.json(invoice);
   } catch (err) {
+    if (err.status === 409) return res.status(409).json({ error: err.message, duplicate: err.duplicate });
     res.status(500).json({ error: err.message });
   }
 });
 
+const INVOICE_NORMALIZE_KEYS = new Set([
+  'vendor', 'buyer', 'seller', 'invoiceNo', 'invoice_no', 'invoiceDate', 'invoice_date',
+  'amount', 'taxAmount', 'tax_amount', 'total', 'category', 'items', 'notes'
+]);
+
 app.put('/api/invoices/:id', requireAuth, (req, res) => {
   try {
-    const invoice = updateInvoice(Number(req.params.id), req.body || {});
+    const body = req.body || {};
+    let patch = { ...body };
+    if (Object.keys(body).some(k => INVOICE_NORMALIZE_KEYS.has(k))) {
+      patch = { ...patch, ...normalizeInvoiceFields(body) };
+    }
+    const invoice = updateInvoice(Number(req.params.id), patch);
     if (!invoice) return res.status(404).json({ error: '发票不存在' });
     res.json(invoice);
   } catch (err) {
+    if (err.status === 409) return res.status(409).json({ error: err.message, duplicate: err.duplicate });
     res.status(500).json({ error: err.message });
   }
 });
