@@ -831,57 +831,6 @@ function creditBillDueMarksInRange(billDay, dueDay, rangeStart, rangeEnd) {
   return { bills, dues };
 }
 
-function creditTimelineRange(cards) {
-  const today = startOfDay(new Date());
-  let contentMin = null;
-  let contentMax = null;
-
-  const bump = d => {
-    if (!d) return;
-    if (contentMin == null || dayNum(d) < dayNum(contentMin)) contentMin = d;
-    if (contentMax == null || dayNum(d) > dayNum(contentMax)) contentMax = d;
-  };
-
-  cards.forEach(acc => {
-    const { billDay, dueDay } = acc.credit || {};
-    if (!billDay || !dueDay) return;
-    const span = creditInterestFreeSpan(billDay, dueDay);
-    if (!span) return;
-    bump(span.bill);
-    bump(span.freeStart);
-    bump(span.freeEnd);
-  });
-
-  const pad = 3;
-  if (contentMin == null) {
-    return { start: addDays(today, -14), end: addDays(today, 14), today };
-  }
-
-  const leftNeed = dayNum(today) - dayNum(contentMin);
-  const rightNeed = dayNum(contentMax) - dayNum(today);
-  const halfSpan = Math.max(leftNeed, rightNeed, 10) + pad;
-
-  return {
-    start: addDays(today, -halfSpan),
-    end: addDays(today, halfSpan),
-    today
-  };
-}
-
-function creditTimelineAxisTicks(rangeStart, rangeEnd) {
-  const ticks = [];
-  const total = dayNum(rangeEnd) - dayNum(rangeStart);
-  const step = total > 50 ? 7 : total > 28 ? 5 : 3;
-  for (let i = 0; i <= total; i += step) {
-    const d = addDays(rangeStart, i);
-    ticks.push({ date: d, left: pctInRange(d, rangeStart, rangeEnd) });
-  }
-  if (!ticks.some(t => dayNum(t.date) === dayNum(rangeEnd))) {
-    ticks.push({ date: rangeEnd, left: 100 });
-  }
-  return ticks;
-}
-
 function renderCreditTimelineMarks(marks, rangeStart, rangeEnd, span) {
   const billHtml = marks.bills.map(b => {
     const left = pctInRange(b.date, rangeStart, rangeEnd);
@@ -896,71 +845,111 @@ function renderCreditTimelineMarks(marks, rangeStart, rangeEnd, span) {
   return billHtml + dueHtml;
 }
 
-function renderCreditTimelineRow(acc, rangeStart, rangeEnd) {
-  const c = acc.credit || {};
-  const displayName = acc.displayName || creditCardDisplayName(acc);
-  const shortName = displayName.length > 16 ? `${displayName.slice(0, 16)}…` : displayName;
-  const span = creditInterestFreeSpan(c.billDay, c.dueDay);
-  const label = `<div class="credit-tl-label">${accountBrandMarkHtml(acc.pay, 20)}<span class="credit-tl-name" title="${esc(displayName)}">${esc(shortName)}</span></div>`;
+function creditCardPriorityList(cards) {
+  return cards
+    .map(acc => {
+      const { billDay, dueDay } = acc.credit || {};
+      const span = creditInterestFreeSpan(billDay, dueDay);
+      return {
+        acc,
+        span,
+        daysRemaining: span?.daysRemaining ?? null,
+        owner: CREDIT_CARD_GROUPS.find(g => g.id === creditCardGroupId(acc))?.name || '',
+        hasSchedule: !!(billDay && dueDay)
+      };
+    })
+    .sort((a, b) => {
+      if (a.hasSchedule !== b.hasSchedule) return a.hasSchedule ? -1 : 1;
+      if (a.daysRemaining == null && b.daysRemaining == null) {
+        return (a.acc.displayName || '').localeCompare(b.acc.displayName || '', 'zh');
+      }
+      if (a.daysRemaining == null) return 1;
+      if (b.daysRemaining == null) return -1;
+      if (b.daysRemaining !== a.daysRemaining) return b.daysRemaining - a.daysRemaining;
+      return (a.acc.displayName || '').localeCompare(b.acc.displayName || '', 'zh');
+    });
+}
 
-  if (!span) {
-    return `<div class="credit-tl-row credit-tl-row--empty">${label}<div class="credit-tl-track"><span class="credit-tl-missing">请设置账单日与还款日</span></div></div>`;
-  }
+function creditTimelinePhase(span, today) {
+  const tn = dayNum(today);
+  const fs = dayNum(span.freeStart);
+  const fe = dayNum(span.freeEnd);
+  if (tn < fs) return { phase: 'before', label: `${fs - tn} 天后开始` };
+  if (tn <= fe) return { phase: 'during', label: `剩 ${span.daysRemaining} 天` };
+  return { phase: 'after', label: '已过还款日' };
+}
 
-  const left = pctInRange(span.freeStart, rangeStart, rangeEnd);
-  const width = Math.max(1.5, pctInRange(span.freeEnd, rangeStart, rangeEnd) - left);
-  const marks = creditBillDueMarksInRange(c.billDay, c.dueDay, rangeStart, rangeEnd);
-  const markHtml = renderCreditTimelineMarks(marks, rangeStart, rangeEnd, span);
+function cardInterestFreeRange(acc) {
+  const { billDay, dueDay } = acc.credit || {};
+  const span = creditInterestFreeSpan(billDay, dueDay);
+  if (!span) return null;
+  const today = startOfDay(new Date());
+  const halfSpan = 18;
+  return {
+    start: addDays(today, -halfSpan),
+    end: addDays(today, halfSpan),
+    today,
+    todayPct: 50,
+    span,
+    phase: creditTimelinePhase(span, today)
+  };
+}
 
-  return `<div class="credit-tl-row">
-    ${label}
-    <div class="credit-tl-track">
-      <div class="credit-tl-bar" style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%" title="当前免息期 ${fmtTimelineDate(span.freeStart)} — ${fmtTimelineDate(span.freeEnd)}">
-        <span class="credit-tl-bar-fill"></span>
-        <span class="credit-tl-bar-text">免息 ${fmtTimelineDate(span.freeStart)}–${fmtTimelineDate(span.freeEnd)} · 还剩 ${span.daysRemaining} 天</span>
-      </div>
+function clipBarPct(left, width) {
+  const right = left + width;
+  const clippedLeft = Math.max(0, left);
+  const clippedRight = Math.min(100, right);
+  return {
+    left: clippedLeft,
+    width: Math.max(0, clippedRight - clippedLeft)
+  };
+}
+
+function renderInlineCreditTimeline(acc) {
+  const range = cardInterestFreeRange(acc);
+  if (!range) return '<span class="accounts-credit-tl-missing">—</span>';
+  const { start, end, span, phase, todayPct } = range;
+  const rawLeft = pctInRange(span.freeStart, start, end);
+  const rawWidth = Math.max(1.5, pctInRange(span.freeEnd, start, end) - rawLeft);
+  const bar = clipBarPct(rawLeft, rawWidth);
+  const marks = creditBillDueMarksInRange(acc.credit.billDay, acc.credit.dueDay, start, end);
+  const markHtml = renderCreditTimelineMarks(marks, start, end, span);
+  const phaseClass = phase.phase === 'during' ? ' accounts-credit-tl--during'
+    : phase.phase === 'before' ? ' accounts-credit-tl--before' : ' accounts-credit-tl--after';
+  const barHtml = bar.width > 0
+    ? `<div class="accounts-credit-tl-bar" style="left:${bar.left.toFixed(2)}%;width:${bar.width.toFixed(2)}%">
+        <span class="accounts-credit-tl-bar-fill"></span>
+      </div>`
+    : '';
+  return `<div class="accounts-credit-tl${phaseClass}" title="免息 ${fmtTimelineDate(span.freeStart)} — ${fmtTimelineDate(span.freeEnd)}">
+    <div class="accounts-credit-tl-track">
+      ${barHtml}
       ${markHtml}
+      <span class="accounts-credit-tl-today" style="left:${todayPct}%"></span>
     </div>
+    <span class="accounts-credit-tl-days">${phase.label}</span>
   </div>`;
 }
 
-function renderCreditTimelineHtml(cards, groups) {
+function renderCreditPriorityHtml(cards) {
   if (!cards.length) return '';
-  const { start, end, today } = creditTimelineRange(cards);
-  const todayLeft = pctInRange(today, start, end);
-  const ticks = creditTimelineAxisTicks(start, end);
-  const axis = ticks.map(t =>
-    `<span class="credit-tl-tick" style="left:${t.left.toFixed(2)}%">${fmtTimelineDate(t.date)}</span>`
-  ).join('');
-  const groupBlocks = groups.map(g => {
-    const rows = g.cards.map(c => renderCreditTimelineRow(c, start, end)).join('');
-    if (!rows) return '';
-    return `<div class="credit-tl-group">
-      <div class="credit-tl-group-name">${esc(g.name)}</div>
-      ${rows}
-    </div>`;
+  const ranked = creditCardPriorityList(cards).filter(r => r.hasSchedule);
+  if (!ranked.length) return '';
+
+  const items = ranked.map((row, i) => {
+    const name = row.acc.displayName || creditCardDisplayName(row.acc);
+    const top = i === 0 ? ' accounts-credit-priority-chip--top' : '';
+    return `<li class="accounts-credit-priority-chip${top}" title="还款 ${fmtTimelineDate(row.span.freeEnd)}">
+      <span class="accounts-credit-priority-rank">${i + 1}</span>
+      ${accountBrandMarkHtml(row.acc.pay, 20)}
+      <span class="accounts-credit-priority-name">${esc(name)}</span>
+      <span class="accounts-credit-priority-days">${row.daysRemaining}天</span>
+    </li>`;
   }).join('');
 
-  return `<div class="cc full accounts-credit-timeline-card">
-    <div class="accounts-credit-timeline-head">
-      <div class="ct"><i class="ti ti-timeline"></i> 免息期时间轴</div>
-      <span class="accounts-credit-timeline-hint">绿色条为当前免息期；橙线为账单日，红线为还款日；以今天为中轴</span>
-    </div>
-    <div class="credit-tl-wrap" style="--today-pct:${todayLeft.toFixed(2)}">
-      <div class="credit-tl-today-global" aria-hidden="true"><span class="credit-tl-today-line"></span></div>
-      <div class="credit-tl-axis">
-        ${axis}
-        <div class="credit-tl-today" style="left:${todayLeft.toFixed(2)}%">
-          <span class="credit-tl-today-label">今天 ${fmtTimelineDate(today)}</span>
-        </div>
-      </div>
-      <div class="credit-tl-legend">
-        <span><i class="credit-tl-legend-dot bill"></i>账单日</span>
-        <span><i class="credit-tl-legend-dot due"></i>还款日</span>
-        <span><i class="credit-tl-legend-dot free"></i>免息期</span>
-      </div>
-      <div class="credit-tl-groups">${groupBlocks}</div>
-    </div>
+  return `<div class="accounts-credit-priority-bar">
+    <div class="accounts-credit-priority-bar-label"><i class="ti ti-list-numbers"></i> 今日优先</div>
+    <ol class="accounts-credit-priority-strip">${items}</ol>
   </div>`;
 }
 
@@ -1012,6 +1001,7 @@ function renderCreditCardRow(acc, { isNew = false, editing = false, pooled = fal
       <td><span class="accounts-credit-val">${debtCell}</span></td>
       <td><span class="accounts-credit-val">${formatCreditBrowseDay(c.billDay)}</span></td>
       <td><span class="accounts-credit-val">${formatCreditBrowseDay(c.dueDay)}</span></td>
+      <td class="accounts-credit-tl-td">${renderInlineCreditTimeline(acc)}</td>
     </tr>`;
   }
 
@@ -1069,7 +1059,7 @@ function renderCreditPoolHeaderRow(pool, cards, editing) {
       <td><span class="accounts-credit-val accounts-credit-val--pool">${formatCreditBrowseAmount(c.limit)}</span></td>
       <td><span class="accounts-credit-val accounts-credit-val--pool">${formatCreditBrowseAmount(c.available)}</span></td>
       <td><span class="accounts-credit-val accounts-credit-val--pool">${formatCreditBrowseAmount(c.debt)}</span></td>
-      <td colspan="2"></td>
+      <td colspan="3"></td>
     </tr>`;
   }
 
@@ -1080,15 +1070,15 @@ function renderCreditPoolHeaderRow(pool, cards, editing) {
     <td>${fields.limit}</td>
     <td>${fields.available}</td>
     <td>${fields.debt}</td>
-    <td colspan="2"></td>
+    <td colspan="3"></td>
     ${actionTd}
   </tr>`;
 }
 
 function renderCreditCardGroupTableBody(group, editing) {
   const blocks = organizeGroupCards(group.cards);
+  const colSpan = editing ? 10 : 8;
   if (!blocks.length) {
-    const colSpan = editing ? 9 : 7;
     return `<tr><td colspan="${colSpan}" class="accounts-credit-group-empty">暂无卡片</td></tr>`;
   }
   return blocks.map(block => {
@@ -1110,10 +1100,33 @@ function renderCreditCardGroupTable(group, editing) {
   const bindBtn = editing
     ? `<button type="button" class="btn btn-sm" data-bind-credit-group="${group.id}" title="将选中的卡绑定为共享额度"><i class="ti ti-link"></i> 绑定共享额度</button>`
     : '';
+  const tlTh = editing ? '' : '<th class="accounts-credit-col-tl">免息期</th>';
+  const colgroup = editing
+    ? `<colgroup>
+        <col class="accounts-credit-col-bind">
+        <col class="accounts-credit-col-name">
+        <col class="accounts-credit-col-cardno">
+        <col class="accounts-credit-col-amt">
+        <col class="accounts-credit-col-amt">
+        <col class="accounts-credit-col-amt">
+        <col class="accounts-credit-col-day">
+        <col class="accounts-credit-col-day">
+        <col class="accounts-credit-col-actions">
+      </colgroup>`
+    : `<colgroup>
+        <col class="accounts-credit-col-name">
+        <col class="accounts-credit-col-tail">
+        <col class="accounts-credit-col-amt">
+        <col class="accounts-credit-col-amt">
+        <col class="accounts-credit-col-amt">
+        <col class="accounts-credit-col-day">
+        <col class="accounts-credit-col-day">
+        <col class="accounts-credit-col-tl">
+      </colgroup>`;
   const body = group.cards.length
     ? renderCreditCardGroupTableBody(group, editing)
     : (() => {
-        const colSpan = editing ? 9 : 7;
+        const colSpan = editing ? 10 : 8;
         return `<tr><td colspan="${colSpan}" class="accounts-credit-group-empty">暂无卡片</td></tr>`;
       })();
   const digitTh = editing ? '<th>卡号</th>' : '<th>尾号</th>';
@@ -1123,9 +1136,10 @@ function renderCreditCardGroupTable(group, editing) {
       <div class="accounts-credit-group-actions">${bindBtn}${addBtn}</div>
     </div>
     <div class="accounts-credit-table-wrap">
-      <table class="report-table accounts-credit-table${editing ? ' is-editing' : ''}">
+      <table class="report-table accounts-credit-table${editing ? ' is-editing' : ' is-viewing'}">
+        ${colgroup}
         <thead><tr>
-          ${bindTh}<th>账户</th>${digitTh}<th>信用额度</th><th>可用额度</th><th>欠款</th><th>账单日</th><th>还款日</th>${actionTh}
+          ${bindTh}<th>账户</th>${digitTh}<th>额度</th><th>可用</th><th>欠款</th><th>账单日</th><th>还款日</th>${tlTh}${actionTh}
         </tr></thead>
         <tbody id="accountsCreditTbody-${group.id}">${body}</tbody>
       </table>
@@ -1139,16 +1153,15 @@ function renderCreditCardSection() {
   const cards = creditCardAccounts();
   const groups = groupCreditCardAccounts(cards);
   const editing = creditCardEditMode;
-  const hint = editing
-    ? '勾选多张卡可绑定共享额度；额度与可用/欠款自动互算，失焦保存'
-    : '浏览模式，点击铅笔进入编辑';
-  el.innerHTML = `${renderCreditTimelineHtml(cards, groups)}<div class="cc full accounts-credit-card${editing ? ' is-editing' : ' is-viewing'}">
+  const editTitle = editing ? '退出编辑' : '编辑';
+  const priorityHtml = renderCreditPriorityHtml(cards);
+  el.innerHTML = `<div class="cc full accounts-credit-card${editing ? ' is-editing' : ' is-viewing'}">
     <div class="accounts-credit-head">
-      <div class="ct"><i class="ti ti-credit-card"></i> 信用卡管理 <span class="accounts-credit-cnt">${cards.length} 张</span></div>
-      <div class="accounts-credit-head-actions">
-        <span class="accounts-credit-hint">${hint}</span>
-        <button type="button" class="btn btn-sm accounts-credit-edit-btn${editing ? ' on' : ''}" onclick="toggleCreditCardEditMode()" title="${editing ? '退出编辑' : '编辑'}" aria-label="${editing ? '退出编辑' : '编辑'}"><i class="ti ${editing ? 'ti-pencil-off' : 'ti-pencil'}"></i></button>
+      <div class="accounts-credit-head-top">
+        <div class="ct"><i class="ti ti-credit-card"></i> 信用卡管理 <span class="accounts-credit-cnt">${cards.length} 张</span></div>
+        <button type="button" class="btn btn-sm accounts-credit-edit-btn${editing ? ' on' : ''}" onclick="toggleCreditCardEditMode()" title="${editTitle}" aria-label="${editTitle}"><i class="ti ${editing ? 'ti-pencil-off' : 'ti-pencil'}"></i></button>
       </div>
+      ${priorityHtml ? `<div class="accounts-credit-priority-wrap">${priorityHtml}</div>` : ''}
     </div>
     <div class="accounts-credit-groups">${groups.map(g => renderCreditCardGroupTable(g, editing)).join('')}</div>
     ${cards.length ? '' : `<div class="accounts-credit-empty">暂无信用卡${editing ? '，可在各分组下新增卡片' : ''}，或在账户管理中将账户设为信用卡。</div>`}

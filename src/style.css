@@ -915,7 +915,92 @@ body{
   min-width:220px;padding:8px 10px;border:1px solid var(--bdr);border-radius:var(--r);
   background:var(--surf);font:inherit;font-size:13px;color:var(--txt);
 }
-.accounts-credit-timeline-card{margin-bottom:14px}
+.accounts-credit-priority-bar{
+  display:flex;align-items:center;gap:10px;min-width:760px;
+}
+.accounts-credit-card.is-editing .accounts-credit-priority-bar{min-width:900px}
+.accounts-credit-priority-bar-label{
+  flex-shrink:0;font-size:11px;font-weight:700;color:var(--txt3);white-space:nowrap;
+  display:inline-flex;align-items:center;gap:4px;
+}
+.accounts-credit-priority-strip{
+  list-style:none;margin:0;padding:0;display:flex;align-items:stretch;gap:8px;
+  overflow-x:auto;min-width:0;flex:1;-webkit-overflow-scrolling:touch;
+}
+.accounts-credit-priority-chip{
+  flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;padding:6px 10px;
+  border:1px solid var(--bdr);border-radius:999px;background:var(--surf2);
+}
+.accounts-credit-priority-chip--top{
+  border-color:rgba(34,197,94,.45);background:linear-gradient(90deg,rgba(34,197,94,.1),rgba(34,197,94,.03));
+}
+.accounts-credit-priority-chip .fund-brand-logo,.accounts-credit-priority-chip .fund-brand-mark{
+  flex-shrink:0;border-radius:5px;
+}
+.accounts-credit-priority-rank{
+  flex-shrink:0;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:800;color:var(--txt2);background:var(--surf);border:1px solid var(--bdr);
+}
+.accounts-credit-priority-chip--top .accounts-credit-priority-rank{
+  color:var(--grn-t);background:var(--grn-bg);border-color:rgba(34,197,94,.35);
+}
+.accounts-credit-priority-name{
+  font-size:12px;font-weight:700;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.accounts-credit-priority-days{
+  flex-shrink:0;font-size:11px;font-weight:700;color:var(--grn-t);white-space:nowrap;
+}
+.accounts-credit-head{
+  display:flex;flex-direction:column;gap:0;margin-bottom:10px;
+}
+.accounts-credit-head-top{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;
+}
+.accounts-credit-head-top .ct,.accounts-credit-head .ct{margin-bottom:0}
+.accounts-credit-priority-wrap{
+  overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -2px;
+}
+.accounts-credit-cnt{
+  font-size:11px;font-weight:600;color:var(--amb-t);background:var(--amb-bg);
+  padding:1px 7px;border-radius:99px;margin-left:4px;vertical-align:middle;
+}
+.accounts-credit-groups{display:flex;flex-direction:column;gap:16px}
+.accounts-credit-card.is-viewing .accounts-credit-table{table-layout:fixed;width:100%;min-width:760px}
+.accounts-credit-card.is-editing .accounts-credit-table{table-layout:fixed;width:100%;min-width:900px}
+.accounts-credit-col-bind{width:36px}
+.accounts-credit-col-name{width:19%}
+.accounts-credit-col-tail{width:7%}
+.accounts-credit-col-cardno{width:14%}
+.accounts-credit-col-amt{width:9%}
+.accounts-credit-col-day{width:7%}
+.accounts-credit-col-tl{width:22%}
+.accounts-credit-col-actions{width:72px}
+.accounts-credit-tl-td{padding:6px 8px!important;vertical-align:middle}
+.accounts-credit-tl{display:flex;align-items:center;gap:8px;min-width:0}
+.accounts-credit-tl-track{
+  position:relative;flex:1;min-width:88px;height:22px;background:var(--surf2);
+  border-radius:6px;border:1px solid var(--bdr);overflow:hidden;
+}
+.accounts-credit-tl-today{
+  position:absolute;top:0;bottom:0;width:2px;transform:translateX(-50%);
+  background:var(--red);border-radius:1px;z-index:3;box-shadow:0 0 0 1px rgba(239,68,68,.2);
+}
+.accounts-credit-tl-days{
+  flex-shrink:0;font-size:10px;font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums;
+}
+.accounts-credit-tl--during .accounts-credit-tl-days{color:var(--grn-t)}
+.accounts-credit-tl--before .accounts-credit-tl-days{color:var(--amb-t)}
+.accounts-credit-tl--after .accounts-credit-tl-days{color:var(--red-t)}
+.accounts-credit-tl-bar{
+  position:absolute;top:3px;height:16px;border-radius:4px;overflow:hidden;min-width:4px;z-index:1;
+}
+.accounts-credit-tl-bar-fill{
+  display:block;width:100%;height:100%;
+  background:linear-gradient(90deg,rgba(34,197,94,.22),rgba(34,197,94,.42));
+  border:1px solid rgba(34,197,94,.35);border-radius:4px;
+}
+.accounts-credit-tl-track .credit-tl-mark{top:2px;bottom:2px}
+.accounts-credit-tl-missing{font-size:12px;color:var(--txt3)}
 .accounts-credit-timeline-head{
   display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;
 }
@@ -1001,18 +1086,6 @@ body{
   .credit-tl-row{flex-direction:column;align-items:stretch;gap:4px}
   .credit-tl-label{width:auto}
 }
-.accounts-credit-card{margin-bottom:16px}
-.accounts-credit-head{
-  display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px;
-}
-.accounts-credit-head .ct{margin-bottom:0}
-.accounts-credit-head-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.accounts-credit-cnt{
-  font-size:11px;font-weight:600;color:var(--amb-t);background:var(--amb-bg);
-  padding:1px 7px;border-radius:99px;margin-left:4px;vertical-align:middle;
-}
-.accounts-credit-hint{font-size:11.5px;color:var(--txt3)}
-.accounts-credit-groups{display:flex;flex-direction:column;gap:16px}
 .accounts-credit-group-head{
   display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;
 }
@@ -1031,15 +1104,14 @@ body{
   font-size:13px;color:var(--txt3);text-align:center;padding:20px 12px;line-height:1.55;
 }
 .accounts-credit-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
-.accounts-credit-table{min-width:820px}
-.accounts-credit-table td{padding:6px 10px;vertical-align:middle}
-.accounts-credit-table th:nth-child(n+3):not(:last-child),
-.accounts-credit-table td:nth-child(n+3):not(:last-child){text-align:right}
-.accounts-credit-table th:last-child,.accounts-credit-table td:last-child{text-align:center;width:72px}
+.accounts-credit-table td{padding:6px 8px;vertical-align:middle}
+.accounts-credit-card.is-viewing .accounts-credit-table th:nth-child(n+3):not(:last-child):not(.accounts-credit-col-tl),
+.accounts-credit-card.is-viewing .accounts-credit-table td:nth-child(n+3):not(:last-child):not(.accounts-credit-tl-td){text-align:right}
+.accounts-credit-card.is-editing .accounts-credit-table th:nth-child(n+4):not(:last-child),
+.accounts-credit-card.is-editing .accounts-credit-table td:nth-child(n+4):not(:last-child){text-align:right}
+.accounts-credit-table th:last-child,.accounts-credit-table td:last-child{text-align:center}
 .accounts-credit-actions{display:flex;justify-content:center;gap:4px}
 .accounts-credit-edit-btn.on{background:var(--primary-bg);border-color:var(--primary-l);color:var(--primary-t)}
-.accounts-credit-card.is-viewing .accounts-credit-table th:nth-child(n+3),
-.accounts-credit-card.is-viewing .accounts-credit-table td:nth-child(n+3){text-align:right}
 .accounts-credit-val{
   display:inline-block;font-size:13px;color:var(--txt);font-variant-numeric:tabular-nums;line-height:1.4;
 }
