@@ -227,10 +227,13 @@
 
   <div class="page view" id="view-accounts">
     <div class="accounts-page-head">
-      <p class="report-intro">管理信用卡额度、账单日与还款日，查看免息期时间轴；可绑定同银行共享额度。</p>
+      <p class="report-intro">管理信用卡额度、账单日与还款日，查看免息期时间轴；登记现金账户余额与未来支出预算。可绑定同银行共享额度。</p>
       <button type="button" class="accounts-settings-btn" onclick="openAccountsMgr()" title="账户管理" aria-label="账户管理"><i class="ti ti-settings"></i></button>
     </div>
+    <div id="accountsStatusSection"></div>
     <div id="accountsCreditSection"></div>
+    <div id="accountsCashSection"></div>
+    <div id="accountsBudgetSection"></div>
   </div>
 
   <div class="page view" id="view-catreport">
@@ -281,7 +284,8 @@
   </div>
 
   <div class="page view" id="view-income">
-    <p class="report-intro">按分类查看收入月度走势，各柱按子分类堆叠着色；闲置转让、乐极客收入等对冲类按净收入（收入减成本支出）统计，点击月份查看明细。</p>
+    <p class="report-intro">按分类查看收入月度走势，各柱按子分类堆叠着色；对冲类按净收入统计，点击月份查看明细。可在下方自定义监视的分类。</p>
+    <div class="income-toolbar" id="incomeToolbar"></div>
     <div class="income-grid" id="incomeGrid"></div>
   </div>
 

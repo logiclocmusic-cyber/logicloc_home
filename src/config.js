@@ -79,8 +79,10 @@ export const CAT_COLORS = [
 
 export const MONITOR_CATS = ['餐饮美食','水电煤气','通讯费用','交通出行','母婴亲子','保险','医疗健康','工商税务'];
 
-/** 收入数据页展示的分类 */
-export const INCOME_DATA_CATS = ['闲置转让', '乐极客收入', '红包奖励', '工资收入'];
+/** 收入数据页默认监视的分类 */
+export const DEFAULT_INCOME_DATA_CATS = ['闲置转让', '乐极客收入', '红包奖励', '工资收入'];
+/** @deprecated 使用 DEFAULT_INCOME_DATA_CATS */
+export const INCOME_DATA_CATS = DEFAULT_INCOME_DATA_CATS;
 export const EXCLUDE_CATS = new Set(['转账']);
 export const OFFSET_CATS = new Set(['代拍代购','闲置转让','餐饮美食','探店置换','乐极客收入']);
 /** 默认不计入首页总收支统计的分类（可在「编辑分类」中调整） */

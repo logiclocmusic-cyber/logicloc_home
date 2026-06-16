@@ -30,6 +30,7 @@ const BANK_RULES = [
   { patterns: ['杭州银行'], code: 'HZBANK', colors: ['#00857a', '#006b62'], name: '杭州银行' },
   { patterns: ['江苏银行'], code: 'JSBANK', colors: ['#1565c0', '#0d47a1'], name: '江苏银行' },
   { patterns: ['南京银行'], code: 'NJCB', colors: ['#c41230', '#8b0e22'], name: '南京银行' },
+  { patterns: ['天府银行', '天府'], code: 'TFBANK', colors: ['#c41230', '#8b0e22'], name: '天府银行' },
   { patterns: ['支付宝', '花呗', '余额宝'], code: 'ALIPAY', colors: ['#1677ff', '#0958d9'], name: '支付宝' },
   { patterns: ['微信', '零钱'], code: 'WECHAT', colors: ['#07c160', '#059a4c'], name: '微信支付' },
   { patterns: ['云闪付', '银联'], code: 'UPOP', colors: ['#e21836', '#b5122b'], name: '云闪付' },
@@ -74,9 +75,14 @@ export function accountGroupName(key) {
   return null;
 }
 
+const CUSTOM_BANK_LOGOS = {
+  TFBANK: '/bank-logos/tfbank.png'
+};
+
 const NO_LOGO_FILE = new Set(['HZBANK', 'UPOP']);
 
 function bankLogoUrl(code) {
+  if (CUSTOM_BANK_LOGOS[code]) return CUSTOM_BANK_LOGOS[code];
   if (['WECHAT', 'ALIPAY', 'UPOP'].includes(code) || NO_LOGO_FILE.has(code)) return null;
   const fileCode = LOGO_CODE_ALIAS[code] || code;
   return `${BANK_LOGO_BASE}/${fileCode}.png`;

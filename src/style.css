@@ -902,6 +902,25 @@ body{
   display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:4px;
 }
 .accounts-page-head .report-intro{flex:1;min-width:0;margin-bottom:0}
+.accounts-status-bar{
+  display:flex;flex-wrap:wrap;gap:12px;margin:0 0 16px;
+}
+.accounts-status-item{
+  flex:1;min-width:140px;display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  padding:14px 16px;border:1px solid var(--bdr);border-radius:var(--r);
+  background:var(--surf);box-shadow:var(--shadow-sm);
+}
+.accounts-status-label{
+  font-size:13px;font-weight:600;color:var(--txt2);display:inline-flex;align-items:center;gap:6px;
+}
+.accounts-status-val{
+  font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.3px;
+}
+.accounts-status-item--budget .accounts-status-val{color:var(--amb-t)}
+.accounts-status-item--cash .accounts-status-val{color:var(--grn-t)}
+.accounts-status-item--debt .accounts-status-val{color:var(--red-t)}
+.accounts-status-item--net-pos .accounts-status-val{color:var(--blu-t)}
+.accounts-status-item--net-neg .accounts-status-val{color:var(--red-t)}
 .accounts-settings-btn{
   flex-shrink:0;width:40px;height:40px;border:1px solid var(--bdr);border-radius:var(--r);
   background:var(--surf);color:var(--txt2);font-size:18px;cursor:pointer;
@@ -1106,6 +1125,62 @@ body{
 .accounts-credit-empty{
   font-size:13px;color:var(--txt3);text-align:center;padding:20px 12px;line-height:1.55;
 }
+.accounts-cash-card{margin-top:16px}
+.accounts-cash-head{display:flex;flex-direction:column;gap:0;margin-bottom:10px}
+.accounts-cash-head-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.accounts-cash-head-top .ct{margin-bottom:0}
+.accounts-cash-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.accounts-cash-table{table-layout:fixed;width:100%;min-width:360px}
+.accounts-cash-col-name{width:52%}
+.accounts-cash-col-amt{width:34%}
+.accounts-cash-col-actions{width:64px}
+.accounts-cash-table td{padding:8px 10px;vertical-align:middle}
+.accounts-cash-table th:nth-child(2),
+.accounts-cash-table td:nth-child(2){text-align:right}
+.accounts-cash-table th:last-child,.accounts-cash-table td:last-child{text-align:center}
+.accounts-cash-val{display:inline-block;font-size:13px;color:var(--txt);font-variant-numeric:tabular-nums}
+.accounts-cash-val--name{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.accounts-cash-name-cell{display:flex;align-items:center;gap:8px;min-width:0}
+.accounts-cash-name-cell .fund-brand-logo,
+.accounts-cash-name-cell .fund-brand-mark{flex-shrink:0;border-radius:6px;object-fit:contain}
+.accounts-cash-name-cell .accounts-cash-name{flex:1;min-width:72px}
+.accounts-cash-val--sum{font-weight:700;color:var(--primary-t)}
+.accounts-cash-sum-label{font-size:12px;font-weight:700;color:var(--txt3)}
+.accounts-cash-sum-row td{border-top:1px solid var(--bdr);background:var(--surf2)}
+.accounts-cash-inp{
+  width:100%;padding:6px 8px;border:1px solid var(--bdr);border-radius:8px;
+  background:var(--surf);font:inherit;font-size:12.5px;color:var(--txt);
+}
+.accounts-cash-inp:focus{outline:none;border-color:var(--primary-l);box-shadow:0 0 0 3px var(--primary-bg)}
+.accounts-cash-actions{display:flex;justify-content:center}
+.accounts-cash-foot{margin-top:10px}
+.accounts-budget-card{margin-top:16px}
+.accounts-budget-head{display:flex;flex-direction:column;gap:0;margin-bottom:10px}
+.accounts-budget-head-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.accounts-budget-head-top .ct{margin-bottom:0}
+.accounts-budget-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.accounts-budget-table{table-layout:fixed;width:100%;min-width:420px}
+.accounts-budget-col-name{width:40%}
+.accounts-budget-col-date{width:28%}
+.accounts-budget-col-amt{width:22%}
+.accounts-budget-col-actions{width:64px}
+.accounts-budget-table td{padding:8px 10px;vertical-align:middle}
+.accounts-budget-table th:nth-child(3),.accounts-budget-table td:nth-child(3){text-align:right}
+.accounts-budget-table th:last-child,.accounts-budget-table td:last-child{text-align:center}
+.accounts-budget-val{display:inline-block;font-size:13px;color:var(--txt);font-variant-numeric:tabular-nums}
+.accounts-budget-val--name{font-weight:600}
+.accounts-budget-val--amt{font-weight:600;color:var(--red-t)}
+.accounts-budget-val--sum{font-weight:700;color:var(--red-t)}
+.accounts-budget-sum-label{font-size:12px;font-weight:700;color:var(--txt3)}
+.accounts-budget-sum-row td{border-top:1px solid var(--bdr);background:var(--surf2)}
+.accounts-budget-inp{
+  width:100%;padding:6px 8px;border:1px solid var(--bdr);border-radius:8px;
+  background:var(--surf);font:inherit;font-size:12.5px;color:var(--txt);
+}
+.accounts-budget-inp:focus{outline:none;border-color:var(--primary-l);box-shadow:0 0 0 3px var(--primary-bg)}
+.accounts-budget-inp[type="date"]{min-width:0;padding:5px 8px}
+.accounts-budget-actions{display:flex;justify-content:center}
+.accounts-budget-foot{margin-top:10px}
 .accounts-credit-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .accounts-credit-table td{padding:6px 8px;vertical-align:middle}
 .accounts-credit-card.is-viewing .accounts-credit-table th:nth-child(n+3):not(:last-child):not(.accounts-credit-col-tl),
@@ -1442,6 +1517,28 @@ body{
 }
 
 /* 收入数据 */
+.income-toolbar{
+  margin-bottom:14px;padding:12px 14px;border:1px solid var(--bdr);border-radius:var(--r);
+  background:var(--surf2);
+}
+.income-toolbar-inner{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.income-toolbar-label{font-size:12px;font-weight:600;color:var(--txt2);flex-shrink:0}
+.income-cat-chips{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1;min-width:0}
+.income-cat-chip{
+  display:inline-flex;align-items:center;gap:6px;padding:4px 8px 4px 6px;
+  border:1px solid var(--bdr);border-radius:999px;background:var(--surf);font-size:12px;color:var(--txt);
+}
+.income-cat-chip-x{
+  width:18px;height:18px;border:none;border-radius:50%;background:transparent;
+  color:var(--txt3);cursor:pointer;font-size:14px;line-height:1;padding:0;
+}
+.income-cat-chip-x:hover{background:var(--surf3);color:var(--red-t)}
+.income-cat-add{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.income-cat-add-sel{
+  height:30px;border:1px solid var(--bdr);border-radius:8px;padding:0 8px;
+  font-size:12px;background:var(--surf);color:var(--txt);max-width:160px;
+}
+.income-toolbar-empty,.income-toolbar-full{font-size:12px;color:var(--txt3)}
 .income-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;margin-bottom:18px}
 @media(max-width:900px){.income-grid{grid-template-columns:1fr}}
 .income-card{
@@ -1452,12 +1549,23 @@ body{
 .income-card-meta{min-width:0}
 .income-card-title{font-size:14px;font-weight:600;color:var(--txt);line-height:1.3;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .income-net-tag{font-size:10px;font-weight:600;color:var(--amb-t);background:var(--amb-bg);padding:2px 6px;border-radius:6px;line-height:1.2}
-.income-card-total{font-size:22px;font-weight:700;color:var(--txt);letter-spacing:-.3px;margin-top:2px;font-variant-numeric:tabular-nums}
+.income-card-total{font-size:22px;font-weight:700;color:var(--txt);letter-spacing:-.3px;font-variant-numeric:tabular-nums;flex-shrink:0}
+.income-card-total-row{display:flex;align-items:baseline;flex-wrap:wrap;gap:10px 18px;margin-top:2px}
+.income-sub-totals{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline;min-width:0;flex:1}
+.income-sub-total{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-variant-numeric:tabular-nums}
+.income-sub-total-name{font-weight:500;color:var(--txt3);max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.income-sub-total-amt{font-weight:600;color:var(--txt2)}
 .income-card-change{flex-shrink:0;padding-top:4px}
 .income-change{display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:600;padding:4px 9px;border-radius:8px;line-height:1}
 .income-change.up{color:#12b76a;background:#ecfdf3}
 .income-change.down{color:#f04438;background:#fef3f2}
 .income-chart-wrap{position:relative;height:220px;margin:12px 0 10px;cursor:pointer;overflow:visible}
+.income-chart-wrap--cr{
+  background:#1b2539;border-radius:12px;padding:8px 4px 4px;margin:12px 0 8px;height:180px;
+}
+.income-cr-foot{margin-top:2px}
+.income-cr-legend{justify-content:flex-start;gap:10px 16px;margin-bottom:8px;color:var(--txt3);max-width:none}
+.income-cr-legend .catreport-leg-dot.hollow{border-color:currentColor}
 .income-chart-tooltip{
   position:absolute;z-index:20;pointer-events:none;
   transform:translate(-50%,calc(-100% - 10px));
@@ -1483,6 +1591,21 @@ body{
 .ict-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
 .ict-val{font-variant-numeric:tabular-nums;font-weight:700;flex-shrink:0}
 .ict-footer{margin-top:5px;padding-top:5px;border-top:1px solid rgba(16,24,40,.08);font-size:10px;font-weight:700;color:#475467}
+.income-card-sub{font-size:12px;color:var(--txt3);margin-top:4px;font-variant-numeric:tabular-nums}
+.income-legend--cost{padding:8px 10px 0}
+.income-month-table-wrap{margin-top:4px;max-height:260px;overflow:auto;border:1px solid var(--bdr);border-radius:10px}
+.income-month-table{width:100%;border-collapse:collapse;font-size:12px}
+.income-month-table th,.income-month-table td{padding:7px 10px;text-align:right;border-bottom:1px solid var(--bdr)}
+.income-month-table th:first-child,.income-month-table td:first-child{text-align:left}
+.income-month-table thead th{
+  position:sticky;top:0;background:var(--surf2);color:var(--txt3);font-weight:600;font-size:11px;
+}
+.income-month-row{cursor:pointer}
+.income-month-row:hover td{background:var(--surf2)}
+.income-month-table .income-t-inc{color:var(--grn-t);font-weight:600}
+.income-month-table .income-t-exp{color:var(--red-t);font-weight:600}
+.income-month-table .income-t-net{font-weight:700}
+.income-month-empty{padding:12px;text-align:center;color:var(--txt3);font-size:12px}
 .income-legend{display:flex;flex-wrap:wrap;gap:8px 14px;font-size:11px;color:var(--txt2)}
 .income-leg-item{display:flex;align-items:center;gap:5px}
 .income-leg-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
