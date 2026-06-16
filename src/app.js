@@ -44,7 +44,8 @@ import {
 } from './txn-pairs.js';
 import {
   initRenqing, loadRenqingState, getRenqingState, renderRenqingPage,
-  selectRenqingPerson, triggerRenqingAvatarUpload, setupRenqingUpload
+  selectRenqingPerson, triggerRenqingAvatarUpload, setupRenqingUpload,
+  RENQING_CAT
 } from './renqing.js';
 import {
   initAccounts, loadAccountsState, getAccountsState, renderAccountsPage,
@@ -287,6 +288,15 @@ function activeData() { return allData.filter(isCountedInStats); }
 function activeExpanded() {
   const out = [];
   allData.filter(isCountedInStats).forEach(r => out.push(...expandRowForStats(r)));
+  return out;
+}
+
+/** 人情往来独立页：不受统计排除分类影响，但仍隐藏已退款记录 */
+function renqingExpanded() {
+  const out = [];
+  allData
+    .filter(r => r['分类'] === RENQING_CAT && r['退款状态'] !== 'refunded')
+    .forEach(r => out.push(...expandRowForStats(r)));
   return out;
 }
 
@@ -3591,7 +3601,7 @@ async function initAppInner() {
     onReorderCats: reorderCats
   });
   initRenqing({
-    getExpandedRows: activeExpanded,
+    getExpandedRows: renqingExpanded,
     getSubcatsFor: subcatsFor,
     formatDayHeader,
     formatTimeShort,
