@@ -59,17 +59,22 @@ export const Parsers = (() => {
     return text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
   }
 
-  /** 支付宝等国内账单 CSV 常为 GBK，UTF-8 直接读会乱码导致无法识别表头 */
-  function looksLikeLedgerCsv(text) {
-    return /交易时间/.test(text) && /交易分类|交易类型/.test(text);
+  function countReplacementChars(text) {
+    const m = text.match(/\uFFFD/g);
+    return m ? m.length : 0;
   }
 
+  /**
+   * 国内银行/账单 CSV 编码不一（支付宝、微信多为 UTF-8，工行等银行流水常为 GBK）。
+   * UTF-8 解码 GBK 字节会产生替换字符（U+FFFD），据此判断是否改用 GB18030。
+   */
   function decodeCsvBytes(bytes) {
     const utf8 = stripBOM(new TextDecoder('utf-8').decode(bytes));
-    if (looksLikeLedgerCsv(utf8)) return utf8;
+    const utf8Bad = countReplacementChars(utf8);
+    if (utf8Bad === 0) return utf8;
     try {
       const gb = stripBOM(new TextDecoder('gb18030').decode(bytes));
-      if (looksLikeLedgerCsv(gb)) return gb;
+      if (countReplacementChars(gb) < utf8Bad) return gb;
     } catch (_) { /* 部分环境不支持 gb18030 */ }
     return utf8;
   }
@@ -690,9 +695,9 @@ export const Parsers = (() => {
         type = parseType(flag, 0);
       }
 
-      const peer = pick(map, row, '对方户名', '交易对方', '对方账号与户名', '对方账号', '对方名称');
+      const peer = pick(map, row, '对方户名', '对方名称', '交易对方', '对方账号与户名', '对方账号');
       const summary = pick(map, row, '摘要', '交易类型', '业务类型');
-      const noteExtra = pick(map, row, '备注', '附言', '交易地点/附言');
+      const noteExtra = pick(map, row, '备注', '备注信息', '附言', '交易地点/附言');
       if (isBankRefundRow(summary, noteExtra)) continue;
       const desc = pick(map, row, '摘要', '用途', '备注', '交易说明', '商品说明') || peer;
       const pay = pick(map, row, '交易渠道', '支付方式', '交易类型') || sourceName;
