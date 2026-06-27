@@ -1129,6 +1129,56 @@ body{
 .accounts-cash-head{display:flex;flex-direction:column;gap:0;margin-bottom:10px}
 .accounts-cash-head-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .accounts-cash-head-top .ct{margin-bottom:0}
+.accounts-cash-grid-wrap{padding-top:6px}
+.accounts-cash-grid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:14px;
+}
+@media(max-width:1200px){.accounts-cash-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:768px){.accounts-cash-grid{grid-template-columns:1fr}}
+.accounts-cash-item{
+  background:var(--surf);
+  border:1px solid var(--bdr);
+  border-radius:var(--rl);
+  box-shadow:var(--shadow-sm);
+  padding:12px 12px;
+  min-width:0;
+}
+.accounts-cash-item-row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-width:0;
+}
+.accounts-cash-name-cell{flex:1;min-width:0}
+.accounts-cash-val--bal{
+  flex-shrink:0;
+  font-size:13px;
+  font-weight:700;
+  color:var(--primary-t);
+  line-height:1.2;
+  font-variant-numeric:tabular-nums;
+}
+.accounts-cash-sum-item{
+  grid-column:1/-1;
+  background:var(--surf2);
+  border:1px solid var(--bdr);
+  border-radius:var(--rl);
+  padding:12px 12px;
+  box-shadow:none;
+}
+.accounts-cash-sum-item .accounts-cash-item-row{justify-content:space-between}
+.accounts-cash-name-cell .accounts-cash-inp.accounts-cash-name{flex:1;min-width:0;width:auto}
+.accounts-cash-inp.accounts-cash-amt{
+  flex-shrink:0;
+  width:88px;
+  max-width:38%;
+  text-align:right;
+}
+.accounts-cash-del{flex-shrink:0;padding:4px 7px}
+.accounts-cash-val.accounts-cash-val--sum{font-weight:800;color:var(--primary-t)}
+
 .accounts-cash-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .accounts-cash-table{table-layout:fixed;width:100%;min-width:360px}
 .accounts-cash-col-name{width:52%}
@@ -1197,10 +1247,20 @@ body{
 .accounts-credit-card.is-viewing .accounts-credit-table td:first-child .accounts-credit-val--name{
   min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;
 }
-.accounts-credit-name-cell{display:flex;align-items:center;gap:8px;min-width:0}
+.accounts-credit-name-cell{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
 .accounts-credit-name-cell .fund-brand-logo,
 .accounts-credit-name-cell .fund-brand-mark{flex-shrink:0;border-radius:6px;object-fit:contain}
 .accounts-credit-name-cell .accounts-credit-label{flex:1;min-width:88px}
+.accounts-credit-name-cell--edit .accounts-credit-val--name{flex:0 1 auto;min-width:0}
+.accounts-credit-tag{
+  flex:0 1 96px;min-width:72px;max-width:120px;padding:4px 8px;font-size:12px;
+  border:1px solid var(--bdr);border-radius:6px;background:var(--surf);color:var(--txt)
+}
+.accounts-credit-tag:focus{outline:none;border-color:var(--primary-l)}
+.accounts-credit-tag-badge{
+  flex-shrink:0;font-size:11px;font-weight:600;line-height:1.2;padding:2px 8px;border-radius:999px;
+  color:var(--blu-t);background:var(--blu-bg);white-space:nowrap
+}
 .accounts-credit-logo-ph{display:inline-flex;align-items:center;justify-content:center;background:var(--surf3);color:var(--txt3);border-radius:6px}
 .accounts-credit-label,.accounts-credit-digits{
   width:100%;min-width:88px;padding:6px 8px;border:1px solid var(--bdr);

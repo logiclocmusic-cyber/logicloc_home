@@ -498,7 +498,8 @@ function parsePayAccount(payKey) {
       payKey,
       manual.label
     );
-    return manual.credit ? { ...fields, credit: { ...manual.credit } } : fields;
+    const tag = manual.tag ? String(manual.tag).trim() : '';
+    return manual.credit ? { ...fields, credit: { ...manual.credit }, tag } : { ...fields, tag };
   }
 
   const full = (payKey || '').trim();
@@ -513,8 +514,10 @@ function parsePayAccount(payKey) {
   if (ov?.kind) kind = ov.kind;
 
   const credit = getEffectiveCreditInfo(payKey);
+  const tag = ov?.tag ? String(ov.tag).trim() : '';
   const fields = buildCardFields(label, digits, kind, full, full);
-  return credit ? { ...fields, credit } : fields;
+  const out = credit ? { ...fields, credit } : fields;
+  return tag ? { ...out, tag } : out;
 }
 
 function isHidden(payKey) {
@@ -647,19 +650,35 @@ function applyCreditToAccount(payKey, credit) {
   return true;
 }
 
-function applyCreditCardMeta(payKey, { label, digits }) {
+function getAccountTag(payKey) {
+  const manual = getManualEntry(payKey);
+  if (manual?.tag) return String(manual.tag).trim();
+  const ov = getOverride(payKey);
+  if (ov?.tag) return String(ov.tag).trim();
+  return '';
+}
+
+function applyCreditCardMeta(payKey, { label, digits, tag }) {
+  const applyTag = (entry) => {
+    if (tag === undefined) return;
+    const t = String(tag || '').trim();
+    if (t) entry.tag = t;
+    else delete entry.tag;
+  };
   if (isManualKey(payKey)) {
     const entry = getManualEntry(payKey);
     if (!entry) return false;
     entry.kind = '信用卡';
     if (label) entry.label = label;
     if (digits) entry.digits = digits;
+    applyTag(entry);
     return true;
   }
   const prev = accountRegistry.overrides[payKey] || {};
   accountRegistry.overrides[payKey] = { ...prev, kind: '信用卡' };
   if (label) accountRegistry.overrides[payKey].label = label;
   if (digits) accountRegistry.overrides[payKey].digits = digits;
+  applyTag(accountRegistry.overrides[payKey]);
   return true;
 }
 
@@ -714,13 +733,15 @@ function creditCardAccounts() {
       const digits = accountDigits(r.key);
       const last4 = digits ? digits.slice(-4) : parsed.last4;
       const label = r.label || parsed.label;
+      const tag = getAccountTag(r.key);
       const pool = creditPoolForCard(r.key);
-      const acc = { pay: r.key, label, last4, digits };
+      const acc = { pay: r.key, label, last4, digits, tag };
       return {
         pay: r.key,
         label,
         last4,
         digits,
+        tag,
         displayName: creditCardDisplayName(acc),
         credit: getEffectiveCreditInfo(r.key) || {},
         poolId: pool?.id || null,
@@ -997,19 +1018,36 @@ function renderCreditPriorityHtml(cards) {
   </div>`;
 }
 
-function creditNameCell(payKey, labelVal = '', { isNew = false } = {}) {
+function creditNameCell(payKey, labelVal = '', { isNew = false, tagVal = '' } = {}) {
   const logo = isNew
     ? '<span class="fund-brand-mark fund-brand-mark--fb accounts-credit-logo-ph" style="width:24px;height:24px"><i class="ti ti-credit-card" style="font-size:12px"></i></span>'
     : accountBrandMarkHtml(payKey, 24);
-  const labelAttr = isNew
-    ? 'placeholder="银行名称 *"'
-    : `value="${esc(labelVal)}" placeholder="银行名称"`;
-  return `<div class="accounts-credit-name-cell">${logo}<input type="text" class="accounts-credit-label" ${labelAttr}></div>`;
+  if (isNew) {
+    return `<div class="accounts-credit-name-cell accounts-credit-name-cell--edit">
+      ${logo}
+      <input type="text" class="accounts-credit-label" placeholder="银行名称 *">
+      <input type="text" class="accounts-credit-tag" placeholder="标签，如 VISA双币">
+    </div>`;
+  }
+  const labelAttr = `value="${esc(labelVal)}" placeholder="银行名称"`;
+  return `<div class="accounts-credit-name-cell accounts-credit-name-cell--edit">${logo}<input type="text" class="accounts-credit-label" ${labelAttr}><input type="text" class="accounts-credit-tag" value="${esc(tagVal)}" placeholder="标签，如 VISA双币"></div>`;
 }
 
 function creditNameDisplayCell(acc) {
   const displayName = acc.displayName || creditCardDisplayName(acc);
-  return `<div class="accounts-credit-name-cell">${accountBrandMarkHtml(acc.pay, 24)}<span class="accounts-credit-val accounts-credit-val--name">${esc(displayName)}</span></div>`;
+  const tag = (acc.tag || '').trim();
+  const tagHtml = tag ? `<span class="accounts-credit-tag-badge">${esc(tag)}</span>` : '';
+  return `<div class="accounts-credit-name-cell">${accountBrandMarkHtml(acc.pay, 24)}<span class="accounts-credit-val accounts-credit-val--name">${esc(displayName)}</span>${tagHtml}</div>`;
+}
+
+function creditNameEditCell(acc) {
+  const displayName = acc.displayName || creditCardDisplayName(acc);
+  const tagVal = acc.tag || '';
+  return `<div class="accounts-credit-name-cell accounts-credit-name-cell--edit">
+    ${accountBrandMarkHtml(acc.pay, 24)}
+    <span class="accounts-credit-val accounts-credit-val--name">${esc(displayName)}</span>
+    <input type="text" class="accounts-credit-tag" value="${esc(tagVal)}" placeholder="标签，如 VISA双币">
+  </div>`;
 }
 
 function creditDigitsInput(acc, { isNew = false } = {}) {
@@ -1072,7 +1110,7 @@ function renderCreditCardRow(acc, { isNew = false, editing = false, pooled = fal
     : '';
   return `<tr data-credit-key="${esc(acc.pay)}"${pooled ? ' class="accounts-credit-pool-card"' : ''}>
     ${bindTd}
-    <td>${creditNameDisplayCell(acc)}</td>
+    <td>${creditNameEditCell(acc)}</td>
     <td>${creditDigitsInput(acc)}</td>
     <td>${fields.limit}</td>
     <td>${fields.available}</td>
@@ -1167,7 +1205,8 @@ function renderCreditPoolAccountTd(acc, pool, editing, isFirst) {
   const poolNameInp = editing && isFirst
     ? `<input type="hidden" class="accounts-credit-pool-name" value="${esc(pool.name)}">`
     : '';
-  return `<td><div class="accounts-credit-pool-name-wrap">${creditNameDisplayCell(acc)}${sharedIc}${poolNameInp}</div></td>`;
+  const nameCell = editing ? creditNameEditCell(acc) : creditNameDisplayCell(acc);
+  return `<td><div class="accounts-credit-pool-name-wrap">${nameCell}${sharedIc}${poolNameInp}</div></td>`;
 }
 
 function renderCreditPoolViewRows(pool, cards) {
@@ -1398,21 +1437,22 @@ function cashAccountNameCell(acc, editing) {
   return `<div class="accounts-cash-name-cell">${logo}<span class="accounts-cash-val accounts-cash-val--name">${esc(acc.name)}</span></div>`;
 }
 
-function renderCashAccountRow(acc, editing) {
+function renderCashAccountCard(acc, editing) {
   if (editing) {
-    return `<tr data-cash-id="${esc(acc.id)}">
-      <td>${cashAccountNameCell(acc, true)}</td>
-      <td><input type="text" class="accounts-cash-inp accounts-cash-amt" inputmode="decimal" value="${creditInputVal(acc.balance)}" placeholder="0.00"></td>
-      <td class="accounts-cash-actions">
-        <button type="button" class="btn btn-sm btn-a" data-delete-cash="${esc(acc.id)}" title="删除"><i class="ti ti-trash"></i></button>
-      </td>
-    </tr>`;
+    return `<section class="accounts-cash-item is-editing" data-cash-id="${esc(acc.id)}">
+      <div class="accounts-cash-item-row">
+        ${cashAccountNameCell(acc, true)}
+        <input type="text" class="accounts-cash-inp accounts-cash-amt" inputmode="decimal" value="${creditInputVal(acc.balance)}" placeholder="0.00">
+        <button type="button" class="btn btn-sm btn-a accounts-cash-del" data-delete-cash="${esc(acc.id)}" title="删除"><i class="ti ti-trash"></i></button>
+      </div>
+    </section>`;
   }
-  return `<tr data-cash-id="${esc(acc.id)}">
-    <td>${cashAccountNameCell(acc, false)}</td>
-    <td><span class="accounts-cash-val">${fmtMoney(acc.balance)}</span></td>
-    <td></td>
-  </tr>`;
+  return `<section class="accounts-cash-item" data-cash-id="${esc(acc.id)}">
+    <div class="accounts-cash-item-row">
+      ${cashAccountNameCell(acc, false)}
+      <span class="accounts-cash-val accounts-cash-val--bal">${fmtMoney(acc.balance)}</span>
+    </div>
+  </section>`;
 }
 
 function renderCashAccountsSection() {
@@ -1421,14 +1461,14 @@ function renderCashAccountsSection() {
   const accounts = cashAccountsList();
   const editing = cashAccountEditMode;
   const editTitle = editing ? '退出编辑' : '编辑';
-  const actionTh = editing ? '<th class="accounts-cash-col-actions"></th>' : '<th class="accounts-cash-col-actions"></th>';
-  const body = accounts.map(acc => renderCashAccountRow(acc, editing)).join('');
-  const sumRow = accounts.length
-    ? `<tr class="accounts-cash-sum-row">
-      <td><span class="accounts-cash-sum-label">合计</span></td>
-      <td><span class="accounts-cash-val accounts-cash-val--sum">${fmtMoney(sumCashBalance())}</span></td>
-      <td></td>
-    </tr>`
+  const cards = accounts.map(acc => renderCashAccountCard(acc, editing)).join('');
+  const sumItem = accounts.length
+    ? `<div class="accounts-cash-sum-item" aria-label="合计">
+        <div class="accounts-cash-item-row">
+          <span class="accounts-cash-sum-label">合计</span>
+          <span class="accounts-cash-val accounts-cash-val--sum">${fmtMoney(sumCashBalance())}</span>
+        </div>
+      </div>`
     : '';
   const addRow = editing
     ? `<div class="accounts-cash-foot"><button type="button" class="btn btn-sm" onclick="addCashAccountRow()"><i class="ti ti-plus"></i> 新增账户</button></div>`
@@ -1440,16 +1480,11 @@ function renderCashAccountsSection() {
         <button type="button" class="btn btn-sm accounts-credit-edit-btn${editing ? ' on' : ''}" onclick="toggleCashAccountEditMode()" title="${editTitle}" aria-label="${editTitle}"><i class="ti ${editing ? 'ti-pencil-off' : 'ti-pencil'}"></i></button>
       </div>
     </div>
-    <div class="accounts-cash-table-wrap">
-      <table class="report-table accounts-cash-table${editing ? ' is-editing' : ' is-viewing'}">
-        <colgroup>
-          <col class="accounts-cash-col-name">
-          <col class="accounts-cash-col-amt">
-          <col class="accounts-cash-col-actions">
-        </colgroup>
-        <thead><tr><th>账户名称</th><th>余额</th>${actionTh}</tr></thead>
-        <tbody>${body}${sumRow}</tbody>
-      </table>
+    <div class="accounts-cash-grid-wrap">
+      <div class="accounts-cash-grid${editing ? ' is-editing' : ''}">
+        ${cards}
+        ${sumItem}
+      </div>
     </div>
     ${accounts.length ? '' : `<div class="accounts-credit-empty">暂无现金账户${editing ? '，可点击下方新增' : ''}。</div>`}
     ${addRow}
@@ -1489,9 +1524,9 @@ export function addCashAccountRow() {
     initial: 0
   });
   renderCashAccountsSection();
-  const tbody = document.querySelector('#accountsCashSection tbody');
-  const lastRow = tbody?.querySelector('tr[data-cash-id]:last-of-type');
-  lastRow?.querySelector('.accounts-cash-name')?.focus();
+  const items = document.querySelectorAll('#accountsCashSection [data-cash-id]');
+  const last = items?.length ? items[items.length - 1] : null;
+  last?.querySelector('.accounts-cash-name')?.focus();
 }
 
 export function deleteCashAccount(id) {
@@ -1689,6 +1724,7 @@ function saveCreditCardRow(row) {
   const parsed = parsePayAccount(payKey);
   const label = labelInp?.value?.trim() || creditCardBankName(payKey, parsed.label);
   const digits = onlyDigits(row.querySelector('.accounts-credit-digits')?.value);
+  const tag = row.querySelector('.accounts-credit-tag')?.value?.trim() || '';
   if (labelInp && !label) {
     alert('请填写银行名称');
     labelInp.focus();
@@ -1696,7 +1732,7 @@ function saveCreditCardRow(row) {
   }
   const pooled = !!creditPoolForCard(payKey);
   const credit = creditFromRowInputs(row, { pooled });
-  if (!applyCreditCardMeta(payKey, { label, digits })) return;
+  if (!applyCreditCardMeta(payKey, { label, digits, tag })) return;
   if (pooled) {
     const prev = getRawCreditInfo(payKey) || {};
     applyCreditToAccount(payKey, credit ? { ...prev, ...credit } : prev.billDay != null || prev.dueDay != null ? { billDay: prev.billDay, dueDay: prev.dueDay } : null);
@@ -1769,8 +1805,10 @@ function saveNewCreditCardRow(row) {
     return;
   }
   const digits = onlyDigits(row.querySelector('.accounts-credit-digits')?.value);
+  const tag = row.querySelector('.accounts-credit-tag')?.value?.trim() || '';
   const credit = creditFromRowInputs(row);
   const entry = { id: `m${Date.now()}`, label, digits, kind: '信用卡' };
+  if (tag) entry.tag = tag;
   if (credit) entry.credit = credit;
   accountRegistry.manual.push(entry);
   flushAccountPersist();
@@ -1904,6 +1942,8 @@ function fillAccountsMgrForm(payKey) {
   if (!payKey) {
     keyInp.value = '';
     labelInp.value = '';
+    const tagInp = document.getElementById('acctMgrTag');
+    if (tagInp) tagInp.value = '';
     digitsInp.value = '';
     kindInp.value = '借记卡';
     fillCreditForm(null);
@@ -1919,6 +1959,8 @@ function fillAccountsMgrForm(payKey) {
   const rawDigits = accountDigits(payKey);
   keyInp.value = payKey;
   labelInp.value = manual?.label || ov?.label || parsed.label;
+  const tagInp = document.getElementById('acctMgrTag');
+  if (tagInp) tagInp.value = manual?.tag || ov?.tag || parsed.tag || '';
   digitsInp.value = formatCardDigits(rawDigits);
   kindInp.value = manual?.kind || ov?.kind || parsed.kind || '支付账户';
   fillCreditForm(getEffectiveCreditInfo(payKey));
@@ -1990,6 +2032,7 @@ export function saveAccountsMgr() {
   const label = document.getElementById('acctMgrLabel')?.value?.trim() || '';
   const digits = onlyDigits(document.getElementById('acctMgrDigits')?.value);
   const kind = document.getElementById('acctMgrKind')?.value || '支付账户';
+  const tag = document.getElementById('acctMgrTag')?.value?.trim() || '';
 
   if (!label) {
     alert('请填写账户名称');
@@ -2002,6 +2045,14 @@ export function saveAccountsMgr() {
 
   const credit = kind === '信用卡' ? creditFieldsFromInputs() : null;
   const pool = payKey ? creditPoolForCard(payKey) : null;
+  const applyTag = (entry) => {
+    if (kind !== '信用卡') {
+      delete entry.tag;
+      return;
+    }
+    if (tag) entry.tag = tag;
+    else delete entry.tag;
+  };
 
   if (payKey) {
     if (isManualKey(payKey)) {
@@ -2010,6 +2061,7 @@ export function saveAccountsMgr() {
         entry.label = label;
         entry.digits = digits;
         entry.kind = kind;
+        applyTag(entry);
         if (pool && credit) {
           pool.limit = credit.limit;
           pool.available = credit.available;
@@ -2025,6 +2077,7 @@ export function saveAccountsMgr() {
     } else {
       const prev = accountRegistry.overrides[payKey] || {};
       accountRegistry.overrides[payKey] = { ...prev, label, digits, kind };
+      applyTag(accountRegistry.overrides[payKey]);
       if (pool && credit) {
         pool.limit = credit.limit;
         pool.available = credit.available;
@@ -2042,6 +2095,7 @@ export function saveAccountsMgr() {
     }
   } else {
     const entry = { id: `m${Date.now()}`, label, digits, kind };
+    applyTag(entry);
     if (credit) entry.credit = credit;
     accountRegistry.manual.push(entry);
   }
@@ -2184,17 +2238,17 @@ export function setupAccountsEvents() {
       }
       const row = e.target.closest('tr[data-credit-key]');
       if (!row) return;
-      if (!e.target.matches('.accounts-credit-inp, .accounts-credit-label, .accounts-credit-digits')) return;
+      if (!e.target.matches('.accounts-credit-inp, .accounts-credit-label, .accounts-credit-digits, .accounts-credit-tag')) return;
       setTimeout(() => {
         const active = document.activeElement;
         const activeRow = active?.closest('tr[data-credit-key]');
-        if (activeRow === row && active.matches('.accounts-credit-inp, .accounts-credit-label, .accounts-credit-digits')) return;
+        if (activeRow === row && active.matches('.accounts-credit-inp, .accounts-credit-label, .accounts-credit-digits, .accounts-credit-tag')) return;
         saveCreditCardRow(row);
       }, 0);
     });
     creditSec.addEventListener('keydown', e => {
       if (!creditCardEditMode) return;
-      if (e.key === 'Enter' && e.target.matches('.accounts-credit-inp, .accounts-credit-label, .accounts-credit-digits')) {
+      if (e.key === 'Enter' && e.target.matches('.accounts-credit-inp, .accounts-credit-label, .accounts-credit-digits, .accounts-credit-tag')) {
         e.preventDefault();
         e.target.blur();
       }
@@ -2237,12 +2291,12 @@ export function setupAccountsEvents() {
     cashSec._bound = true;
     cashSec.addEventListener('focusout', e => {
       if (!cashAccountEditMode) return;
-      const row = e.target.closest('tr[data-cash-id]');
+      const row = e.target.closest('.accounts-cash-item[data-cash-id]');
       if (!row) return;
       if (!e.target.matches('.accounts-cash-inp')) return;
       setTimeout(() => {
         const active = document.activeElement;
-        const activeRow = active?.closest('tr[data-cash-id]');
+        const activeRow = active?.closest('.accounts-cash-item[data-cash-id]');
         if (activeRow === row && active.matches('.accounts-cash-inp')) return;
         saveCashAccountRow(row);
       }, 0);

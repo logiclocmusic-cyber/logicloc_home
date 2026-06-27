@@ -15,11 +15,19 @@ const BUYER_ROW_BG = [
   'rgba(245,158,11,.06)', 'rgba(139,92,246,.06)', 'rgba(236,72,153,.06)'
 ];
 
+function currentYear() {
+  return String(new Date().getFullYear());
+}
+
+function currentQuarter() {
+  return String(Math.ceil((new Date().getMonth() + 1) / 3));
+}
+
 let invoices = [];
 let openId = null;
 let pendingFile = null;
 let buyerColorMap = new Map();
-let filters = { buyer: '', search: '', year: '', quarter: '', status: '' };
+let filters = { buyer: '', search: '', year: currentYear(), quarter: currentQuarter(), status: '' };
 
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -301,10 +309,16 @@ function renderTable() {
   });
 }
 
+function syncQuarterFilter() {
+  const sel = document.getElementById('invFilterQuarter');
+  if (sel) sel.value = filters.quarter;
+}
+
 function renderAll() {
   renderYearCards();
   renderCompanyTabs();
   renderYearFilter();
+  syncQuarterFilter();
   renderTable();
 }
 

@@ -23,14 +23,24 @@ if (!loginRes.ok) {
 }
 const { token } = await loginRes.json();
 
-const putRes = await fetch(`${API_BASE}/api/state`, {
-  method: 'PUT',
-  headers: {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`
-  },
-  body: JSON.stringify(state)
-});
+async function putState(body) {
+  return fetch(`${API_BASE}/api/state`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(body)
+  });
+}
+
+let putRes = await putState(state);
+if (putRes.status === 409) {
+  const conflict = await putRes.json();
+  console.log(`线上版本 ${conflict.currentVersion}，本地 ${state.stateVersion ?? 0}，以本地数据覆盖…`);
+  state.stateVersion = conflict.currentVersion;
+  putRes = await putState(state);
+}
 if (!putRes.ok) {
   console.error('上传失败:', await putRes.text());
   process.exit(1);
