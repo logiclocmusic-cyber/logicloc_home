@@ -1472,6 +1472,22 @@ function renderReport() {
 const INCOME_SUB_COLORS = ['#FDBA74', '#86EFAC', '#1E3A5F', '#93C5FD', '#C4B5FD', '#FDA4AF', '#67E8F9', '#FDE68A'];
 const EXPENSE_SUB_COLORS = ['#FDA4AF', '#FB7185', '#F87171', '#EF4444', '#E11D48', '#F97316', '#FB923C', '#FDBA74'];
 let catReportCat = '';
+let catReportYear = new Date().getFullYear();
+
+function catReportAvailableYears() {
+  const years = new Set();
+  activeExpanded().forEach(r => {
+    const y = r['日期']?.slice(0, 4);
+    if (y && /^\d{4}$/.test(y)) years.add(+y);
+  });
+  years.add(new Date().getFullYear());
+  return [...years].sort((a, b) => b - a);
+}
+
+function catReportFilterByYear(rows, year) {
+  const prefix = String(year);
+  return rows.filter(r => r['日期']?.startsWith(prefix));
+}
 
 function catReportRows(cat) {
   return activeExpanded().filter(r => r['分类'] === cat);
@@ -1917,6 +1933,15 @@ function renderCatReportSubCharts(months, catRows, cat, allSubcats, expSet, incS
   });
 }
 
+function populateCatReportYearSelect() {
+  const sel = document.getElementById('catReportYearSel');
+  if (!sel) return;
+  const years = catReportAvailableYears();
+  if (!years.includes(catReportYear)) catReportYear = new Date().getFullYear();
+  sel.innerHTML = years.map(y => `<option value="${y}">${y} 年</option>`).join('');
+  sel.value = String(catReportYear);
+}
+
 function populateCatReportSelect() {
   const sel = document.getElementById('catReportSel');
   if (!sel) return;
@@ -1927,6 +1952,11 @@ function populateCatReportSelect() {
 
 function onCatReportChange() {
   catReportCat = document.getElementById('catReportSel')?.value || CATS[0] || '';
+  renderCatReport();
+}
+
+function onCatReportYearChange() {
+  catReportYear = +(document.getElementById('catReportYearSel')?.value) || new Date().getFullYear();
   renderCatReport();
 }
 
@@ -2077,13 +2107,14 @@ function renderCatReportSubKpis(catRows, allSubcats) {
 
 function renderCatReport() {
   populateCatReportSelect();
+  populateCatReportYearSelect();
   const cat = catReportCat || document.getElementById('catReportSel')?.value || CATS[0];
   if (!cat) return;
 
-  const catRows = catReportRows(cat);
+  const catRows = catReportFilterByYear(catReportRows(cat), catReportYear);
   const months = [...new Set(catRows.map(r => r['日期'].slice(0, 7)))].sort();
   const titleEl = document.getElementById('catReportChartTitle');
-  if (titleEl) titleEl.textContent = `${catLabel(cat)} · 各子分类月度收支`;
+  if (titleEl) titleEl.textContent = `${catLabel(cat)} · ${catReportYear} 年各子分类月度收支`;
 
   const expSubcats = catReportSubcats(cat, catRows, '支出');
   const incSubcats = catReportSubcats(cat, catRows, '收入');
@@ -3641,7 +3672,7 @@ Object.assign(window, {
   setQuick, resetF, applyF, changePgSize, filterSrc, setTypeFilter, toggleSortCol,
   toggleSelect, toggleSelectAll, clearSelection, applyBulkCat, applyBulkSubCat, bulkToggleRefund,
   resetImportPreview, confirmImport, onImportSrcChange, toggleDupImport, toggleAllDupImport, resetAllLedger,
-  openBatchSrc, closeBatchSrc, saveBatchSrc, onCatReportChange, selectRenqingPerson, triggerRenqingAvatarUpload,
+  openBatchSrc, closeBatchSrc, saveBatchSrc, onCatReportChange, onCatReportYearChange, selectRenqingPerson, triggerRenqingAvatarUpload,
   updRenqingSubCat, updRenqingSplitSub,
   openAccountsMgr, closeAccountsMgr, resetAccountsMgrForm, saveAccountsMgr,
   editAccountsMgr, startAccountMerge, cancelAccountMerge, confirmAccountMerge,

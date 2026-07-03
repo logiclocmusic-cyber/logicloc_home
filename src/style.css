@@ -1509,6 +1509,7 @@ body{
   min-width:180px;padding:8px 12px;border:1px solid var(--bdr);border-radius:10px;
   background:var(--surf);color:var(--txt);font-size:13px;font-weight:500;
 }
+#catReportYearSel{min-width:120px}
 .catreport-chart-card{
   background:linear-gradient(145deg,#1e2235 0%,#2a3048 100%);
   border:none;margin-bottom:18px;

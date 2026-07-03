@@ -106,13 +106,13 @@ export const Parsers = (() => {
       } else if (ch === ',') {
         row.push(field.trim());
         field = '';
-      } else if (ch === '\n' || (ch === '\r' && next === '\n')) {
+      } else if (ch === '\r' || ch === '\n') {
         row.push(field.trim());
         if (row.some(c => c !== '')) rows.push(row);
         row = [];
         field = '';
-        if (ch === '\r') i++;
-      } else if (ch !== '\r') {
+        if (ch === '\r' && next === '\n') i++;
+      } else {
         field += ch;
       }
     }
