@@ -279,6 +279,57 @@ app.post('/api/gear/:id/image', requireAuth, (req, res) => {
   }
 });
 
+function gearImageExt(buf, contentType = '') {
+  const ct = contentType.toLowerCase();
+  if (ct.includes('png')) return 'png';
+  if (ct.includes('webp')) return 'webp';
+  if (ct.includes('gif')) return 'gif';
+  if (buf[0] === 0x89 && buf[1] === 0x50) return 'png';
+  if (buf[0] === 0xff && buf[1] === 0xd8) return 'jpg';
+  if (buf[0] === 0x47 && buf[1] === 0x49) return 'gif';
+  if (buf.length >= 12 && buf.slice(0, 4).toString() === 'RIFF' && buf.slice(8, 12).toString() === 'WEBP') return 'webp';
+  return 'jpg';
+}
+
+app.post('/api/gear/:id/image-from-url', requireAuth, async (req, res) => {
+  try {
+    const { url } = req.body || {};
+    if (!url || typeof url !== 'string') return res.status(400).json({ error: '请提供图片链接' });
+    let parsed;
+    try {
+      parsed = new URL(url.trim());
+    } catch {
+      return res.status(400).json({ error: '链接格式无效' });
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return res.status(400).json({ error: '仅支持 http/https 链接' });
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    let response;
+    try {
+      response = await fetch(url.trim(), {
+        signal: controller.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LocHome/1.0)', Accept: 'image/*,*/*;q=0.8' },
+        redirect: 'follow'
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!response.ok) return res.status(400).json({ error: `获取图片失败 (${response.status})` });
+    const buf = Buffer.from(await response.arrayBuffer());
+    if (!buf.length) return res.status(400).json({ error: '图片为空' });
+    if (buf.length > 5 * 1024 * 1024) return res.status(400).json({ error: '图片不能超过 5MB' });
+    const ext = gearImageExt(buf, response.headers.get('content-type') || '');
+    const filename = `${req.params.id}.${ext}`;
+    writeFileSync(join(GEAR_IMG_DIR, filename), buf);
+    res.json({ url: `/gear-images/${filename}` });
+  } catch (err) {
+    if (err.name === 'AbortError') return res.status(408).json({ error: '获取图片超时' });
+    res.status(500).json({ error: err.message || '获取图片失败' });
+  }
+});
+
 if (isProd && serveStatic) {
   const dist = join(__dirname, '..', 'dist');
   app.use(express.static(dist));

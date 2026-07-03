@@ -44,8 +44,37 @@ export function fmtChartAxis(v) {
   return `¥${num}`;
 }
 
+/** Chart.js 深色主题 */
+export const CHART_THEME = {
+  pieBorder: '#161b22',
+  inc: '#5dd4a8',
+  exp: '#f07178',
+  grid: 'rgba(255,255,255,0.06)',
+  gridY: 'rgba(255,255,255,0.08)',
+  tick: 'rgba(255,255,255,0.5)',
+  tooltip: {
+    backgroundColor: '#1c222b',
+    titleColor: '#e6eaef',
+    bodyColor: '#8d97a8',
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    padding: 10
+  }
+};
+
+export const chartDarkScalesY = {
+  grid: { color: CHART_THEME.gridY },
+  ticks: { color: CHART_THEME.tick, callback: fmtChartAxis }
+};
+
+export const chartDarkScalesXY = {
+  x: { grid: { color: CHART_THEME.grid }, ticks: { color: CHART_THEME.tick } },
+  y: chartDarkScalesY
+};
+
 /** Chart.js tooltip 金额 */
 export const chartMoneyTooltip = {
+  ...CHART_THEME.tooltip,
   callbacks: {
     label(ctx) {
       const val = ctx.parsed?.y ?? ctx.parsed ?? ctx.raw;

@@ -13,10 +13,10 @@ import {
   recordsForBatch as batchRecords, deleteConfirmMessage
 } from './import-manager.js';
 import { API_BASE } from './apiBase.js';
-import { fmtMoney, fmtMoneySigned, fmtCount, fmtChartAxis, chartMoneyTooltip } from './format.js';
+import { fmtMoney, fmtMoneySigned, fmtCount, fmtChartAxis, chartMoneyTooltip, CHART_THEME, chartDarkScalesY, chartDarkScalesXY } from './format.js';
 import {
   initGear, loadGearState, getGearState, renderGearPage,
-  openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload, setupGearUpload
+  openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload, setupGearUpload, submitGearImageUrl
 } from './gear.js';
 import {
   renderCompanyCostPage, setupCompanyCost,
@@ -1306,7 +1306,7 @@ function renderMonitor() {
         backgroundColor: catColor(cat), borderRadius: 3
       }))
     },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { font: { size: 11 } } }, tooltip: chartMoneyTooltip }, scales: { y: { ticks: { callback: fmtChartAxis } } } }
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { font: { size: 11 }, color: CHART_THEME.tick } }, tooltip: chartMoneyTooltip }, scales: chartDarkScalesXY }
   });
   refreshActiveViews();
 }
@@ -1321,7 +1321,7 @@ function renderCharts() {
   const cColors = cKeys.map(catColor), totE = cVals.reduce((s, v) => s + v, 0) || 1;
   document.getElementById('catLeg').innerHTML = cKeys.map((c, i) => `<span style="display:flex;align-items:center;gap:3px"><span style="width:9px;height:9px;border-radius:2px;background:${cColors[i]}"></span>${catLabel(c)} ${((cVals[i] / totE) * 100).toFixed(1)}%</span>`).join('');
   if (charts.cPie) charts.cPie.destroy();
-  charts.cPie = new Chart(document.getElementById('cPie'), { type: 'doughnut', data: { labels: cKeys.map(catLabel), datasets: [{ data: cVals, backgroundColor: cColors, borderWidth: 2, borderColor: '#fff' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: chartMoneyTooltip }, cutout: '58%' } });
+  charts.cPie = new Chart(document.getElementById('cPie'), { type: 'doughnut', data: { labels: cKeys.map(catLabel), datasets: [{ data: cVals, backgroundColor: cColors, borderWidth: 2, borderColor: CHART_THEME.pieBorder }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: chartMoneyTooltip }, cutout: '58%' } });
 
   const incT = {}; incD.forEach(r => incT[r['分类']] = (incT[r['分类']] || 0) + r['金额']);
   const incS = Object.entries(incT).sort((a, b) => b[1] - a[1]);
@@ -1329,13 +1329,13 @@ function renderCharts() {
   const iColors = iKeys.map(catColor), totI = iVals.reduce((s, v) => s + v, 0) || 1;
   document.getElementById('incLeg').innerHTML = iKeys.map((c, i) => `<span style="display:flex;align-items:center;gap:3px"><span style="width:9px;height:9px;border-radius:2px;background:${iColors[i]}"></span>${catLabel(c)} ${((iVals[i] / totI) * 100).toFixed(1)}%</span>`).join('');
   if (charts.iPie) charts.iPie.destroy();
-  charts.iPie = new Chart(document.getElementById('iPie'), { type: 'doughnut', data: { labels: iKeys.map(catLabel), datasets: [{ data: iVals, backgroundColor: iColors, borderWidth: 2, borderColor: '#fff' }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: chartMoneyTooltip }, cutout: '58%' } });
+  charts.iPie = new Chart(document.getElementById('iPie'), { type: 'doughnut', data: { labels: iKeys.map(catLabel), datasets: [{ data: iVals, backgroundColor: iColors, borderWidth: 2, borderColor: CHART_THEME.pieBorder }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: chartMoneyTooltip }, cutout: '58%' } });
 
   const months = [...new Set(allData.map(r => r['日期'].slice(0, 7)))].sort();
   const mInc = months.map(m => +ad.filter(r => r['日期'].startsWith(m) && r['收支'] === '收入').reduce((s, r) => s + r['金额'], 0).toFixed(2));
   const mExp = months.map(m => +ad.filter(r => r['日期'].startsWith(m) && r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0).toFixed(2));
   if (charts.mBar) charts.mBar.destroy();
-  charts.mBar = new Chart(document.getElementById('mBar'), { type: 'bar', data: { labels: months, datasets: [{ label: '收入', data: mInc, backgroundColor: '#12b76a', borderRadius: 4 }, { label: '支出', data: mExp, backgroundColor: '#f04438', borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: chartMoneyTooltip }, scales: { y: { ticks: { callback: fmtChartAxis } } } } });
+  charts.mBar = new Chart(document.getElementById('mBar'), { type: 'bar', data: { labels: months, datasets: [{ label: '收入', data: mInc, backgroundColor: CHART_THEME.inc, borderRadius: 4 }, { label: '支出', data: mExp, backgroundColor: CHART_THEME.exp, borderRadius: 4 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: chartMoneyTooltip }, scales: chartDarkScalesXY } });
 
   const srcNames = [...new Set(allData.map(r => r['来源']))];
   const topCats = cKeys.slice(0, 9);
@@ -1349,7 +1349,7 @@ function renderCharts() {
         backgroundColor: srcColor(s), borderRadius: 3
       }))
     },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { font: { size: 10 } } }, tooltip: chartMoneyTooltip }, scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: fmtChartAxis } } } }
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { font: { size: 10 }, color: CHART_THEME.tick } }, tooltip: chartMoneyTooltip }, scales: { ...chartDarkScalesXY, x: { ...chartDarkScalesXY.x, stacked: true }, y: { ...chartDarkScalesXY.y, stacked: true } } }
   });
 }
 
@@ -1941,10 +1941,10 @@ function catReportChartOptions(months, cat, sub) {
       legend: { display: false },
       tooltip: {
         ...chartMoneyTooltip,
-        backgroundColor: '#fff',
-        titleColor: '#344054',
-        bodyColor: '#475467',
-        borderColor: '#eaecf0',
+        backgroundColor: CHART_THEME.tooltip.backgroundColor,
+        titleColor: CHART_THEME.tooltip.titleColor,
+        bodyColor: CHART_THEME.tooltip.bodyColor,
+        borderColor: CHART_THEME.tooltip.borderColor,
         borderWidth: 1,
         padding: 12,
         displayColors: true,
@@ -2310,7 +2310,7 @@ function incomeChartOptions(months, cat) {
         grid: { display: false },
         border: { display: false },
         ticks: {
-          color: '#98a2b3',
+          color: CHART_THEME.tick,
           font: { size: 11, weight: '500' },
           maxRotation: 0,
           autoSkip: true,
@@ -2320,10 +2320,10 @@ function incomeChartOptions(months, cat) {
       y: {
         stacked: true,
         beginAtZero: true,
-        grid: { color: '#f2f4f7', drawBorder: false },
+        grid: { color: CHART_THEME.gridY, drawBorder: false },
         border: { display: false },
         ticks: {
-          color: '#98a2b3',
+          color: CHART_THEME.tick,
           font: { size: 10 },
           maxTicksLimit: 5,
           callback: fmtChartAxis
@@ -3651,7 +3651,7 @@ Object.assign(window, {
   bindSelectedCreditCards, unbindCreditCardFromPool, dissolveCreditPoolById,
   goP, toggleRf, toggleExclude, updCat, updSubCat, updCatDet, showAllDetail, showDetail, showIncomeDetail, showCatReportDetail, closeDetModal, toggleDetSort, toggleDetUnsetSubFilter,
   toggleDetSelect, toggleDetSelectAll, clearDetSelection, applyDetBulkCat, applyDetBulkSubCat, detBulkToggleRefund,
-  openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload,
+  openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload, submitGearImageUrl,
   addIncomeMonitorCat, addIncomeMonitorCatFromSel, removeIncomeMonitorCat,
   openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload,
   toggleInvoicePrinted, downloadInvoiceFile, printInvoiceFile,

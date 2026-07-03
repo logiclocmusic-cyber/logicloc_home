@@ -540,6 +540,13 @@
         </div>
         <div class="gear-form">
           <div class="fg"><label>产品名称</label><input type="text" id="gearNameInp" placeholder="如：婴儿推车"></div>
+          <div class="fg gear-url-field">
+            <label>图片链接</label>
+            <div class="gear-url-row">
+              <input type="url" id="gearUrlInp" placeholder="粘贴商品图 URL，回车或点击获取" autocomplete="off">
+              <button type="button" class="btn btn-sm gear-url-btn" id="gearUrlBtn" onclick="submitGearImageUrl()"><i class="ti ti-link"></i> 获取</button>
+            </div>
+          </div>
           <div class="gear-meta" id="gearMeta"></div>
         </div>
       </div>

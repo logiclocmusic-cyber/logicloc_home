@@ -1,5 +1,6 @@
 // ── 装备库 ───────────────────────────────────────────────────────────────────
 import { fmtMoney, fmtCount } from './format.js';
+import { uploadGearImageFromUrl } from './api.js';
 
 export const GEAR_CATEGORY = '母婴亲子';
 export const GEAR_SUBCAT = '母婴装备';
@@ -115,6 +116,47 @@ function isImageFile(file) {
   return /\.(jpe?g|png|gif|webp|bmp|heic|heif)$/i.test(file.name || '');
 }
 
+export async function handleGearImageFromUrl(gearId, rawUrl) {
+  const url = rawUrl?.trim();
+  if (!url) {
+    alert('请粘贴图片链接');
+    return;
+  }
+  try {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('invalid');
+  } catch {
+    alert('链接格式无效，请使用 http 或 https 开头的图片地址');
+    return;
+  }
+  const gear = gearLibrary.find(g => g.id === gearId);
+  if (!gear) return;
+  const btn = document.getElementById('gearUrlBtn');
+  const prev = btn?.innerHTML;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ti ti-loader"></i> 获取中…';
+  }
+  try {
+    const { url: imageUrl } = await uploadGearImageFromUrl(gearId, url);
+    gear.image = imageUrl;
+    onPersist();
+    renderGearGallery();
+    if (openGearId === gearId) {
+      refreshGearModal(gearId);
+      const urlInp = document.getElementById('gearUrlInp');
+      if (urlInp) urlInp.value = '';
+    }
+  } catch (err) {
+    alert(err.message || '从链接获取图片失败');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = prev || '<i class="ti ti-link"></i> 获取';
+    }
+  }
+}
+
 export async function handleGearImageUpload(gearId, file) {
   if (!isImageFile(file)) {
     alert('请选择图片文件');
@@ -200,6 +242,8 @@ export function openGearEdit(gearId) {
 
 export function closeGearEdit() {
   openGearId = null;
+  const urlInp = document.getElementById('gearUrlInp');
+  if (urlInp) urlInp.value = '';
   document.getElementById('moGear')?.classList.add('hide');
 }
 
@@ -208,6 +252,12 @@ export function saveGearEdit() {
   const name = document.getElementById('gearNameInp')?.value || '';
   updateGearName(openGearId, name);
   closeGearEdit();
+}
+
+export function submitGearImageUrl() {
+  if (!openGearId) return;
+  const url = document.getElementById('gearUrlInp')?.value || '';
+  handleGearImageFromUrl(openGearId, url);
 }
 
 export function triggerGearUpload() {
@@ -221,6 +271,20 @@ export function setupGearUpload() {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (file && openGearId) handleGearImageUpload(openGearId, file);
+  });
+  const urlInp = document.getElementById('gearUrlInp');
+  urlInp?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submitGearImageUrl();
+    }
+  });
+  urlInp?.addEventListener('paste', e => {
+    const text = e.clipboardData?.getData('text')?.trim();
+    if (!text || !openGearId || !/^https?:\/\//i.test(text)) return;
+    e.preventDefault();
+    urlInp.value = text;
+    handleGearImageFromUrl(openGearId, text);
   });
 }
 

@@ -35,6 +35,20 @@ export async function saveState(state) {
   return res.json();
 }
 
+export async function uploadGearImageFromUrl(gearId, imageUrl) {
+  const res = await fetch(`${API}/gear/${gearId}/image-from-url`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ url: imageUrl })
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `获取失败 (${res.status})`);
+  }
+  return res.json();
+}
+
 export async function uploadGearImage(gearId, file) {
   const data = await new Promise((resolve, reject) => {
     const reader = new FileReader();

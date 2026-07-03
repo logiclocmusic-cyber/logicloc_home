@@ -395,6 +395,39 @@ export const Parsers = (() => {
   const PLATFORM_PREFIX = { wechat: '微信', alipay: '支付宝', bank: '银行', ccb: '建行', jd: '京东' };
   const FORMAT_LABELS = { wechat: '微信支付', alipay: '支付宝', bank: '银行流水', ccb: '建设银行流水' };
 
+  /** 文件名/表头中的公司关键词 → 账本来源名称 */
+  const COMPANY_SOURCE_HINTS = [
+    { keys: ['乐极客', '乐极客科技', '成都乐极客'], source: '乐极客公司' },
+    { keys: ['小河帮', '小河帮电子商务', '成都小河帮'], source: '小河帮公司' }
+  ];
+
+  function isCorporateBankStatement(rows) {
+    const head = rows.slice(0, 8).map(r => r.join(',')).join('\n');
+    if (/账户历史明细/.test(head)
+      && /交易日期/.test(head)
+      && /(收入|贷方)/.test(head)
+      && /(支出|借方)/.test(head)) return true;
+    // 长城华西银行等：户名 + 借方金额/贷方金额 + 对方名称
+    return /户名/.test(head)
+      && /借方金额/.test(head)
+      && /贷方金额/.test(head)
+      && /交易日期/.test(head);
+  }
+
+  function matchCompanySource(file, rows, sources) {
+    const text = [(file?.name || ''), ...extractFileHints(file, rows)].join(' ');
+    for (const { keys, source } of COMPANY_SOURCE_HINTS) {
+      if (!keys.some(k => text.includes(k))) continue;
+      const found = sources.find(s => s.name === source);
+      if (found) return source;
+    }
+    if (isCorporateBankStatement(rows)) {
+      const companySources = sources.filter(s => /公司$/.test(s.name));
+      if (companySources.length === 1) return companySources[0].name;
+    }
+    return null;
+  }
+
   function isCcbBankStatement(rows) {
     const head = rows.slice(0, 8).map(r => r.join(',')).join('\n');
     return /中国建设银行/.test(head)
@@ -440,7 +473,14 @@ export const Parsers = (() => {
   function extractFileHints(file, rows) {
     const hints = new Set();
     const fname = (file?.name || '').replace(/\.[^.]+$/i, '');
-    if (fname) hints.add(fname);
+    if (fname) {
+      hints.add(fname);
+      for (const { keys } of COMPANY_SOURCE_HINTS) {
+        for (const k of keys) {
+          if (fname.includes(k)) hints.add(k);
+        }
+      }
+    }
 
     for (let i = 0; i < Math.min(rows.length, 35); i++) {
       const row = rows[i];
@@ -462,6 +502,11 @@ export const Parsers = (() => {
   function resolveSourceName(file, rows, format, sources) {
     if (!sources?.length) throw new Error('请先在系统中配置账单来源');
 
+    if (format === 'bank' || format === 'ccb') {
+      const companySource = matchCompanySource(file, rows, sources);
+      if (companySource) return companySource;
+    }
+
     const prefix = PLATFORM_PREFIX[format] || '';
     const hints = extractFileHints(file, rows);
 
@@ -482,6 +527,10 @@ export const Parsers = (() => {
         if (s.name.includes(h) && h.length >= 2) score += 30;
         if (person.length >= 2 && h.includes(person)) score += 40;
         if (person.length >= 2 && person.includes(h) && h.length >= 2) score += 25;
+        for (const { keys, source } of COMPANY_SOURCE_HINTS) {
+          if (s.name !== source) continue;
+          if (keys.some(k => h.includes(k))) score += 60;
+        }
       }
 
       if (format === 'bank' || format === 'ccb') {
@@ -699,7 +748,11 @@ export const Parsers = (() => {
       const summary = pick(map, row, '摘要', '交易类型', '业务类型');
       const noteExtra = pick(map, row, '备注', '备注信息', '附言', '交易地点/附言');
       if (isBankRefundRow(summary, noteExtra)) continue;
-      const desc = pick(map, row, '摘要', '用途', '备注', '交易说明', '商品说明') || peer;
+      const genericSummary = /^(转账|转账转入|转账转出)$/;
+      let desc = genericSummary.test(summary) && noteExtra
+        ? noteExtra
+        : [summary, noteExtra].filter(Boolean).join(' · ');
+      if (!desc) desc = pick(map, row, '用途', '交易说明', '商品说明') || peer;
       const pay = pick(map, row, '交易渠道', '支付方式', '交易类型') || sourceName;
       const note = noteExtra;
       const orderId = pick(map, row, '交易流水号', '流水号', '交易单号');

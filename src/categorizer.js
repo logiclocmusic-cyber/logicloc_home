@@ -14,15 +14,15 @@ export const Categorizer = (() => {
     { cat: '美容美发', keys: ['美容', '美发', '理发', '护肤', '化妆品', '美甲'] },
     { cat: '宠物', keys: ['宠物', '猫粮', '狗粮', '兽医'] },
     { cat: '保险', keys: ['保险', '保费', '人寿', '平安险', '车险'] },
-    { cat: '工商税务', keys: ['税务', '工商', '社保', '公积金', '税'] },
-    { cat: '商业服务', keys: ['软件服务', '服务费', '会员', '订阅', '阿里云', '腾讯云'] },
+    { cat: '工商税务', keys: ['税务', '工商', '社保', '公积金', '税', '证书服务费', '代收税', '数字证书', '待报解预算'] },
+    { cat: '商业服务', keys: ['软件服务', '服务费', '会员', '订阅', '阿里云', '腾讯云', '短信服务费', '网银年服务费', '网银服务费', '财务服务费', '财务管理服务'] },
     { cat: '生活服务', keys: ['快递', '顺丰', '京东快递', '菜鸟', '洗衣', '保洁', '维修', '寄件', '跑腿'] },
     { cat: '红包奖励', keys: ['红包', '天天领红包', '奖励', '签到', '提现'] },
     { cat: '闲置转让', keys: ['闲鱼', '转转', '二手', '闲置'] },
-    { cat: '转账', keys: ['微信转账', '转账备注', '二维码收款', '个人经营'] },
+    { cat: '转账', keys: ['微信转账', '转账备注', '二维码收款', '个人经营', '往来款'] },
     { cat: '人情往来', keys: ['礼金', '份子', '红包-'] },
     { cat: '工资收入', keys: ['工资', '薪资', '代发'] },
-    { cat: '投资理财', keys: ['基金', '理财', '股票', '证券', '余额宝收益', '利息'] },
+    { cat: '投资理财', keys: ['基金', '理财', '股票', '证券', '余额宝收益', '利息', '结息', '入息'] },
     { cat: '探店置换', keys: ['探店', '置换', '暖羊', '暖暖洋'] },
     { cat: '日用百货', keys: ['淘宝', '天猫', '京东', '拼多多', '百货', '日用品', '超市'] }
   ];
@@ -90,9 +90,54 @@ export const Categorizer = (() => {
     return null;
   }
 
+  const COMPANY_SOURCE_RULES = [
+    { cat: '投资理财', keys: ['结息', '入息', '存款利息'] },
+    { cat: '工商税务', keys: ['代收税', '待报解预算', '数字证书', '证书认证', '证书服务费'] },
+    { cat: '商业服务', keys: ['短信服务费', '网银年服务费', '网银服务费', '签约代扣', '财务服务费', '财务管理服务', '智中智'] },
+    { cat: '转账', keys: ['往来款', '其他合法款项'] }
+  ];
+
+  function classifyCompanyRow(row, cats) {
+    const source = row['来源'] || '';
+    if (!/公司$/.test(source)) return null;
+
+    const peer = (row['交易对方'] || '').trim();
+    const note = row['备注'] || '';
+    const desc = row['商品说明'] || '';
+    const text = textOf(row);
+    const type = row['收支'];
+
+    if (type === '收入' && /支付.+服务|热浪|橘丽丝/.test(`${note} ${desc}`)) {
+      if (cats.includes('其他收入')) return { cat: '其他收入', conf: 'high', reason: 'company', auto: true };
+    }
+    if (type === '收入' && /文化传播|传媒/.test(peer) && /转账|服务/.test(text)) {
+      if (cats.includes('其他收入')) return { cat: '其他收入', conf: 'high', reason: 'company', auto: true };
+    }
+    if (/胡晗/.test(peer) && type === '支出') {
+      if (cats.includes('转账')) return { cat: '转账', conf: 'high', reason: 'company', auto: true };
+    }
+
+    for (const rule of COMPANY_SOURCE_RULES) {
+      if (!cats.includes(rule.cat)) continue;
+      for (const k of rule.keys) {
+        if (!text.includes(k.toLowerCase())) continue;
+        if (rule.cat === '商业服务' && type === '收入' && /支付.+服务/.test(`${note} ${desc}`)) continue;
+        return { cat: rule.cat, conf: 'high', reason: 'company', auto: true };
+      }
+    }
+    return null;
+  }
+
+  function matchCompanySourceRules(row, cats) {
+    return classifyCompanyRow(row, cats);
+  }
+
   function classify(row, cats) {
     const peer = (row['交易对方'] || '').trim();
     const text = textOf(row);
+
+    const companyRule = matchCompanySourceRules(row, cats);
+    if (companyRule) return companyRule;
 
     if (peer && peerRules[peer] && cats.includes(peerRules[peer])) {
       return { cat: peerRules[peer], conf: 'high', reason: 'peer', auto: true };
