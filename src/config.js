@@ -19,7 +19,7 @@ export const LEGACY_DEFAULT_EMOJIS = {
   '衣服鞋帽':'👗','探店置换':'📸','人情往来':'🤝','工资收入':'💼','其他收入':'💰','其他':'📌'
 };
 
-/** 默认卡通图标（OpenMoji） */
+/** 默认卡通图标（Iconify / fluent-emoji-flat） */
 export const DEFAULT_EMOJIS = {
   '交通出行': iconRef('1F682'),
   '餐饮美食': iconRef('1F374'),
@@ -52,6 +52,13 @@ export const DEFAULT_EMOJIS = {
   '工资收入': iconRef('1F4B0'),
   '其他收入': iconRef('1F4B5'),
   '其他': iconRef('1F4CC'),
+};
+
+/** 用户重命名分类时，回退到默认图标 */
+export const CAT_ICON_NAME_ALIASES = {
+  '公司服务': '商业服务',
+  '存款理财': '投资理财',
+  '乐极客': '乐极客收入',
 };
 
 /** 各主分类下的默认子分类（可在「编辑分类」中修改） */

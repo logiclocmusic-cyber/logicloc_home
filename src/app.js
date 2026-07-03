@@ -3,10 +3,10 @@ import { Categorizer } from './categorizer.js';
 import { ImportTimeline } from './import-timeline.js';
 import { Parsers } from './parsers.js';
 import {
-  DEFAULT_CATS, DEFAULT_EMOJIS, LEGACY_DEFAULT_EMOJIS, DEFAULT_SOURCES, DEFAULT_IMPORT_SOURCE, DEFAULT_SUBCATS, CAT_COLORS,
+  DEFAULT_CATS, DEFAULT_EMOJIS, LEGACY_DEFAULT_EMOJIS, CAT_ICON_NAME_ALIASES, DEFAULT_SOURCES, DEFAULT_IMPORT_SOURCE, DEFAULT_SUBCATS, CAT_COLORS,
   MONITOR_CATS, EXCLUDE_CATS, OFFSET_CATS, DEFAULT_CAT_STATS_EXCLUDE, MONITOR_EMOJIS, DEFAULT_INCOME_DATA_CATS
 } from './config.js';
-import { renderCatIcon, iconRef } from './cat-icons.js';
+import { renderCatIcon, iconRef, isIconRef, resolveCatIconValue } from './cat-icons.js';
 import { fetchState, saveState, resetLedger, deleteImportBatchApi, changeImportBatchSourceApi, checkHealth } from './api.js';
 import {
   createBatchId, stampImportBatch, deriveImportHistory,
@@ -29,9 +29,9 @@ import {
   addSplitLine, saveSplitEditor, clearSplits, updateSplitItem,
   parentCatCellHtml, splitSubRowHtml, splitSubRowNoDateHtml
 } from './splits.js';
-import { initCatPicker, catPickBtnHtml, openEmojiPicker, closeEmojiPicker } from './cat-picker.js';
+import { initCatPicker, catCellInnerHtml, openEmojiPicker, closeEmojiPicker } from './cat-picker.js';
 import { subCatSelectHtml, rowHasUnsetSub } from './subcat-ui.js';
-import { srcMarkHtml } from './source-logos.js';
+import { srcMarkHtml, srcBrandColor } from './source-logos.js';
 import {
   initCatBrowse, renderCatBrowse, selectCatBrowse,
   toggleCatBrowseGroup, toggleCatBrowseUnsetSubFilter,
@@ -171,11 +171,11 @@ function renderLedgerDayRow(row) {
   const typeCat = split ? (row.splits[0]?.category || row['分类']) : row['分类'];
   let html = `<div class="tr COL COL-NODATE ledger-row${split ? ' has-splits' : ''}${isR ? ' refunded' : ''}${isEx ? ' excluded' : ''}${isSel ? ' selected' : ''}" data-id="${row.id}">
     <div class="td td-check"><input type="checkbox" class="cb" ${isSel ? 'checked' : ''} onchange="toggleSelect(${row.id},this)"></div>
-    <div class="td no-strike src-cell">${srcBadge(row['来源'])}</div>
     ${peerDescCell(row)}
+    ${amtCellHtml(row, isR)}
     ${catCell}
     <div class="td no-strike type-cell">${typeBadge(row['收支'], row['退款状态'], typeCat)}</div>
-    ${amtCellHtml(row, isR)}
+    <div class="td no-strike src-cell">${srcBadge(row['来源'])}</div>
     <div class="td no-strike td-actions">
       <button type="button" class="icon-act split${split ? ' on' : ''}" title="${split ? '编辑拆分' : '拆分账目'}" onclick="openSplitEditor(${row.id})"><i class="ti ti-arrows-split"></i></button>
       <button type="button" class="icon-act rf ${isR ? 'um' : 'mk'}" title="${isR ? '撤销退款' : '标记退款'}" onclick="toggleRf(${row.id})"><i class="ti ${isR ? 'ti-rotate-clockwise' : 'ti-receipt-refund'}"></i></button>
@@ -251,13 +251,10 @@ function subcatsFor(cat) {
 }
 
 function amtCellHtml(row, isR) {
-  const pay = row['支付方式'] || '';
-  const pm = pay.length > 10 ? pay.slice(0, 10) + '…' : pay;
   const sign = row['收支'] === '收入' ? '+' : '-';
   const cls = isR ? ' rf' : row['收支'] === '收入' ? ' i' : ' e';
   return `<div class="td amt-cell no-strike${cls}">
-    <div class="amt-val">${isR ? '<span class="amt-rf-tag">退</span>' : ''}${sign}¥${row['金额'].toFixed(2)}</div>
-    ${pm ? `<div class="amt-pay" title="${pay}">${pm}</div>` : ''}
+    <div class="amt-val">${isR ? '<span class="amt-rf-tag">退</span>' : ''}${sign}${row['金额'].toFixed(2)}</div>
   </div>`;
 }
 
@@ -265,9 +262,8 @@ function catCellHtml(row) {
   const cat = row['分类'];
   const sub = row['子分类'] || '';
   const subs = subcatsFor(cat);
-  const mainBtn = catPickBtnHtml(row.id, cat);
   const subSel = subCatSelectHtml({ subs, sub, onchange: `updSubCat(${row.id},this.value)` });
-  return `<div class="td no-strike cat-cell">${mainBtn}${subSel}</div>`;
+  return `<div class="td no-strike cat-cell">${catCellInnerHtml(row.id, cat, subSel)}</div>`;
 }
 
 function catLabel(c) { return c; }
@@ -357,23 +353,22 @@ function buildState() {
 }
 
 let persistTimer = null;
+let persistChain = Promise.resolve();
+const PERSIST_MAX_RETRIES = 5;
 
-async function persistNow(opts = {}) {
-  flash();
-  updateSubtitle();
-  clearTimeout(persistTimer);
-  persistTimer = null;
+async function persistNowInner(retryCount = 0) {
   try {
     const res = await saveState(buildState());
     if (res?.stateVersion != null) stateVersion = res.stateVersion;
     return true;
   } catch (err) {
-    if (err.code === 'STATE_CONFLICT' && !opts._retried && err.currentVersion != null) {
+    if (err.code === 'STATE_CONFLICT' && err.currentVersion != null && retryCount < PERSIST_MAX_RETRIES) {
       stateVersion = err.currentVersion;
-      return persistNow({ _retried: true });
+      return persistNowInner(retryCount + 1);
     }
     if (err.code === 'STATE_CONFLICT') {
       await loadData();
+      if (!document.getElementById('moCat')?.classList.contains('hide')) renderCatList();
       alert('保存失败：云端数据已被其他设备更新，已同步最新数据');
       return false;
     }
@@ -382,30 +377,56 @@ async function persistNow(opts = {}) {
   }
 }
 
+async function persistNow() {
+  flash();
+  updateSubtitle();
+  clearTimeout(persistTimer);
+  persistTimer = null;
+  const run = persistChain.then(() => persistNowInner());
+  persistChain = run.catch(() => {});
+  return run;
+}
+
 function persist() {
   clearTimeout(persistTimer);
   persistTimer = setTimeout(() => { persistNow(); }, 300);
 }
 
+function setupLedgerHeadScrollSync() {
+  const headWrap = document.getElementById('ledgerHeadWrap');
+  const bodyScroll = document.getElementById('ledgerBodyScroll');
+  if (!headWrap || !bodyScroll) return;
+  let syncing = false;
+  const sync = (from, to) => {
+    if (syncing) return;
+    syncing = true;
+    to.scrollLeft = from.scrollLeft;
+    syncing = false;
+  };
+  headWrap.addEventListener('scroll', () => sync(headWrap, bodyScroll), { passive: true });
+  bodyScroll.addEventListener('scroll', () => sync(bodyScroll, headWrap), { passive: true });
+}
+
 async function updateBackendFooter(count) {
-  const title = document.querySelector('#sbFooterText strong');
+  const tip = document.getElementById('sbFooterTip');
   const sub = document.getElementById('sbFooterSub');
-  const footer = document.getElementById('sbFooter');
-  if (!sub) return;
+  const btn = document.getElementById('sbFooterBtn');
+  if (!sub || !tip) return;
+  const titleEl = tip.querySelector('strong');
   if (API_BASE) {
     let host = API_BASE;
     try { host = new URL(API_BASE).hostname; } catch { /* keep raw */ }
-    if (title) title.textContent = '云端数据库';
+    if (titleEl) titleEl.textContent = '云端数据库';
     sub.textContent = count != null
       ? `Railway · ${host} · ${count} 笔`
       : `Railway · ${host}`;
-    footer?.setAttribute('title', `数据保存在 Railway 后端 (${API_BASE})`);
+    btn?.setAttribute('title', `云端数据库 · Railway · ${host}${count != null ? ` · ${count} 笔` : ''}`);
   } else {
-    if (title) title.textContent = 'SQLite 数据库';
+    if (titleEl) titleEl.textContent = 'SQLite 数据库';
     sub.textContent = count != null
       ? `本地开发 · data/ledger.db · ${count} 笔`
       : '本地开发 · data/ledger.db';
-    footer?.setAttribute('title', '数据保存在本地 data/ledger.db');
+    btn?.setAttribute('title', `SQLite 数据库 · 本地 data/ledger.db${count != null ? ` · ${count} 笔` : ''}`);
   }
 }
 
@@ -413,6 +434,7 @@ async function loadData() {
   try {
     const health = await checkHealth().catch(() => null);
     const state = await fetchState();
+    stateVersion = state.stateVersion || 0;
     refunded = new Set((state.refunded || []).map(id => typeof id === 'string' ? parseInt(id, 10) : id));
     excluded = new Set((state.excluded || []).map(id => typeof id === 'string' ? parseInt(id, 10) : id));
 
@@ -427,6 +449,7 @@ async function loadData() {
           EMOJIS[cat] = val;
         }
       }
+      if (migrateCatEmojisToIcons()) persist();
       SUBCATS = { ...DEFAULT_SUBCATS, ...(state.categories.subcats || {}) };
       const babySubs = SUBCATS['母婴亲子'];
       if (babySubs && !babySubs.includes('母婴装备')) {
@@ -446,7 +469,6 @@ async function loadData() {
 
     if (state.sources) SOURCES = state.sources;
     if (ensureCcbChenchengSource()) await persistNow();
-    stateVersion = state.stateVersion || 0;
     allData = state.transactions || [];
     const maxId = allData.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0);
     nextId = Math.max(Number(state.nextId) || 1, maxId + 1);
@@ -491,16 +513,7 @@ async function loadData() {
   }
 }
 
-function updateSubtitle() {
-  const el = document.getElementById('subtitle');
-  if (!allData.length) {
-    if (el) el.textContent = '导入账单开始使用';
-    return;
-  }
-  const dates = allData.map(r => r['日期']).filter(Boolean).sort();
-  const range = `${dates[0]} 至 ${dates[dates.length - 1]}`;
-  if (el) el.innerHTML = `${range}<br>${fmtCount(allData.length)} 笔`;
-}
+function updateSubtitle() {}
 
 function kpiCard(label, value, sub, icon, iconCls, valCls) {
   return `<div class="kpi-c">
@@ -538,12 +551,10 @@ function buildSrcChips() {
   const el = document.getElementById('srcChips');
   const allSrcs = ['all', ...new Set(allData.map(r => r['来源']))];
   el.innerHTML = allSrcs.map(s => {
-    const clr = s === 'all' ? '#98a2b3' : srcColor(s);
     const on = (s === 'all' && activeSrc === 'all') || s === activeSrc;
-    const mark = s === 'all'
-      ? '<span class="dot" style="background:#98a2b3"></span>'
-      : srcMarkHtml(s, { size: 20, fallbackColor: clr });
-    return `<div class="chip${on ? ' on' : ''}" onclick="filterSrc('${s.replace(/'/g, "\\'")}',this)" data-src="${s}">${mark}${s === 'all' ? '全部' : s}</div>`;
+    const bg = s === 'all' ? '#98a2b3' : srcBrandColor(s, srcColor(s));
+    const label = s === 'all' ? '全部' : s;
+    return `<div class="chip chip-src${on ? ' on' : ''}" style="--src-chip-bg:${bg}" onclick="filterSrc('${s.replace(/'/g, "\\'")}',this)" data-src="${s}">${label}</div>`;
   }).join('');
 }
 
@@ -554,15 +565,26 @@ function filterSrc(s, el) {
   applyF();
 }
 
+function syncCatFilterBtn(cat) {
+  const btn = document.getElementById('cfPickBtn');
+  const hidden = document.getElementById('cf');
+  if (!btn || !hidden) return;
+  hidden.value = cat || '';
+  const label = btn.querySelector('.cat-filter-label');
+  const iconEl = btn.querySelector('.cat-filter-icon');
+  const display = cat ? catLabel(cat) : '全部分类';
+  if (label) label.textContent = display;
+  btn.dataset.currentCat = cat || '';
+  btn.classList.toggle('on', !!cat);
+  if (iconEl) {
+    iconEl.innerHTML = cat
+      ? catIconHtml(cat, { size: 14, wrapClass: 'cat-filter-emoji-wrap' })
+      : '<i class="ti ti-category"></i>';
+  }
+}
+
 function buildCatFilter() {
-  const sel = document.getElementById('cf');
-  sel.innerHTML = '<option value="">全部分类</option>';
-  CATS.forEach(c => {
-    const o = document.createElement('option');
-    o.value = c;
-    o.textContent = catLabel(c);
-    sel.appendChild(o);
-  });
+  syncCatFilterBtn(document.getElementById('cf')?.value || '');
   const fs = document.getElementById('f-cat');
   if (fs) {
     fs.innerHTML = '';
@@ -690,6 +712,7 @@ function resetF() {
   if (top) top.value = '';
   updateSearchClear();
   document.getElementById('cf').value = '';
+  syncCatFilterBtn('');
   document.getElementById('tf').value = '';
   syncTypeSegUI();
   document.getElementById('rfHide').checked = true;
@@ -750,7 +773,7 @@ function renderTable() {
     const t = dayTotals[date] || { inc: 0, exp: 0 };
     return `<section class="ledger-day-card">
       <header class="ledger-day-head">
-        <span class="ledger-day-date">${formatDayHeader(date)}</span>
+        <span class="ledger-day-date"><i class="ti ti-calendar" aria-hidden="true"></i>${formatDayHeader(date)}</span>
         ${daySumHtml(t.inc, t.exp)}
       </header>
       <div class="ledger-day-rows">${rows.map(renderLedgerDayRow).join('')}</div>
@@ -1434,11 +1457,11 @@ function renderReport() {
           type: 'line',
           label: '净结余',
           data: mNet,
-          borderColor: '#ffffff',
-          backgroundColor: 'rgba(255,255,255,0.08)',
+          borderColor: '#8b7fd4',
+          backgroundColor: 'rgba(139,127,212,0.12)',
           borderWidth: 2.5,
-          pointBackgroundColor: '#fff',
-          pointBorderColor: '#fff',
+          pointBackgroundColor: '#8b7fd4',
+          pointBorderColor: '#8b7fd4',
           pointRadius: 4,
           pointHoverRadius: 6,
           tension: 0.35,
@@ -1457,12 +1480,12 @@ function renderReport() {
       },
       scales: {
         x: {
-          grid: { color: 'rgba(255,255,255,0.06)' },
-          ticks: { color: 'rgba(255,255,255,0.55)', font: { size: 11 }, maxRotation: 45 }
+          grid: { color: CHART_THEME.grid },
+          ticks: { color: CHART_THEME.tick, font: { size: 11 }, maxRotation: 45 }
         },
         y: {
-          grid: { color: 'rgba(255,255,255,0.08)' },
-          ticks: { color: 'rgba(255,255,255,0.55)', callback: fmtChartAxis }
+          grid: { color: CHART_THEME.gridY },
+          ticks: { color: CHART_THEME.tick, callback: fmtChartAxis }
         }
       }
     }
@@ -1712,7 +1735,7 @@ const catReportBarValueLabelsPlugin = {
       });
 
       ctx.save();
-      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.fillStyle = 'rgba(42,40,56,0.72)';
       ctx.font = '600 10px system-ui, -apple-system, "PingFang SC", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
@@ -2035,9 +2058,9 @@ function catReportChartOptions(months, cat, sub) {
     scales: {
       x: {
         stacked: true,
-        grid: { color: 'rgba(255,255,255,0.06)' },
+        grid: { color: CHART_THEME.grid },
         ticks: {
-          color: 'rgba(255,255,255,0.55)',
+          color: CHART_THEME.tick,
           font: { size: 10 },
           maxRotation: 0,
           autoSkip: true,
@@ -2047,8 +2070,8 @@ function catReportChartOptions(months, cat, sub) {
       y: {
         stacked: true,
         beginAtZero: true,
-        grid: { color: 'rgba(255,255,255,0.08)' },
-        ticks: { color: 'rgba(255,255,255,0.55)', callback: fmtChartAxis }
+        grid: { color: CHART_THEME.gridY },
+        ticks: { color: CHART_THEME.tick, callback: fmtChartAxis }
       }
     },
     onClick(evt, _elements, chart) {
@@ -3148,7 +3171,27 @@ function saveSrc() {
 }
 
 function catIconValue(cat) {
-  return EMOJIS[cat] || DEFAULT_EMOJIS[cat] || iconRef('1F4CC');
+  return resolveCatIconValue(cat, EMOJIS[cat], {
+    iconMap: DEFAULT_EMOJIS,
+    legacyMap: LEGACY_DEFAULT_EMOJIS,
+    nameAliases: CAT_ICON_NAME_ALIASES,
+  });
+}
+
+function migrateCatEmojisToIcons() {
+  let changed = false;
+  for (const cat of CATS) {
+    const resolved = resolveCatIconValue(cat, EMOJIS[cat], {
+      iconMap: DEFAULT_EMOJIS,
+      legacyMap: LEGACY_DEFAULT_EMOJIS,
+      nameAliases: CAT_ICON_NAME_ALIASES,
+    });
+    if (EMOJIS[cat] !== resolved) {
+      EMOJIS[cat] = resolved;
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 function catIconHtml(cat, opts = {}) {
@@ -3286,13 +3329,15 @@ function saveCat() {
     if (CATS[i]) nextExclude.add(CATS[i]);
   });
   CAT_STATS_EXCLUDE = nextExclude;
-  persist();
-  buildCatFilter();
-  applyF();
-  renderKPI();
-  renderMonitor();
-  closeCat();
-  refreshActiveViews();
+  persistNow().then(ok => {
+    if (!ok) return;
+    buildCatFilter();
+    applyF();
+    renderKPI();
+    renderMonitor();
+    closeCat();
+    refreshActiveViews();
+  });
 }
 
 // ── 批量选择 ─────────────────────────────────────────────────────────────────
@@ -3617,7 +3662,11 @@ async function initAppInner() {
     onSelect: (rowId, cat, splitIdx) => {
       if (splitIdx != null) handleUpdSplitCat(rowId, splitIdx, cat);
       else updCat(rowId, cat);
-    }
+    },
+    onFilterSelect: cat => {
+      syncCatFilterBtn(cat);
+      applyF();
+    },
   });
   syncUnsetSubFilterUI();
   initCatBrowse({
@@ -3659,6 +3708,7 @@ async function initAppInner() {
   setupCompanyCost();
   setupDropZone();
   setupImportHistoryActions();
+  setupLedgerHeadScrollSync();
   await loadData();
   appReady = true;
 }

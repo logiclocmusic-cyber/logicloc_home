@@ -1,5 +1,7 @@
 /** 账单来源平台 LOGO（微信 / 支付宝 / 京东） */
 
+import { matchBankBrand } from './bank-brands.js';
+
 const PLATFORMS = {
   wechat: { bg: '#07c160', icon: 'ti-brand-wechat' },
   alipay: { bg: '#1677ff', icon: 'ti-brand-alipay' },
@@ -16,6 +18,15 @@ export function srcPlatformKey(name) {
   if (n.startsWith('支付宝')) return 'alipay';
   if (n.startsWith('京东')) return 'jd';
   return null;
+}
+
+/** 来源筛选按钮配色（与平台图标底色一致） */
+export function srcBrandColor(name, fallback = '#98a2b3') {
+  const key = srcPlatformKey(name);
+  if (key && PLATFORMS[key]) return PLATFORMS[key].bg;
+  const brand = matchBankBrand(name);
+  if (brand?.colors?.[0]) return brand.colors[0];
+  return fallback;
 }
 
 export function srcMarkHtml(name, opts = {}) {

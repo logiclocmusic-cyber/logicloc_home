@@ -1,5 +1,5 @@
 // ── 账目拆分 ─────────────────────────────────────────────────────────────────
-import { catPickBtnHtml } from './cat-picker.js';
+import { catCellInnerHtml } from './cat-picker.js';
 import { SUBCAT_UNSET_LABEL, subCatSelectHtml } from './subcat-ui.js';
 
 let getCats = () => [];
@@ -270,7 +270,6 @@ export function updateSplitItem(parentId, idx, field, value) {
 
 function splitSubRowCells(row, sp, idx, gridCls) {
   const subs = getSubcatsFor(sp.category);
-  const mainBtn = catPickBtnHtml(row.id, sp.category, { splitIdx: idx });
   const subSel = subCatSelectHtml({
     subs,
     sub: sp.subcategory || '',
@@ -281,17 +280,36 @@ function splitSubRowCells(row, sp, idx, gridCls) {
   const note = sp.note ? `<span class="split-sub-note">${sp.note}</span>` : `<span class="split-sub-tag">子项 ${idx + 1}</span>`;
   const dateCell = gridCls === 'COL-NODATE' ? '' : `<div class="td dt-cell split-dt"><span class="split-sub-tag">子项 ${idx + 1}</span></div>`;
   const peerNote = gridCls === 'COL-NODATE' ? note : (sp.note ? `<span class="split-sub-note">${sp.note}</span>` : '');
+  const amtCell = `<div class="td amt-cell ${row['收支'] === '收入' ? 'i' : 'e'} no-strike">
+      <div class="amt-val">${sign}${Number(sp.amount).toFixed(2)}</div>
+    </div>`;
+  const catCell = `<div class="td cat-cell split-cat-cell">${catCellInnerHtml(row.id, sp.category, subSel, { splitIdx: idx })}</div>`;
+  const peerCell = `<div class="td peer-desc split-peer">${peerNote}</div>`;
+  const srcEmpty = '<div class="td split-empty"></div>';
+  const typeEmpty = '<div class="td type-cell split-empty"></div>';
+  const actionsEmpty = '<div class="td td-actions split-empty"></div>';
+  const cells = gridCls === 'COL-NODATE'
+    ? [
+      '<div class="td td-check"><span class="split-tree-line"></span></div>',
+      peerCell,
+      amtCell,
+      catCell,
+      typeEmpty,
+      srcEmpty,
+      actionsEmpty,
+    ]
+    : [
+      '<div class="td td-check"><span class="split-tree-line"></span></div>',
+      dateCell,
+      peerCell,
+      amtCell,
+      catCell,
+      typeEmpty,
+      srcEmpty,
+      actionsEmpty,
+    ];
   return `<div class="tr ${gridCls} ledger-split-row" data-parent-id="${row.id}">
-    <div class="td td-check"><span class="split-tree-line"></span></div>
-    ${dateCell}
-    <div class="td split-empty"></div>
-    <div class="td peer-desc split-peer">${peerNote}</div>
-    <div class="td cat-cell split-cat-cell">${mainBtn}${subSel}</div>
-    <div class="td type-cell split-empty"></div>
-    <div class="td amt-cell ${row['收支'] === '收入' ? 'i' : 'e'} no-strike">
-      <div class="amt-val">${sign}¥${Number(sp.amount).toFixed(2)}</div>
-    </div>
-    <div class="td td-actions split-empty"></div>
+    ${cells.join('')}
   </div>`;
 }
 

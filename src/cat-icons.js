@@ -1,9 +1,15 @@
-/** 分类卡通图标（OpenMoji 彩色 SVG） */
+/** 分类卡通图标（Iconify CDN） */
 
-export const OPENMOJI_CDN = 'https://cdn.jsdelivr.net/npm/openmoji@15.1.0/color/svg';
+export const ICONIFY_API = 'https://api.iconify.design';
+/** 默认图标集：fluent-emoji-flat | twemoji | fluent-emoji | mdi 等 */
+export const ICONIFY_COLLECTION = 'fluent-emoji-flat';
 
 export function isIconRef(v) {
   return typeof v === 'string' && /^icon:[0-9A-Fa-f]+$/.test(v);
+}
+
+export function isIconifyRef(v) {
+  return typeof v === 'string' && /^iconify:[^:]+:.+$/.test(v);
 }
 
 export function iconRef(hex) {
@@ -11,9 +17,50 @@ export function iconRef(hex) {
   return `icon:${h}`;
 }
 
+export function iconifyRef(collection, name) {
+  return `iconify:${collection}:${name}`;
+}
+
+export function iconifyUrl(collection, name) {
+  return `${ICONIFY_API}/${collection}/${name}.svg`;
+}
+
 export function iconUrl(ref) {
-  const hex = isIconRef(ref) ? ref.slice(5) : String(ref).toUpperCase();
-  return `${OPENMOJI_CDN}/${hex}.svg`;
+  if (isIconifyRef(ref)) {
+    const rest = ref.slice(8);
+    const sep = rest.indexOf(':');
+    if (sep > 0) return iconifyUrl(rest.slice(0, sep), rest.slice(sep + 1));
+  }
+  const hex = isIconRef(ref) ? ref.slice(5) : String(ref);
+  return iconifyUrl(ICONIFY_COLLECTION, hex.toLowerCase());
+}
+
+export function legacyEmojiToIconRef(emoji, legacyMap, iconMap) {
+  if (!emoji || isIconRef(emoji) || isIconifyRef(emoji)) return emoji;
+  for (const [cat, em] of Object.entries(legacyMap || {})) {
+    if (em === emoji) {
+      const ref = iconMap[cat];
+      if (ref && (isIconRef(ref) || isIconifyRef(ref))) return ref;
+    }
+  }
+  return null;
+}
+
+export function resolveCatIconValue(cat, stored, { iconMap, legacyMap, nameAliases } = {}) {
+  const raw = stored ?? iconMap?.[cat];
+  if (raw && (isIconRef(raw) || isIconifyRef(raw))) return raw;
+  const fromEmoji = legacyEmojiToIconRef(raw, legacyMap, iconMap);
+  if (fromEmoji && (isIconRef(fromEmoji) || isIconifyRef(fromEmoji))) return fromEmoji;
+  const alias = nameAliases?.[cat];
+  if (alias && iconMap?.[alias]) {
+    const ref = iconMap[alias];
+    if (isIconRef(ref) || isIconifyRef(ref)) return ref;
+  }
+  if (iconMap?.[cat]) {
+    const ref = iconMap[cat];
+    if (isIconRef(ref) || isIconifyRef(ref)) return ref;
+  }
+  return iconRef('1F4CC');
 }
 
 export function renderCatIcon(value, opts = {}) {
@@ -22,7 +69,7 @@ export function renderCatIcon(value, opts = {}) {
   const wrap = opts.wrapClass || '';
   const v = value || '📌';
 
-  if (isIconRef(v)) {
+  if (isIconRef(v) || isIconifyRef(v)) {
     const img = `<img class="${cls || 'cat-icon-img'}" src="${iconUrl(v)}" width="${size}" height="${size}" alt="" loading="lazy" decoding="async">`;
     return wrap ? `<span class="${wrap}">${img}</span>` : img;
   }

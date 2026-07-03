@@ -12,9 +12,11 @@ let getCats = () => [];
 let getEmoji = () => '📌';
 let getCatColor = () => '#98a2b3';
 let onSelect = () => {};
+let onFilterSelect = () => {};
 let popEl = null;
 let activeRowId = null;
 let activeSplitIdx = null;
+let activeMode = 'row';
 let emojiPopEl = null;
 let emojiOnPick = null;
 
@@ -28,7 +30,14 @@ function ensurePop() {
 
   popEl.querySelector('.cat-picker-grid').addEventListener('click', e => {
     const btn = e.target.closest('[data-cat]');
-    if (!btn || activeRowId == null) return;
+    if (!btn) return;
+    if (activeMode === 'filter') {
+      const cat = btn.dataset.cat || '';
+      closeCatPicker();
+      onFilterSelect(cat);
+      return;
+    }
+    if (activeRowId == null) return;
     const cat = btn.dataset.cat;
     const rowId = activeRowId;
     const splitIdx = activeSplitIdx;
@@ -38,7 +47,7 @@ function ensurePop() {
 
   document.addEventListener('click', e => {
     if (!popEl || popEl.classList.contains('hide')) return;
-    if (e.target.closest('.cat-picker-pop') || e.target.closest('.cat-pick-btn')) return;
+    if (e.target.closest('.cat-picker-pop') || e.target.closest('.cat-pick-btn') || e.target.closest('.cat-filter-btn')) return;
     closeCatPicker();
   });
 
@@ -59,9 +68,16 @@ export function initCatPicker(deps) {
   getEmoji = deps.getEmoji || getEmoji;
   getCatColor = deps.getCatColor || getCatColor;
   onSelect = deps.onSelect || onSelect;
+  onFilterSelect = deps.onFilterSelect || onFilterSelect;
   ensurePop();
 
   document.addEventListener('click', e => {
+    const filterBtn = e.target.closest('.cat-filter-btn');
+    if (filterBtn) {
+      e.stopPropagation();
+      openCatPickerForFilter(filterBtn);
+      return;
+    }
     const btn = e.target.closest('.cat-pick-btn');
     if (!btn) return;
     e.stopPropagation();
@@ -80,13 +96,40 @@ export function catPickBtnHtml(rowId, cat, opts = {}) {
   </button>`;
 }
 
-function renderGrid(currentCat) {
+export function catCellInnerHtml(rowId, cat, subSelHtml = '', opts = {}) {
+  const icon = getEmoji(cat);
+  const label = cat || '选择';
+  const on = cat ? ' on' : '';
+  const splitAttr = opts.splitIdx != null ? ` data-split-idx="${opts.splitIdx}"` : '';
+  const catAttr = cat ? ` data-current-cat="${cat}"` : '';
+  const attrs = `data-row-id="${rowId}"${splitAttr}${catAttr} title="${cat || '选择分类'}"`;
+  const btnCls = `cat-pick-btn cs cs-main${on}`;
+  return `<div class="cat-cell-inner">
+    <button type="button" class="${btnCls} cat-pick-btn--icon" ${attrs}>
+      ${renderCatIcon(icon, { size: 18, wrapClass: 'cat-pick-emoji-wrap' })}
+    </button>
+    <div class="cat-cell-text">
+      <button type="button" class="${btnCls} cat-pick-btn--label" ${attrs}>
+        <span class="cat-pick-label">${label}</span>
+      </button>
+      ${subSelHtml}
+    </div>
+  </div>`;
+}
+
+function renderGrid(currentCat, mode = 'row') {
   const grid = ensurePop().querySelector('.cat-picker-grid');
-  grid.innerHTML = getCats().map(c => {
+  const allTile = mode === 'filter'
+    ? `<button type="button" class="cat-picker-tile${!currentCat ? ' on' : ''}" data-cat="" title="全部分类">
+        <span class="cat-picker-icon cat-picker-icon--all"><i class="ti ti-apps"></i></span>
+        <span class="cat-picker-name">全部</span>
+      </button>`
+    : '';
+  grid.innerHTML = allTile + getCats().map(c => {
     const on = c === currentCat ? ' on' : '';
     const em = getEmoji(c);
     return `<button type="button" class="cat-picker-tile${on}" data-cat="${c}" title="${c}">
-      <span class="cat-picker-icon">${renderCatIcon(em, { size: 20 })}</span>
+      <span class="cat-picker-icon">${renderCatIcon(em, { size: 18 })}</span>
       <span class="cat-picker-name">${c}</span>
     </button>`;
   }).join('');
@@ -113,14 +156,30 @@ export function openCatPicker(anchor) {
   const splitIdx = splitRaw != null && splitRaw !== '' ? Number(splitRaw) : null;
   const currentCat = anchor.dataset.currentCat || anchor.querySelector('.cat-pick-label')?.textContent?.trim() || '';
 
-  if (!popEl?.classList.contains('hide') && activeRowId === rowId && activeSplitIdx === splitIdx) {
+  if (!popEl?.classList.contains('hide') && activeMode === 'row' && activeRowId === rowId && activeSplitIdx === splitIdx) {
     closeCatPicker();
     return;
   }
 
+  activeMode = 'row';
   activeRowId = rowId;
   activeSplitIdx = splitIdx;
-  renderGrid(currentCat === '选择分类' ? '' : currentCat);
+  renderGrid(currentCat === '选择分类' ? '' : currentCat, 'row');
+  positionPop(anchor);
+}
+
+export function openCatPickerForFilter(anchor) {
+  const currentCat = anchor.dataset.currentCat || '';
+
+  if (!popEl?.classList.contains('hide') && activeMode === 'filter') {
+    closeCatPicker();
+    return;
+  }
+
+  activeMode = 'filter';
+  activeRowId = null;
+  activeSplitIdx = null;
+  renderGrid(currentCat, 'filter');
   positionPop(anchor);
 }
 
@@ -129,6 +188,7 @@ export function closeCatPicker() {
   popEl.classList.add('hide');
   activeRowId = null;
   activeSplitIdx = null;
+  activeMode = 'row';
 }
 
 function ensureEmojiPop() {
