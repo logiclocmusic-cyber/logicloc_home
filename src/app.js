@@ -4,7 +4,7 @@ import { ImportTimeline } from './import-timeline.js';
 import { Parsers } from './parsers.js';
 import {
   DEFAULT_CATS, DEFAULT_EMOJIS, LEGACY_DEFAULT_EMOJIS, CAT_ICON_NAME_ALIASES, DEFAULT_SOURCES, DEFAULT_IMPORT_SOURCE, DEFAULT_SUBCATS, CAT_COLORS,
-  MONITOR_CATS, EXCLUDE_CATS, OFFSET_CATS, DEFAULT_CAT_STATS_EXCLUDE, MONITOR_EMOJIS, DEFAULT_INCOME_DATA_CATS
+  MONITOR_CATS, EXCLUDE_CATS, DEFAULT_OFFSET_CATS, DEFAULT_CAT_STATS_EXCLUDE, MONITOR_EMOJIS, DEFAULT_INCOME_DATA_CATS
 } from './config.js';
 import { renderCatIcon, iconRef, isIconRef, resolveCatIconValue } from './cat-icons.js';
 import { fetchState, saveState, resetLedger, deleteImportBatchApi, changeImportBatchSourceApi, checkHealth } from './api.js';
@@ -63,7 +63,7 @@ let CATS = [...DEFAULT_CATS];
 let EMOJIS = { ...DEFAULT_EMOJIS };
 let SUBCATS = { ...DEFAULT_SUBCATS };
 let SOURCES = JSON.parse(JSON.stringify(DEFAULT_SOURCES));
-let OFFSET_CATS_SET = OFFSET_CATS;
+let OFFSET_CATS_SET = new Set(DEFAULT_OFFSET_CATS);
 let CAT_STATS_EXCLUDE = new Set(DEFAULT_CAT_STATS_EXCLUDE);
 let INCOME_DATA_CATS_LIST = [...DEFAULT_INCOME_DATA_CATS];
 
@@ -337,7 +337,7 @@ function buildState() {
     transactions: allData,
     refunded: [...refunded],
     excluded: [...excluded],
-    categories: { cats: CATS, emojis: EMOJIS, subcats: SUBCATS, statsExclude: [...CAT_STATS_EXCLUDE], incomeDataCats: [...INCOME_DATA_CATS_LIST] },
+    categories: { cats: CATS, emojis: EMOJIS, subcats: SUBCATS, statsExclude: [...CAT_STATS_EXCLUDE], offsetCats: [...OFFSET_CATS_SET], incomeDataCats: [...INCOME_DATA_CATS_LIST] },
     sources: SOURCES,
     rules: { peerRules: Categorizer.peerRules, keywordRules: Categorizer.keywordRules },
     importHistory,
@@ -459,6 +459,11 @@ async function loadData() {
         CAT_STATS_EXCLUDE = new Set(state.categories.statsExclude);
       } else {
         CAT_STATS_EXCLUDE = new Set(DEFAULT_CAT_STATS_EXCLUDE);
+      }
+      if (Array.isArray(state.categories.offsetCats)) {
+        OFFSET_CATS_SET = new Set(state.categories.offsetCats);
+      } else {
+        OFFSET_CATS_SET = new Set(DEFAULT_OFFSET_CATS);
       }
       if (Array.isArray(state.categories.incomeDataCats) && state.categories.incomeDataCats.length) {
         INCOME_DATA_CATS_LIST = [...state.categories.incomeDataCats];
@@ -3247,6 +3252,10 @@ function renderCatList() {
           <input type="checkbox" class="cat-stats-exclude-cb" data-i="${i}"${CAT_STATS_EXCLUDE.has(c) ? ' checked' : ''}>
           <span>不计入统计</span>
         </label>
+        <label class="cat-offset-type" title="统计时该分类收支相抵，只计净收入/净支出">
+          <input type="checkbox" class="cat-offset-cb" data-i="${i}"${OFFSET_CATS_SET.has(c) ? ' checked' : ''}>
+          <span>对冲</span>
+        </label>
         <button class="db" onclick="delCat(${i})">✕</button>
       </div>
       <div class="cat-sub-panel${open ? ' open' : ''}">
@@ -3262,6 +3271,7 @@ function delCat(i) {
   delete EMOJIS[c];
   delete SUBCATS[c];
   CAT_STATS_EXCLUDE.delete(c);
+  OFFSET_CATS_SET.delete(c);
   INCOME_DATA_CATS_LIST = INCOME_DATA_CATS_LIST.filter(x => x !== c);
   catSubExpanded.delete(c);
   renderCatList();
@@ -3304,6 +3314,10 @@ function saveCat() {
         CAT_STATS_EXCLUDE.delete(old);
         CAT_STATS_EXCLUDE.add(nv);
       }
+      if (OFFSET_CATS_SET.has(old)) {
+        OFFSET_CATS_SET.delete(old);
+        OFFSET_CATS_SET.add(nv);
+      }
       const incIdx = INCOME_DATA_CATS_LIST.indexOf(old);
       if (incIdx >= 0) INCOME_DATA_CATS_LIST[incIdx] = nv;
       CATS[i] = nv;
@@ -3329,6 +3343,13 @@ function saveCat() {
     if (CATS[i]) nextExclude.add(CATS[i]);
   });
   CAT_STATS_EXCLUDE = nextExclude;
+  const nextOffset = new Set();
+  document.querySelectorAll('#catList .cat-offset-cb').forEach(cb => {
+    if (!cb.checked) return;
+    const i = parseInt(cb.dataset.i, 10);
+    if (CATS[i]) nextOffset.add(CATS[i]);
+  });
+  OFFSET_CATS_SET = nextOffset;
   persistNow().then(ok => {
     if (!ok) return;
     buildCatFilter();

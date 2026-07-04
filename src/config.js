@@ -91,7 +91,10 @@ export const DEFAULT_INCOME_DATA_CATS = ['闲置转让', '乐极客收入', '红
 /** @deprecated 使用 DEFAULT_INCOME_DATA_CATS */
 export const INCOME_DATA_CATS = DEFAULT_INCOME_DATA_CATS;
 export const EXCLUDE_CATS = new Set(['转账']);
-export const OFFSET_CATS = new Set(['代拍代购','闲置转让','餐饮美食','探店置换','乐极客收入']);
+/** 默认对冲分类：统计时该分类收支相抵，只计净额 */
+export const DEFAULT_OFFSET_CATS = ['代拍代购', '闲置转让', '餐饮美食', '探店置换', '乐极客收入'];
+/** @deprecated 使用 DEFAULT_OFFSET_CATS */
+export const OFFSET_CATS = new Set(DEFAULT_OFFSET_CATS);
 /** 默认不计入首页总收支统计的分类（可在「编辑分类」中调整） */
 export const DEFAULT_CAT_STATS_EXCLUDE = new Set(['人情往来']);
 export const MONITOR_EMOJIS = {

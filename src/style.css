@@ -1907,6 +1907,12 @@ body{
 }
 .cat-stats-exclude input{margin:0;cursor:pointer}
 .cat-stats-exclude:hover{color:var(--txt2)}
+.cat-offset-type{
+  display:flex;align-items:center;gap:5px;flex-shrink:0;
+  font-size:11px;color:var(--amb-t);cursor:pointer;white-space:nowrap;user-select:none;
+}
+.cat-offset-type input{margin:0;cursor:pointer}
+.cat-offset-type:hover{color:var(--txt2)}
 .cat-sub-toggle{
   width:28px;height:28px;border:1px solid var(--bdr);border-radius:8px;background:var(--surf);
   cursor:pointer;color:var(--txt3);display:flex;align-items:center;justify-content:center;
