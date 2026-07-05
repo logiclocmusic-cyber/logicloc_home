@@ -134,9 +134,10 @@ function formatDayHeader(date) {
   if (!date) return '—';
   const d = new Date(`${date}T12:00:00`);
   if (Number.isNaN(d.getTime())) return date;
+  const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
-  return `${mm}.${dd} ${WEEKDAY_LABELS[d.getDay()]}`;
+  return `${yyyy}.${mm}.${dd} ${WEEKDAY_LABELS[d.getDay()]}`;
 }
 
 function fmtDayAmt(n) {
@@ -269,6 +270,21 @@ function catCellHtml(row) {
 
 function catLabel(c) { return c; }
 function catColor(c) { const i = CATS.indexOf(c); return i >= 0 ? CAT_COLORS[i] : '#98a2b3'; }
+
+function colorLuminance(hex) {
+  const raw = String(hex || '').replace('#', '');
+  if (raw.length !== 6) return 0.5;
+  const [r, g, b] = [0, 2, 4].map(i => parseInt(raw.slice(i, i + 2), 16) / 255);
+  const lin = (c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+/** 首页卡片：保留分类原色，仅将黑色/近黑色替换为主题紫 */
+function homeCardAccent(accent) {
+  const hex = String(accent || '').trim();
+  if (!hex.startsWith('#') || colorLuminance(hex) < 0.12) return 'var(--primary)';
+  return hex;
+}
 function srcColor(s) { const f = SOURCES.find(x => x.name === s); return f ? f.color : '#98a2b3'; }
 function isCatExcludedFromStats(cat) {
   return CAT_STATS_EXCLUDE.has(cat);
@@ -508,6 +524,7 @@ async function loadData() {
     buildCatFilter();
     applyF();
     renderKPI();
+    renderHome();
     renderMonitor();
     updateSubtitle();
     renderImportHistoryUI();
@@ -533,6 +550,349 @@ function kpiCard(label, value, sub, icon, iconCls, valCls) {
       <div class="kpi-s">${sub}</div>
     </div>
   </div>`;
+}
+
+function getLastMonthYm() {
+  const now = new Date();
+  const mo = now.getMonth();
+  const pm = mo === 0 ? 12 : mo;
+  const py = mo === 0 ? now.getFullYear() - 1 : now.getFullYear();
+  return `${py}-${String(pm).padStart(2, '0')}`;
+}
+
+function getPrevMonthYm(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(y, m - 2, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+const HOME_EXP_CAT_HIDDEN_KEY = 'home_exp_cat_hidden';
+const HOME_INC_CAT_HIDDEN_KEY = 'home_inc_cat_hidden';
+let homeExpCatSettingsDraft = null;
+let homeIncCatSettingsDraft = null;
+
+function getHomeExpCatHidden() {
+  return getHomeCatHiddenSet(HOME_EXP_CAT_HIDDEN_KEY);
+}
+
+function saveHomeExpCatHiddenSet(set) {
+  saveHomeCatHiddenSet(HOME_EXP_CAT_HIDDEN_KEY, set);
+}
+
+function getHomeIncCatHidden() {
+  return getHomeCatHiddenSet(HOME_INC_CAT_HIDDEN_KEY);
+}
+
+function saveHomeIncCatHiddenSet(set) {
+  saveHomeCatHiddenSet(HOME_INC_CAT_HIDDEN_KEY, set);
+}
+
+function getHomeCatHiddenSet(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function saveHomeCatHiddenSet(key, set) {
+  localStorage.setItem(key, JSON.stringify([...set]));
+}
+
+function getRecentMonthsYm(anchorYm, count = 6) {
+  const months = [];
+  let cur = anchorYm;
+  for (let i = 0; i < count; i++) {
+    months.unshift(cur);
+    cur = getPrevMonthYm(cur);
+  }
+  return months;
+}
+
+function categoryTotalInMonth(ym, cat, type) {
+  return monthStatsRows(ym)
+    .filter(r => r['分类'] === cat && r['收支'] === type)
+    .reduce((s, r) => s + r['金额'], 0);
+}
+
+function yearMonthsThroughYm(anchorYm) {
+  const [y, m] = anchorYm.split('-').map(Number);
+  return Array.from({ length: m }, (_, i) => `${y}-${String(i + 1).padStart(2, '0')}`);
+}
+
+function categoryYearStats(cat, type, anchorYm) {
+  const months = yearMonthsThroughYm(anchorYm);
+  const ytd = months.reduce((s, ym) => s + categoryTotalInMonth(ym, cat, type), 0);
+  const avg = months.length ? ytd / months.length : 0;
+  return { ytd, avg };
+}
+
+function homeCatSubHtml(cat, type, ym) {
+  const { ytd, avg } = categoryYearStats(cat, type, ym);
+  return `<div class="home-cat-sub"><span>总计 ${fmtCompactMoney(ytd)}</span><span class="home-cat-sub-sep">·</span><span>月均 ${fmtCompactMoney(avg)}</span></div>`;
+}
+
+function monthlySeriesForCategory(cat, type, anchorYm, count = 6) {
+  return getRecentMonthsYm(anchorYm, count).map(ym => ({
+    ym,
+    amount: categoryTotalInMonth(ym, cat, type),
+  }));
+}
+
+function monthStatsRows(ym) {
+  return statsData().filter(r => r['日期'].startsWith(ym));
+}
+
+function lastMonthStatsRows() {
+  return monthStatsRows(getLastMonthYm());
+}
+
+function fmtCompactMoney(n) {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return '—';
+  const abs = Math.abs(num);
+  const sign = num < 0 ? '-' : '';
+  if (abs >= 10000) return `${sign}${(abs / 10000).toFixed(1).replace(/\.0$/, '')}万`;
+  if (abs >= 1000) return `${sign}${(abs / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+  return `${sign}${abs.toFixed(0)}`;
+}
+
+function renderHomeMonthlyBars(series, accent, anchorYm, cat, type) {
+  const max = Math.max(...series.map(s => s.amount), 1);
+  const encCat = encodeURIComponent(cat);
+  const maxPx = 48;
+  return `<div class="home-cat-bars home-cat-bars-click" role="group" aria-label="近六个月趋势">${series.map(({ ym, amount }) => {
+    const hPx = Math.max(8, Math.round((amount / max) * maxPx));
+    const on = ym === anchorYm;
+    const title = `${fmtMonthLabel(ym)} ${fmtMoney(amount)}`;
+    return `<button type="button" class="home-bar${on ? ' home-bar-on' : ''}" style="height:${hPx}px;${on ? `--bar-color:${accent}` : ''}" data-ym="${ym}" data-cat="${encCat}" data-type="${type}" title="${title}" aria-label="${title}"></button>`;
+  }).join('')}</div>`;
+}
+
+function homeCatDeltaHtml(delta, type) {
+  const abs = Math.abs(delta);
+  if (abs < 0.01) {
+    return '<span class="home-cat-delta home-cat-delta-flat">持平</span>';
+  }
+  const up = delta > 0;
+  const bad = type === '支出' ? up : !up;
+  const cls = bad ? 'home-cat-delta-up' : 'home-cat-delta-down';
+  const icon = up ? 'ti-trending-up' : 'ti-trending-down';
+  const prefix = up ? '+' : '-';
+  return `<span class="home-cat-delta ${cls}">${prefix}${fmtCompactMoney(abs)} <i class="ti ${icon}"></i></span>`;
+}
+
+function renderHomeCatCards(el, entries, prevMap, type, ym) {
+  if (!el) return;
+  if (!entries.length) {
+    el.innerHTML = '<div class="home-cat-empty">上月暂无数据</div>';
+    return;
+  }
+  el.innerHTML = entries.map(([cat, amt]) => {
+    const accent = homeCardAccent(catColor(cat));
+    const prev = prevMap.get(cat) || 0;
+    const delta = amt - prev;
+    const amtStr = fmtCompactMoney(amt);
+    const amtCls = amtStr.includes('万') || amtStr.length >= 5 ? ' home-cat-amt--sm' : '';
+    const bars = renderHomeMonthlyBars(monthlySeriesForCategory(cat, type, ym), accent, ym, cat, type);
+    return `<article class="home-cat-card" style="--card-accent:${accent}">
+      <div class="home-cat-main">
+        <div class="home-cat-name">${catLabel(cat)}</div>
+        <div class="home-cat-row">
+          <div class="home-cat-val">
+            <span class="home-cat-amt${amtCls}">${amtStr}</span>
+            ${homeCatDeltaHtml(delta, type)}
+          </div>
+        </div>
+        ${homeCatSubHtml(cat, type, ym)}
+      </div>
+      ${bars}
+    </article>`;
+  }).join('');
+}
+
+function ensureHomeCatBarClicks(gridId) {
+  const grid = document.getElementById(gridId);
+  if (!grid || grid._homeBarClick) return;
+  grid._homeBarClick = true;
+  grid.addEventListener('click', (e) => {
+    const bar = e.target.closest('.home-bar[data-ym][data-cat]');
+    if (!bar) return;
+    const ym = bar.dataset.ym;
+    const cat = decodeURIComponent(bar.dataset.cat);
+    if (!ym || !cat) return;
+    if (bar.dataset.type === '收入') showIncomeDetail(ym, cat);
+    else showDetail(ym, cat);
+  });
+}
+
+function openHomeCatSettings(type) {
+  const isInc = type === '收入';
+  const entries = categoryTotals(lastMonthStatsRows(), type);
+  const hidden = isInc ? getHomeIncCatHidden() : getHomeExpCatHidden();
+  const allCats = [...new Set([...entries.map(([c]) => c), ...hidden])];
+  const draft = new Set(hidden);
+  if (isInc) homeIncCatSettingsDraft = draft;
+  else homeExpCatSettingsDraft = draft;
+  const list = document.getElementById(isInc ? 'homeIncCatSettingsList' : 'homeExpCatSettingsList');
+  const emptyLabel = isInc ? '上月暂无收入分类' : '上月暂无支出分类';
+  const toggleFn = isInc ? 'toggleHomeIncCatSetting' : 'toggleHomeExpCatSetting';
+  if (list) {
+    list.innerHTML = allCats.length
+      ? allCats.map(cat => {
+        const visible = !draft.has(cat);
+        return `<label class="home-exp-cat-setting-item"><input type="checkbox" data-cat="${encodeURIComponent(cat)}" ${visible ? 'checked' : ''} onchange="${toggleFn}(this)"><span>${catLabel(cat)}</span></label>`;
+      }).join('')
+      : `<p class="home-cat-empty">${emptyLabel}</p>`;
+  }
+  document.getElementById(isInc ? 'moHomeIncCats' : 'moHomeExpCats')?.classList.remove('hide');
+}
+
+function openHomeExpCatSettings() { openHomeCatSettings('支出'); }
+function openHomeIncCatSettings() { openHomeCatSettings('收入'); }
+
+function toggleHomeCatSetting(inp, type) {
+  const cat = decodeURIComponent(inp.dataset.cat);
+  const draft = type === '收入' ? homeIncCatSettingsDraft : homeExpCatSettingsDraft;
+  if (!draft) return;
+  if (inp.checked) draft.delete(cat);
+  else draft.add(cat);
+}
+
+function toggleHomeExpCatSetting(inp) { toggleHomeCatSetting(inp, '支出'); }
+function toggleHomeIncCatSetting(inp) { toggleHomeCatSetting(inp, '收入'); }
+
+function saveHomeCatSettings(type) {
+  const isInc = type === '收入';
+  const draft = isInc ? homeIncCatSettingsDraft : homeExpCatSettingsDraft;
+  if (draft) {
+    if (isInc) saveHomeIncCatHiddenSet(draft);
+    else saveHomeExpCatHiddenSet(draft);
+  }
+  closeHomeCatSettings(type);
+  renderHome();
+}
+
+function saveHomeExpCatSettings() { saveHomeCatSettings('支出'); }
+function saveHomeIncCatSettings() { saveHomeCatSettings('收入'); }
+
+function closeHomeCatSettings(type) {
+  const isInc = type === '收入';
+  document.getElementById(isInc ? 'moHomeIncCats' : 'moHomeExpCats')?.classList.add('hide');
+  if (isInc) homeIncCatSettingsDraft = null;
+  else homeExpCatSettingsDraft = null;
+}
+
+function closeHomeExpCatSettings() { closeHomeCatSettings('支出'); }
+function closeHomeIncCatSettings() { closeHomeCatSettings('收入'); }
+
+function renderHomeCatGrid(el, entries, prevMap, type, ym, hiddenCats, openSettingsFn) {
+  const visible = entries.filter(([cat]) => !hiddenCats.has(cat));
+  if (visible.length) {
+    renderHomeCatCards(el, visible, prevMap, type, ym);
+  } else if (entries.length) {
+    el.innerHTML = `<div class="home-cat-empty">分类卡片已全部隐藏 · <button type="button" class="btn btn-sm" onclick="${openSettingsFn}()">显示设置</button></div>`;
+  } else {
+    renderHomeCatCards(el, [], prevMap, type, ym);
+  }
+}
+
+function categoryTotals(rows, type) {
+  const map = {};
+  rows.filter(r => r['收支'] === type).forEach(r => {
+    map[r['分类']] = (map[r['分类']] || 0) + r['金额'];
+  });
+  return Object.entries(map).sort((a, b) => b[1] - a[1]);
+}
+
+function renderHomeLegend(el, entries, colors) {
+  if (!el) return;
+  if (!entries.length) {
+    el.innerHTML = '<span class="home-leg-empty">暂无数据</span>';
+    return;
+  }
+  el.innerHTML = entries.map(([cat, amt], i) => {
+    const amtStr = fmtMoney(amt, { integer: amt >= 10000 });
+    return `<span class="home-leg-item"><span class="home-leg-dot" style="background:${colors[i]}"></span><span class="home-leg-name">${catLabel(cat)}</span><span class="home-leg-amt">${amtStr}</span></span>`;
+  }).join('');
+}
+
+function renderHomeDonut(chartKey, canvasId, entries, colors, total, centerEl) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  if (charts[chartKey]) charts[chartKey].destroy();
+  if (!entries.length) {
+    if (centerEl) centerEl.textContent = '—';
+    charts[chartKey] = new Chart(canvas, {
+      type: 'doughnut',
+      data: {
+        labels: ['无数据'],
+        datasets: [{ data: [1], backgroundColor: ['rgba(42,40,56,.08)'], borderWidth: 0 }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        cutout: '72%',
+      },
+    });
+    return;
+  }
+  const keys = entries.map(e => e[0]);
+  const vals = entries.map(e => +e[1].toFixed(2));
+  if (centerEl) centerEl.textContent = fmtMoney(total, { integer: total >= 10000 });
+  charts[chartKey] = new Chart(canvas, {
+    type: 'doughnut',
+    data: {
+      labels: keys.map(catLabel),
+      datasets: [{ data: vals, backgroundColor: colors, borderWidth: 3, borderColor: CHART_THEME.pieBorder }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: chartMoneyTooltip },
+      cutout: '72%',
+    },
+  });
+}
+
+function renderHome() {
+  const ym = getLastMonthYm();
+  const titleEl = document.getElementById('homeMonthTitle');
+  if (titleEl) titleEl.textContent = fmtMonthLabel(ym);
+
+  const rows = lastMonthStatsRows();
+  const expEntries = categoryTotals(rows, '支出');
+  const incEntries = categoryTotals(rows, '收入');
+  const totalExp = expEntries.reduce((s, [, v]) => s + v, 0);
+  const totalInc = incEntries.reduce((s, [, v]) => s + v, 0);
+  const net = totalInc - totalExp;
+
+  const summaryEl = document.getElementById('homeSummary');
+  if (summaryEl) {
+    summaryEl.innerHTML = [
+      kpiCard('上月支出', fmtMoney(totalExp), `${expEntries.length} 个分类`, 'ti-arrow-down-right', 'pink', 'c-red'),
+      kpiCard('上月收入', fmtMoney(totalInc), `${incEntries.length} 个分类`, 'ti-arrow-up-right', 'green', 'c-grn'),
+      kpiCard('上月结余', fmtMoneySigned(net), net >= 0 ? '盈余' : '超支', 'ti-scale', 'blue', net >= 0 ? 'c-blu' : 'c-red'),
+    ].join('');
+  }
+
+  const expColors = expEntries.map(([c]) => catColor(c));
+  const incColors = incEntries.map(([c]) => catColor(c));
+
+  const prevYm = getPrevMonthYm(ym);
+  const prevExpMap = new Map(categoryTotals(monthStatsRows(prevYm), '支出'));
+  const prevIncMap = new Map(categoryTotals(monthStatsRows(prevYm), '收入'));
+  const hiddenExpCats = getHomeExpCatHidden();
+  const hiddenIncCats = getHomeIncCatHidden();
+  renderHomeCatGrid(document.getElementById('homeExpCats'), expEntries, prevExpMap, '支出', ym, hiddenExpCats, 'openHomeExpCatSettings');
+  renderHomeCatGrid(document.getElementById('homeIncCats'), incEntries, prevIncMap, '收入', ym, hiddenIncCats, 'openHomeIncCatSettings');
+  ensureHomeCatBarClicks('homeExpCats');
+  ensureHomeCatBarClicks('homeIncCats');
+
+  renderHomeDonut('homeExpPie', 'homeExpPie', expEntries, expColors, totalExp, document.getElementById('homeExpCenter'));
+  renderHomeDonut('homeIncPie', 'homeIncPie', incEntries, incColors, totalInc, document.getElementById('homeIncCenter'));
+  renderHomeLegend(document.getElementById('homeExpLeg'), expEntries, expColors);
+  renderHomeLegend(document.getElementById('homeIncLeg'), incEntries, incColors);
 }
 
 function renderKPI() {
@@ -1321,6 +1681,7 @@ function refreshDetailModal() {
 }
 
 function refreshActiveViews() {
+  if (document.getElementById('view-home')?.classList.contains('on')) renderHome();
   if (document.getElementById('view-income')?.classList.contains('on')) renderIncomeData();
   if (document.getElementById('view-report')?.classList.contains('on')) renderReport();
   if (document.getElementById('view-catreport')?.classList.contains('on')) renderCatReport();
@@ -2702,7 +3063,8 @@ function sw(name, el) {
   document.querySelectorAll('.ni').forEach(n => n.classList.remove('on'));
   document.getElementById('view-' + name).classList.add('on');
   el.classList.add('on');
-  document.getElementById('vt').textContent = { ledger: '明细列表', catbrowse: '分类检索', catreport: '分类报表', renqing: '人情往来', accounts: '信用账户', charts: '统计图表', monitor: '统计监控', gear: '装备库', report: '收支报告', income: '收入数据', company: '公司成本', refunds: '退款管理', import: '导入预览' }[name];
+  document.getElementById('vt').textContent = { home: '首页', ledger: '明细列表', catbrowse: '分类检索', catreport: '分类报表', renqing: '人情往来', accounts: '信用账户', charts: '统计图表', monitor: '统计监控', gear: '装备库', report: '收支报告', income: '收入数据', company: '公司成本', refunds: '退款管理', import: '导入预览' }[name];
+  if (name === 'home') setTimeout(renderHome, 60);
   if (name === 'charts') setTimeout(renderCharts, 60);
   if (name === 'report') setTimeout(renderReport, 60);
   if (name === 'income') setTimeout(renderIncomeData, 60);
@@ -3978,6 +4340,8 @@ Object.assign(window, {
   toggleBudgetEditMode, addBudgetRow, deleteBudget,
   bindSelectedCreditCards, unbindCreditCardFromPool, dissolveCreditPoolById,
   goP, toggleRf, toggleExclude, updCat, updSubCat, updCatDet, showAllDetail, showDetail, showIncomeDetail, showCatReportDetail, closeDetModal, toggleDetSort, toggleDetUnsetSubFilter,
+  openHomeExpCatSettings, closeHomeExpCatSettings, saveHomeExpCatSettings, toggleHomeExpCatSetting,
+  openHomeIncCatSettings, closeHomeIncCatSettings, saveHomeIncCatSettings, toggleHomeIncCatSetting,
   toggleDetSelect, toggleDetSelectAll, clearDetSelection, applyDetBulkCat, applyDetBulkSubCat, detBulkToggleRefund,
   openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload, submitGearImageUrl,
   addIncomeMonitorCat, addIncomeMonitorCatFromSel, removeIncomeMonitorCat,

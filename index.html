@@ -31,7 +31,8 @@
     </div>
   </div>
   <nav class="nav">
-    <button class="ni on" onclick="sw('ledger',this)" title="明细列表"><span class="ni-icon"><i class="ti ti-list-details"></i></span><span class="ni-label">明细</span></button>
+    <button class="ni on" onclick="sw('home',this)" title="首页"><span class="ni-icon"><i class="ti ti-home"></i></span><span class="ni-label">首页</span></button>
+    <button class="ni" onclick="sw('ledger',this)" title="明细列表"><span class="ni-icon"><i class="ti ti-list-details"></i></span><span class="ni-label">明细</span></button>
     <button class="ni" onclick="sw('catbrowse',this)" title="分类检索"><span class="ni-icon"><i class="ti ti-category"></i></span><span class="ni-label">检索</span></button>
     <button class="ni" onclick="sw('gear',this)" title="装备库"><span class="ni-icon"><i class="ti ti-baby-carriage"></i></span><span class="ni-label">装备</span></button>
     <button class="ni" onclick="sw('catreport',this)" title="分类报表"><span class="ni-icon"><i class="ti ti-chart-bar"></i></span><span class="ni-label">报表</span></button>
@@ -72,7 +73,53 @@
     <h2 id="vt">明细列表</h2>
   </div>
 
-  <div class="page view on" id="view-ledger">
+  <div class="page view on" id="view-home">
+    <div class="home-head">
+      <h2 class="home-title" id="homeMonthTitle">—</h2>
+      <p class="home-sub">上月收支概览 · 按分类统计</p>
+    </div>
+    <div class="home-summary" id="homeSummary"></div>
+    <div class="home-cat-section">
+      <div class="home-section-head">
+        <h3 class="home-section-title">支出分类</h3>
+        <button type="button" class="btn btn-sm home-section-btn" id="homeExpCatSettingsBtn" onclick="openHomeExpCatSettings()" title="设置分类卡片显示"><i class="ti ti-adjustments-horizontal"></i></button>
+      </div>
+      <div class="home-cat-grid" id="homeExpCats"></div>
+    </div>
+    <div class="home-cat-section">
+      <div class="home-section-head">
+        <h3 class="home-section-title">收入分类</h3>
+        <button type="button" class="btn btn-sm home-section-btn" id="homeIncCatSettingsBtn" onclick="openHomeIncCatSettings()" title="设置分类卡片显示"><i class="ti ti-adjustments-horizontal"></i></button>
+      </div>
+      <div class="home-cat-grid" id="homeIncCats"></div>
+    </div>
+    <div class="home-charts">
+      <div class="home-chart-card">
+        <div class="home-chart-title">支出分类</div>
+        <div class="home-donut-wrap">
+          <canvas id="homeExpPie"></canvas>
+          <div class="home-donut-center">
+            <div class="home-donut-val" id="homeExpCenter">—</div>
+            <div class="home-donut-sub">总支出</div>
+          </div>
+        </div>
+        <div class="home-leg" id="homeExpLeg"></div>
+      </div>
+      <div class="home-chart-card">
+        <div class="home-chart-title">收入分类</div>
+        <div class="home-donut-wrap">
+          <canvas id="homeIncPie"></canvas>
+          <div class="home-donut-center">
+            <div class="home-donut-val" id="homeIncCenter">—</div>
+            <div class="home-donut-sub">总收入</div>
+          </div>
+        </div>
+        <div class="home-leg" id="homeIncLeg"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="page view" id="view-ledger">
     <div class="bulk-bar" id="bulkBar">
       <span class="bulk-cnt" id="bulkCnt">0 项已选</span>
       <span class="bulk-stats" id="bulkStats"></span>
@@ -532,6 +579,34 @@
         <button class="btn btn-sm" onclick="clearDetSelection()" style="margin-left:auto">✕ 取消</button>
       </div>
       <div id="detBody" style="max-height:50vh;overflow-y:auto"></div>
+    </div>
+  </div>
+</div>
+
+<div class="mo hide" id="moHomeExpCats">
+  <div class="mbox">
+    <div class="mh"><h3>支出分类卡片显示</h3><button class="mclose" onclick="closeHomeExpCatSettings()"><i class="ti ti-x"></i></button></div>
+    <div class="mb">
+      <p class="cat-edit-hint">取消勾选后，该分类不会在首页支出卡片中显示。</p>
+      <div id="homeExpCatSettingsList" class="home-exp-cat-settings"></div>
+    </div>
+    <div class="mf">
+      <button class="btn" onclick="closeHomeExpCatSettings()">取消</button>
+      <button class="btn btn-p" onclick="saveHomeExpCatSettings()">确定</button>
+    </div>
+  </div>
+</div>
+
+<div class="mo hide" id="moHomeIncCats">
+  <div class="mbox">
+    <div class="mh"><h3>收入分类卡片显示</h3><button class="mclose" onclick="closeHomeIncCatSettings()"><i class="ti ti-x"></i></button></div>
+    <div class="mb">
+      <p class="cat-edit-hint">取消勾选后，该分类不会在首页收入卡片中显示。</p>
+      <div id="homeIncCatSettingsList" class="home-exp-cat-settings"></div>
+    </div>
+    <div class="mf">
+      <button class="btn" onclick="closeHomeIncCatSettings()">取消</button>
+      <button class="btn btn-p" onclick="saveHomeIncCatSettings()">确定</button>
     </div>
   </div>
 </div>
