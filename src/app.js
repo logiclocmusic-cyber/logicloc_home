@@ -63,6 +63,7 @@ let CATS = [...DEFAULT_CATS];
 let EMOJIS = { ...DEFAULT_EMOJIS };
 let SUBCATS = { ...DEFAULT_SUBCATS };
 let SOURCES = JSON.parse(JSON.stringify(DEFAULT_SOURCES));
+let SOURCE_CHIP_ORDER = [];
 let OFFSET_CATS_SET = new Set(DEFAULT_OFFSET_CATS);
 let CAT_STATS_EXCLUDE = new Set(DEFAULT_CAT_STATS_EXCLUDE);
 let INCOME_DATA_CATS_LIST = [...DEFAULT_INCOME_DATA_CATS];
@@ -339,6 +340,7 @@ function buildState() {
     excluded: [...excluded],
     categories: { cats: CATS, emojis: EMOJIS, subcats: SUBCATS, statsExclude: [...CAT_STATS_EXCLUDE], offsetCats: [...OFFSET_CATS_SET], incomeDataCats: [...INCOME_DATA_CATS_LIST] },
     sources: SOURCES,
+    sourceChipOrder: SOURCE_CHIP_ORDER,
     rules: { peerRules: Categorizer.peerRules, keywordRules: Categorizer.keywordRules },
     importHistory,
     nextId,
@@ -473,6 +475,8 @@ async function loadData() {
     }
 
     if (state.sources) SOURCES = state.sources;
+    if (Array.isArray(state.sourceChipOrder)) SOURCE_CHIP_ORDER = [...state.sourceChipOrder];
+    else SOURCE_CHIP_ORDER = [];
     if (ensureCcbChenchengSource()) await persistNow();
     allData = state.transactions || [];
     const maxId = allData.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0);
@@ -552,21 +556,142 @@ function renderKPI() {
   updateSubtitle();
 }
 
+function syncSourceChipOrder() {
+  const fromData = [...new Set(allData.map(r => r['来源']).filter(Boolean))];
+  const next = [];
+  SOURCE_CHIP_ORDER.forEach(s => {
+    if (fromData.includes(s)) next.push(s);
+  });
+  SOURCES.forEach(s => {
+    if (fromData.includes(s.name) && !next.includes(s.name)) next.push(s.name);
+  });
+  fromData.forEach(s => {
+    if (!next.includes(s)) next.push(s);
+  });
+  SOURCE_CHIP_ORDER = next;
+}
+
+let srcChipDragFrom = null;
+let srcChipDragBound = false;
+let srcChipHoldTimer = null;
+let srcChipHoldEl = null;
+let srcChipSuppressClick = false;
+const SRC_CHIP_HOLD_MS = 420;
+
+function reorderSourceChips(fromName, toName) {
+  if (!fromName || !toName || fromName === toName || fromName === 'all' || toName === 'all') return;
+  syncSourceChipOrder();
+  const fromIdx = SOURCE_CHIP_ORDER.indexOf(fromName);
+  const toIdx = SOURCE_CHIP_ORDER.indexOf(toName);
+  if (fromIdx < 0 || toIdx < 0) return;
+  const [moved] = SOURCE_CHIP_ORDER.splice(fromIdx, 1);
+  SOURCE_CHIP_ORDER.splice(toIdx, 0, moved);
+  persist();
+  buildSrcChips();
+}
+
+function ensureSrcChipsDrag() {
+  const list = document.getElementById('srcChips');
+  if (!list || srcChipDragBound) return;
+  srcChipDragBound = true;
+
+  const clearHold = () => {
+    if (srcChipHoldTimer) clearTimeout(srcChipHoldTimer);
+    srcChipHoldTimer = null;
+    srcChipHoldEl?.classList.remove('hold-ready');
+    srcChipHoldEl = null;
+  };
+
+  list.addEventListener('pointerdown', e => {
+    const chip = e.target.closest('.chip-src[data-src]');
+    if (!chip || chip.dataset.src === 'all') return;
+    clearHold();
+    srcChipHoldEl = chip;
+    srcChipHoldTimer = setTimeout(() => {
+      if (!srcChipHoldEl) return;
+      srcChipHoldEl.classList.add('hold-ready');
+      srcChipHoldEl.setAttribute('draggable', 'true');
+    }, SRC_CHIP_HOLD_MS);
+  });
+
+  list.addEventListener('pointerup', clearHold);
+  list.addEventListener('pointercancel', clearHold);
+  list.addEventListener('pointerleave', e => {
+    if (e.target === list) clearHold();
+  });
+
+  list.addEventListener('click', e => {
+    if (srcChipSuppressClick) {
+      srcChipSuppressClick = false;
+      return;
+    }
+    const chip = e.target.closest('.chip-src[data-src]');
+    if (!chip) return;
+    filterSrc(chip.dataset.src, chip);
+  });
+
+  list.addEventListener('dragstart', e => {
+    const chip = e.target.closest('.chip-src');
+    if (!chip?.hasAttribute('draggable') || chip.dataset.src === 'all') {
+      e.preventDefault();
+      return;
+    }
+    srcChipDragFrom = chip.dataset.src;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', srcChipDragFrom);
+    chip.classList.add('is-dragging');
+    clearHold();
+  });
+
+  list.addEventListener('dragend', e => {
+    const chip = e.target.closest('.chip-src');
+    chip?.classList.remove('is-dragging', 'hold-ready');
+    chip?.removeAttribute('draggable');
+    srcChipDragFrom = null;
+    srcChipSuppressClick = true;
+    list.querySelectorAll('.chip-src').forEach(c => c.classList.remove('drag-over'));
+  });
+
+  list.addEventListener('dragover', e => {
+    if (!srcChipDragFrom) return;
+    const chip = e.target.closest('.chip-src[data-src]');
+    if (!chip || chip.dataset.src === 'all') return;
+    e.preventDefault();
+    list.querySelectorAll('.chip-src').forEach(c => c.classList.remove('drag-over'));
+    chip.classList.add('drag-over');
+  });
+
+  list.addEventListener('drop', e => {
+    if (!srcChipDragFrom) return;
+    const chip = e.target.closest('.chip-src[data-src]');
+    if (!chip || chip.dataset.src === 'all') return;
+    e.preventDefault();
+    const toName = chip.dataset.src;
+    list.querySelectorAll('.chip-src').forEach(c => c.classList.remove('drag-over'));
+    if (toName !== srcChipDragFrom) reorderSourceChips(srcChipDragFrom, toName);
+    srcChipDragFrom = null;
+  });
+}
+
 function buildSrcChips() {
   const el = document.getElementById('srcChips');
-  const allSrcs = ['all', ...new Set(allData.map(r => r['来源']))];
+  syncSourceChipOrder();
+  const allSrcs = ['all', ...SOURCE_CHIP_ORDER];
   el.innerHTML = allSrcs.map(s => {
     const on = (s === 'all' && activeSrc === 'all') || s === activeSrc;
     const bg = s === 'all' ? '#98a2b3' : srcBrandColor(s, srcColor(s));
     const label = s === 'all' ? '全部' : s;
-    return `<div class="chip chip-src${on ? ' on' : ''}" style="--src-chip-bg:${bg}" onclick="filterSrc('${s.replace(/'/g, "\\'")}',this)" data-src="${s}">${label}</div>`;
+    const srcAttr = s.replace(/"/g, '&quot;');
+    return `<div class="chip chip-src${on ? ' on' : ''}" style="--src-chip-bg:${bg}" data-src="${srcAttr}">${label}</div>`;
   }).join('');
+  ensureSrcChipsDrag();
 }
 
 function filterSrc(s, el) {
   activeSrc = s;
-  document.querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
-  el.classList.add('on');
+  document.querySelectorAll('#srcChips .chip').forEach(c => c.classList.remove('on'));
+  if (el) el.classList.add('on');
+  else document.querySelector(`#srcChips .chip[data-src="${CSS.escape(s)}"]`)?.classList.add('on');
   applyF();
 }
 
@@ -725,9 +850,8 @@ function resetF() {
   syncUnsetSubFilterUI();
   document.getElementById('sf').value = 'd-';
   activeSrc = 'all';
-  document.querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
-  const allChip = document.querySelector('[data-src="all"]');
-  if (allChip) allChip.classList.add('on');
+  document.querySelectorAll('#srcChips .chip').forEach(c => c.classList.remove('on'));
+  document.querySelector('#srcChips .chip[data-src="all"]')?.classList.add('on');
   applyF();
 }
 
@@ -3226,6 +3350,87 @@ function pickNewCatEmoji(ev) {
 }
 
 const catSubExpanded = new Set();
+let catListDragFromIdx = null;
+let catListDragBound = false;
+
+function collectCatListFromDom() {
+  return [...document.querySelectorAll('#catList .cat-edit-item')].map(item => {
+    const origIdx = parseInt(item.dataset.i, 10);
+    const oldName = CATS[origIdx];
+    return {
+      origIdx,
+      oldName,
+      name: item.querySelector('.ni2')?.value.trim() || oldName,
+      emoji: item.querySelector('.cat-emoji-btn')?.dataset.emoji?.trim() || catIconValue(oldName),
+      statsExclude: !!item.querySelector('.cat-stats-exclude-cb')?.checked,
+      offset: !!item.querySelector('.cat-offset-cb')?.checked,
+      subsRaw: item.querySelector('.subcat-inp')?.value || '',
+    };
+  });
+}
+
+function moveCatEditDom(fromIdx, toIdx) {
+  const list = document.getElementById('catList');
+  if (!list || fromIdx === toIdx) return;
+  const items = [...list.querySelectorAll('.cat-edit-item')];
+  const fromEl = items.find(el => parseInt(el.dataset.i, 10) === fromIdx);
+  const toEl = items.find(el => parseInt(el.dataset.i, 10) === toIdx);
+  if (!fromEl || !toEl) return;
+  const fromPos = items.indexOf(fromEl);
+  const toPos = items.indexOf(toEl);
+  if (fromPos < toPos) toEl.after(fromEl);
+  else list.insertBefore(fromEl, toEl);
+}
+
+function ensureCatListDrag() {
+  if (catListDragBound) return;
+  const list = document.getElementById('catList');
+  if (!list) return;
+  catListDragBound = true;
+
+  list.addEventListener('dragstart', e => {
+    const handle = e.target.closest('.cat-drag-handle');
+    if (!handle) return;
+    const item = handle.closest('.cat-edit-item');
+    if (!item) return;
+    catListDragFromIdx = parseInt(item.dataset.i, 10);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(catListDragFromIdx));
+    item.classList.add('is-dragging');
+  });
+
+  list.addEventListener('dragend', e => {
+    const item = e.target.closest('.cat-edit-item');
+    item?.classList.remove('is-dragging');
+    catListDragFromIdx = null;
+    list.querySelectorAll('.cat-edit-item').forEach(el => el.classList.remove('drag-over'));
+  });
+
+  list.addEventListener('dragover', e => {
+    if (catListDragFromIdx == null) return;
+    const item = e.target.closest('.cat-edit-item');
+    if (!item) return;
+    e.preventDefault();
+    list.querySelectorAll('.cat-edit-item').forEach(el => el.classList.remove('drag-over'));
+    item.classList.add('drag-over');
+  });
+
+  list.addEventListener('dragleave', e => {
+    const item = e.target.closest('.cat-edit-item');
+    if (item && !item.contains(e.relatedTarget)) item.classList.remove('drag-over');
+  });
+
+  list.addEventListener('drop', e => {
+    if (catListDragFromIdx == null) return;
+    const item = e.target.closest('.cat-edit-item');
+    if (!item) return;
+    e.preventDefault();
+    const toIdx = parseInt(item.dataset.i, 10);
+    list.querySelectorAll('.cat-edit-item').forEach(el => el.classList.remove('drag-over'));
+    if (toIdx !== catListDragFromIdx) moveCatEditDom(catListDragFromIdx, toIdx);
+    catListDragFromIdx = null;
+  });
+}
 
 function toggleCatSub(i) {
   const c = CATS[i];
@@ -3245,6 +3450,7 @@ function renderCatList() {
     const em = catIconValue(c);
     return `<div class="cat-edit-item" data-i="${i}">
       <div class="cr">
+        <button type="button" class="cat-drag-handle" draggable="true" title="拖动排序" aria-label="拖动排序"><i class="ti ti-grip-vertical"></i></button>
         <button type="button" class="cat-sub-toggle${open ? ' open' : ''}" title="子分类${subs.length ? `（${subs.length}）` : ''}" onclick="toggleCatSub(${i})"><i class="ti ti-chevron-right"></i></button>
         <button type="button" class="cat-emoji-btn" data-i="${i}" data-emoji="${em}" title="设置图标" onclick="pickCatEmoji(event,${i})">${catIconHtml(c, { size: 22 })}</button>
         <input class="ni2" value="${c}" data-i="${i}">
@@ -3263,10 +3469,12 @@ function renderCatList() {
       </div>
     </div>`;
   }).join('');
+  ensureCatListDrag();
 }
 function delCat(i) {
   const c = CATS[i];
-  if (allData.find(r => r['分类'] === c)) { alert(`"${c}" 还有记录在使用`); return; }
+  const inUse = allData.some(r => r['分类'] === c || (hasSplits(r) && r.splits.some(sp => sp.category === c)));
+  if (inUse) { alert(`"${c}" 还有记录在使用`); return; }
   CATS.splice(i, 1);
   delete EMOJIS[c];
   delete SUBCATS[c];
@@ -3288,67 +3496,85 @@ function addCat() {
   if (emBtn) setCatIconBtn(emBtn, iconRef('1F4CC'));
   renderCatList();
 }
-function saveCat() {
-  const emojiByIndex = {};
-  document.querySelectorAll('#catList .cat-emoji-btn').forEach(btn => {
-    emojiByIndex[parseInt(btn.dataset.i, 10)] = btn.dataset.emoji?.trim() || btn.textContent.trim() || iconRef('1F4CC');
-  });
-
-  document.querySelectorAll('#catList .ni2').forEach(inp => {
-    const i = parseInt(inp.dataset.i, 10);
-    const old = CATS[i];
-    const nv = inp.value.trim();
-    if (nv && nv !== old) {
-      allData.filter(r => r['分类'] === old).forEach(r => r['分类'] = nv);
-      EMOJIS[nv] = EMOJIS[old] || '';
-      delete EMOJIS[old];
-      if (SUBCATS[old]) {
-        SUBCATS[nv] = SUBCATS[old];
-        delete SUBCATS[old];
-      }
-      if (catSubExpanded.has(old)) {
-        catSubExpanded.delete(old);
-        catSubExpanded.add(nv);
-      }
-      if (CAT_STATS_EXCLUDE.has(old)) {
-        CAT_STATS_EXCLUDE.delete(old);
-        CAT_STATS_EXCLUDE.add(nv);
-      }
-      if (OFFSET_CATS_SET.has(old)) {
-        OFFSET_CATS_SET.delete(old);
-        OFFSET_CATS_SET.add(nv);
-      }
-      const incIdx = INCOME_DATA_CATS_LIST.indexOf(old);
-      if (incIdx >= 0) INCOME_DATA_CATS_LIST[incIdx] = nv;
-      CATS[i] = nv;
+function renameCategoryInTransactions(oldName, newName) {
+  if (!oldName || !newName || oldName === newName) return 0;
+  let count = 0;
+  allData.forEach(r => {
+    let touched = false;
+    if (r['分类'] === oldName) {
+      r['分类'] = newName;
+      touched = true;
     }
+    if (hasSplits(r)) {
+      r.splits.forEach(sp => {
+        if (sp.category === oldName) {
+          sp.category = newName;
+          touched = true;
+        }
+      });
+    }
+    if (touched) count++;
   });
-  document.querySelectorAll('#catList .subcat-inp').forEach(inp => {
-    const i = parseInt(inp.dataset.i, 10);
-    const cat = CATS[i];
-    if (!cat) return;
-    const subs = inp.value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
-    if (subs.length) SUBCATS[cat] = subs;
-    else delete SUBCATS[cat];
-    allData.filter(r => r['分类'] === cat && r['子分类'] && !subs.includes(r['子分类']))
-      .forEach(r => r['子分类'] = '');
-  });
-  CATS.forEach((c, i) => {
-    if (emojiByIndex[i] != null) EMOJIS[c] = emojiByIndex[i];
-  });
+  Categorizer.renameCategory(oldName, newName);
+  return count;
+}
+function saveCat() {
+  const rows = collectCatListFromDom();
+  if (!rows.length) return;
+
+  const names = rows.map(r => r.name).filter(Boolean);
+  if (names.length !== rows.length) {
+    alert('分类名称不能为空');
+    return;
+  }
+  if (new Set(names).size !== names.length) {
+    alert('分类名称不能重复');
+    return;
+  }
+
+  for (const row of rows) {
+    if (row.name === row.oldName) continue;
+    renameCategoryInTransactions(row.oldName, row.name);
+    EMOJIS[row.name] = EMOJIS[row.oldName] || row.emoji;
+    delete EMOJIS[row.oldName];
+    if (SUBCATS[row.oldName]) {
+      SUBCATS[row.name] = SUBCATS[row.oldName];
+      delete SUBCATS[row.oldName];
+    }
+    if (catSubExpanded.has(row.oldName)) {
+      catSubExpanded.delete(row.oldName);
+      catSubExpanded.add(row.name);
+    }
+    if (CAT_STATS_EXCLUDE.has(row.oldName)) {
+      CAT_STATS_EXCLUDE.delete(row.oldName);
+      CAT_STATS_EXCLUDE.add(row.name);
+    }
+    if (OFFSET_CATS_SET.has(row.oldName)) {
+      OFFSET_CATS_SET.delete(row.oldName);
+      OFFSET_CATS_SET.add(row.name);
+    }
+    const incIdx = INCOME_DATA_CATS_LIST.indexOf(row.oldName);
+    if (incIdx >= 0) INCOME_DATA_CATS_LIST[incIdx] = row.name;
+  }
+
+  const nextCats = [];
   const nextExclude = new Set();
-  document.querySelectorAll('#catList .cat-stats-exclude-cb').forEach(cb => {
-    if (!cb.checked) return;
-    const i = parseInt(cb.dataset.i, 10);
-    if (CATS[i]) nextExclude.add(CATS[i]);
-  });
-  CAT_STATS_EXCLUDE = nextExclude;
   const nextOffset = new Set();
-  document.querySelectorAll('#catList .cat-offset-cb').forEach(cb => {
-    if (!cb.checked) return;
-    const i = parseInt(cb.dataset.i, 10);
-    if (CATS[i]) nextOffset.add(CATS[i]);
-  });
+
+  for (const row of rows) {
+    nextCats.push(row.name);
+    EMOJIS[row.name] = row.emoji || EMOJIS[row.name] || iconRef('1F4CC');
+    const subs = row.subsRaw.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+    if (subs.length) SUBCATS[row.name] = subs;
+    else delete SUBCATS[row.name];
+    allData.filter(r => r['分类'] === row.name && r['子分类'] && !subs.includes(r['子分类']))
+      .forEach(r => r['子分类'] = '');
+    if (row.statsExclude) nextExclude.add(row.name);
+    if (row.offset) nextOffset.add(row.name);
+  }
+
+  CATS = nextCats;
+  CAT_STATS_EXCLUDE = nextExclude;
   OFFSET_CATS_SET = nextOffset;
   persistNow().then(ok => {
     if (!ok) return;

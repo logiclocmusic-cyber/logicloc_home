@@ -196,5 +196,16 @@ export const Categorizer = (() => {
     return row._autoCat && (row._catConf === 'low' || row['分类'] === '其他');
   }
 
-  return { classify, classifyAll, learn, isPending, loadRules, applyRules, onRulesChange, peerRules, keywordRules };
+  function renameCategory(oldName, newName) {
+    if (!oldName || !newName || oldName === newName) return;
+    Object.keys(peerRules).forEach(peer => {
+      if (peerRules[peer] === oldName) peerRules[peer] = newName;
+    });
+    keywordRules.forEach(rule => {
+      if (rule.cat === oldName) rule.cat = newName;
+    });
+    saveRules();
+  }
+
+  return { classify, classifyAll, learn, isPending, loadRules, applyRules, onRulesChange, renameCategory, peerRules, keywordRules };
 })();
