@@ -209,9 +209,14 @@ body{
 .home-title{font-size:22px;font-weight:700;letter-spacing:-.3px;color:var(--txt);margin:0 0 4px}
 .home-sub{font-size:13px;color:var(--txt3);margin:0}
 .home-summary{
-  display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px;
+  display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px;
 }
-@media(max-width:900px){.home-summary{grid-template-columns:1fr}}
+@media(max-width:1100px){.home-summary{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.home-summary{grid-template-columns:1fr}}
+.home-summary .kpi-s{
+  font-size:10px;line-height:1.25;margin-top:4px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
 .home-cat-section{margin-bottom:22px}
 .home-section-head{
   display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;
@@ -876,14 +881,14 @@ body{
 }
 .td.cat-cell .cs-sub:hover,.td.cat-cell .cs-sub:focus{background-color:var(--surf2);border-radius:4px}
 .td.cat-cell .cs.cs-sub.cs-sub-unset,
-.det-cat .cs.cs-sub.cs-sub-unset{
+.det-cat-cell .cs.cs-sub.cs-sub-unset{
   color:var(--txt3) !important;background:transparent !important;border:none !important;
   border-radius:0;font-weight:500;text-align:left;text-align-last:left;
   padding:0;min-height:16px;box-shadow:none;
   background-image:none !important;
 }
 .td.cat-cell .cs.cs-sub.cs-sub-unset:hover,.td.cat-cell .cs.cs-sub.cs-sub-unset:focus,
-.det-cat .cs.cs-sub.cs-sub-unset:hover,.det-cat .cs.cs-sub.cs-sub-unset:focus{
+.det-cat-cell .cs.cs-sub.cs-sub-unset:hover,.det-cat-cell .cs.cs-sub.cs-sub-unset:focus{
   background-color:var(--surf2) !important;color:var(--txt3) !important;border:none !important;
 }
 .td.cat-cell .cat-pick-btn--icon,
@@ -2026,7 +2031,7 @@ body{
 }
 .mbox.wide{width:680px}
 #moInvoice .mbox.wide{width:min(96vw,880px)}
-#moDet .mbox.wide{width:min(96vw,680px)}
+#moDet .mbox.wide{width:min(96vw,760px)}
 #moDet.det-income .mbox.wide{width:min(96vw,920px)}
 #moDet #detBody{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .mh{padding:18px 22px 14px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
@@ -2382,12 +2387,12 @@ body{
   align-items:center;width:100%;min-width:560px;
 }
 .det-cols-actions{
-  grid-template-columns:36px 76px minmax(96px,112px) minmax(0,1fr) minmax(88px,100px) 76px 48px;
-  min-width:620px;
+  grid-template-columns:36px 76px minmax(90px,110px) minmax(0,1fr) minmax(168px,210px) 80px 48px;
+  min-width:720px;
 }
 .det-cols-actions.det-cols-income{
-  grid-template-columns:36px 76px minmax(96px,112px) minmax(96px,1fr) minmax(108px,max-content) 52px minmax(100px,128px) 48px;
-  min-width:860px;
+  grid-template-columns:36px 76px minmax(90px,110px) minmax(100px,1fr) minmax(168px,210px) 52px minmax(100px,128px) 48px;
+  min-width:940px;
 }
 .det-head{background:var(--surf2);border-bottom:1px solid var(--bdr);position:sticky;top:0;z-index:1}
 .det-th-check,.det-check{padding:10px 8px;display:flex;align-items:center;justify-content:center}
@@ -2420,16 +2425,10 @@ body{
 .det-peer{padding:10px 12px;min-width:0}
 .det-peer-main{font-size:12px;font-weight:600;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .det-peer-sub{font-size:11px;color:var(--txt3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
-.det-cat{
-  display:flex;flex-direction:row;align-items:center;justify-content:flex-start;
-  padding:6px 8px;overflow:visible;min-width:0;max-width:100%;
+.det-cat-cell{
+  padding:8px 10px !important;overflow:visible;min-width:0;
 }
-.det-cat .cat-cell-inner{width:100%}
-.det-cat .cat-pick-btn--label{font-size:12px;font-weight:700}
-.det-cat .cs-sub{
-  font-size:10px;min-height:16px;color:var(--txt3);padding:0;
-  background-image:none !important;cursor:pointer;
-}
+.det-cat-cell .cat-pick-btn .cat-pick-label{max-width:none}
 .det-type{padding:10px 6px;display:flex;align-items:center;justify-content:center}
 .det-th-type{text-align:center}
 .det-amt{padding:10px 14px;font-size:13px;font-weight:700;color:var(--red-t);text-align:right;font-variant-numeric:tabular-nums}

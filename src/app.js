@@ -268,6 +268,10 @@ function catCellHtml(row) {
   return `<div class="td no-strike cat-cell">${catCellInnerHtml(row.id, cat, subSel)}</div>`;
 }
 
+function detCatCellHtml(row) {
+  return catCellHtml(row).replace('class="td no-strike cat-cell"', 'class="td no-strike cat-cell det-cat-cell"');
+}
+
 function catLabel(c) { return c; }
 function catColor(c) { const i = CATS.indexOf(c); return i >= 0 ? CAT_COLORS[i] : '#98a2b3'; }
 
@@ -628,6 +632,23 @@ function categoryYearStats(cat, type, anchorYm) {
   return { ytd, avg };
 }
 
+function expenseCategoriesInYear(anchorYm) {
+  const cats = new Set();
+  yearMonthsThroughYm(anchorYm).forEach(ym => {
+    monthStatsRows(ym)
+      .filter(r => r['收支'] === '支出')
+      .forEach(r => cats.add(r['分类']));
+  });
+  return [...cats];
+}
+
+function estimatedMonthlyExpense(anchorYm) {
+  return expenseCategoriesInYear(anchorYm).reduce(
+    (sum, cat) => sum + categoryYearStats(cat, '支出', anchorYm).avg,
+    0
+  );
+}
+
 function homeCatSubHtml(cat, type, ym) {
   const { ytd, avg } = categoryYearStats(cat, type, ym);
   return `<div class="home-cat-sub"><span>总计 ${fmtCompactMoney(ytd)}</span><span class="home-cat-sub-sep">·</span><span>月均 ${fmtCompactMoney(avg)}</span></div>`;
@@ -866,11 +887,15 @@ function renderHome() {
   const totalExp = expEntries.reduce((s, [, v]) => s + v, 0);
   const totalInc = incEntries.reduce((s, [, v]) => s + v, 0);
   const net = totalInc - totalExp;
+  const estExp = estimatedMonthlyExpense(ym);
+  const estExpCats = expenseCategoriesInYear(ym).length;
+  const monthCount = yearMonthsThroughYm(ym).length;
 
   const summaryEl = document.getElementById('homeSummary');
   if (summaryEl) {
     summaryEl.innerHTML = [
       kpiCard('上月支出', fmtMoney(totalExp), `${expEntries.length} 个分类`, 'ti-arrow-down-right', 'pink', 'c-red'),
+      kpiCard('预估月支出', fmtMoney(estExp), `${estExpCats}类月均 · 本年${monthCount}个月`, 'ti-chart-arrows', 'amber', 'c-amb'),
       kpiCard('上月收入', fmtMoney(totalInc), `${incEntries.length} 个分类`, 'ti-arrow-up-right', 'green', 'c-grn'),
       kpiCard('上月结余', fmtMoneySigned(net), net >= 0 ? '盈余' : '超支', 'ti-scale', 'blue', net >= 0 ? 'c-blu' : 'c-red'),
     ].join('');
@@ -1750,7 +1775,7 @@ function renderDetailBody(rows) {
         <div class="det-dt">${formatDateLabel(r['日期'])}<span>${formatTimeShort(r['时间'])}</span></div>
         <div class="det-src">${srcBadge(r['来源'])}</div>
         <div class="det-peer"><div class="det-peer-main">${p}</div>${showDesc ? `<div class="det-peer-sub">${d}</div>` : ''}</div>
-        ${catCellHtml(r).replace('class="td no-strike cat-cell"', 'class="det-cat"')}
+        ${detCatCellHtml(r)}
         ${typeCell}
         <div class="det-amt${amtCls}">${amtTxt}</div>
         <div class="det-act">
