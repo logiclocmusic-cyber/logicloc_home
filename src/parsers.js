@@ -33,25 +33,40 @@ export const Parsers = (() => {
   let pdfjsReady = null;
   async function getPdfJs() {
     if (!pdfjsReady) {
-      pdfjsReady = (async () => {
-        const pdfjs = await import('pdfjs-dist');
-        const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
-        pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
-        return pdfjs;
-      })();
+      pdfjsReady = import('pdfjs-dist');
     }
     return pdfjsReady;
+  }
+
+  /** pdf.js 默认按页拼接会把整页合成一行；按 Y 坐标还原行，供银行流水正则解析 */
+  function reconstructPageText(items) {
+    if (!items?.length) return '';
+    const lines = [];
+    let line = [];
+    let lastY = null;
+    const Y_TOL = 2;
+    for (const item of items) {
+      const y = item.transform?.[5];
+      if (lastY != null && Math.abs(y - lastY) > Y_TOL) {
+        if (line.length) lines.push(line.join(' ').replace(/\s+/g, ' ').trim());
+        line = [];
+      }
+      if (item.str) line.push(item.str);
+      lastY = y;
+    }
+    if (line.length) lines.push(line.join(' ').replace(/\s+/g, ' ').trim());
+    return lines.join('\n');
   }
 
   async function readPdfText(file) {
     const pdfjs = await getPdfJs();
     const data = new Uint8Array(await readArrayBuffer(file));
-    const doc = await pdfjs.getDocument({ data }).promise;
+    const doc = await pdfjs.getDocument({ data, disableWorker: true }).promise;
     const chunks = [];
     for (let page = 1; page <= doc.numPages; page++) {
       const pg = await doc.getPage(page);
       const content = await pg.getTextContent();
-      chunks.push(content.items.map(item => item.str).join(' '));
+      chunks.push(reconstructPageText(content.items));
     }
     return chunks.join('\n');
   }
@@ -891,6 +906,18 @@ export const Parsers = (() => {
 
   const CITIC_TXN_RE = /^(\d{8})\s+RMB\s+([\d.]+)\s+RMB\s+([\d.]+)\s+(.+)$/;
 
+  function collectCiticTxnLines(rows, text) {
+    const lines = [];
+    for (const row of rows) {
+      const line = row.join(' ').trim();
+      if (CITIC_TXN_RE.test(line)) lines.push(line);
+    }
+    if (lines.length) return lines;
+    return text.split(/(?=\d{8}\s+RMB\s+[\d.]+\s+RMB\s+[\d.]+\s+)/)
+      .map(s => s.trim().replace(/\s+/g, ' '))
+      .filter(s => CITIC_TXN_RE.test(s));
+  }
+
   function parseCiticPeerTail(tail) {
     const s = cleanField(tail);
     if (!s) return { summary: '', peer: '', account: '' };
@@ -934,8 +961,7 @@ export const Parsers = (() => {
     const out = [];
     let prevBalance = null;
 
-    for (const row of rows) {
-      const line = row.join(' ').trim();
+    for (const line of collectCiticTxnLines(rows, text)) {
       const m = line.match(CITIC_TXN_RE);
       if (!m) continue;
 
@@ -994,7 +1020,11 @@ export const Parsers = (() => {
       }
     }
     if (carry) merged.push(carry);
-    return merged;
+    if (merged.length) return merged;
+    const text = rows.map(r => r.join(' ')).join('\n');
+    return text.split(/(?=\d{4}-\d{2}-\d{2}\s+CNY\s+)/)
+      .map(s => s.trim().replace(/\s+/g, ' '))
+      .filter(s => /^\d{4}-\d{2}-\d{2}\s+CNY\s+/.test(s));
   }
 
   function parseCmbTail(tail) {
