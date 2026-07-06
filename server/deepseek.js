@@ -217,19 +217,6 @@ function visionEnabled() {
   return !!(VISION_BASE && VISION_MODEL);
 }
 
-async function visionInputFromBuffer(buf, mime) {
-  const isPdf = mime === 'application/pdf' || String(mime || '').includes('pdf');
-  if (!isPdf) {
-    return { base64: buf.toString('base64'), mime: mime || 'image/jpeg' };
-  }
-  const pdfText = await pdfToText(buf);
-  if (pdfText && isInvoiceTextUsable(pdfText)) {
-    return { text: pdfText };
-  }
-  const pageImg = await pdfPageImageForOcr(buf);
-  return { base64: pageImg.toString('base64'), mime: 'image/png', pageImg };
-}
-
 function mapChineseInvoiceFields(parsed = {}) {
   const p = parsed && typeof parsed === 'object' ? parsed : {};
   return {
@@ -275,9 +262,24 @@ function extractAssistantText(message = {}) {
   return '';
 }
 
-function visionResultUsable(parsed = {}) {
+function invoiceNoFromFilename(fileName) {
+  const m = String(fileName || '').match(/(\d{18,22})/);
+  return m ? m[1] : '';
+}
+
+function applyFilenameHints(parsed = {}, fileName = '') {
+  if (!parsed.invoiceNo) {
+    const fromName = invoiceNoFromFilename(fileName);
+    if (fromName) parsed = { ...parsed, invoiceNo: fromName };
+  }
+  return parsed;
+}
+
+function invoiceResultUsable(parsed = {}) {
   const n = normalizeInvoiceFields(parsed);
-  return !!(n.invoiceNo || n.total || n.vendor || n.buyer);
+  const no = String(n.invoiceNo || '').replace(/\s/g, '');
+  if (!/^\d{18,22}$/.test(no)) return false;
+  return n.total != null || n.amount != null;
 }
 
 async function scanWithVision(base64, mime, { ocrHint = '' } = {}) {
@@ -327,17 +329,12 @@ async function scanWithVision(base64, mime, { ocrHint = '' } = {}) {
     const text = extractAssistantText(json.choices?.[0]?.message || {});
     lastText = text;
     const parsed = parseJsonFromText(text);
-    if (parsed && visionResultUsable(parsed)) {
+    if (parsed && invoiceResultUsable(parsed)) {
       return { parsed, raw: text, mode: 'vision' };
     }
   }
 
-  const parsed = parseJsonFromText(lastText);
-  if (parsed) {
-    console.warn('[invoice-scan] vision parsed but missing key fields:', lastText.slice(0, 300));
-    return { parsed, raw: lastText, mode: 'vision' };
-  }
-  throw new Error(`视觉模型返回格式无法解析：${lastText.slice(0, 200) || '(空响应)'}`);
+  throw new Error(`视觉模型未识别到完整发票信息：${lastText.slice(0, 200) || '(空响应)'}`);
 }
 
 async function scanWithText(sourceText, mode = 'ocr') {
@@ -367,69 +364,72 @@ export function getAiStatus() {
   };
 }
 
-export async function scanInvoiceImage(base64, mime = 'image/jpeg') {
+export async function scanInvoiceImage(base64, mime = 'image/jpeg', opts = {}) {
   if (!process.env.DEEPSEEK_API_KEY) {
     throw new Error('未配置 DEEPSEEK_API_KEY，请在 Railway 环境变量中添加');
   }
 
+  const fileName = opts.fileName || '';
   const buf = Buffer.from(base64, 'base64');
   const isPdf = mime === 'application/pdf' || String(mime || '').includes('pdf');
 
-  if (visionEnabled()) {
-    let visionError = null;
-    let renderedImg = null;
-    try {
-      const input = await visionInputFromBuffer(buf, mime);
-      if (input.text) {
-        return scanWithText(input.text, 'pdf');
-      }
-      renderedImg = input.pageImg || null;
-      let ocrHint = '';
-      if (renderedImg) {
-        try { ocrHint = await imageToText(renderedImg); } catch { /* optional hint */ }
-      }
-      const result = await scanWithVision(input.base64, input.mime, { ocrHint });
-      if (visionResultUsable(result.parsed)) return result;
-      if (ocrHint && ocrHint.replace(/\s/g, '').length >= 40) {
-        const textResult = await scanWithText(ocrHint, 'ocr');
-        if (visionResultUsable(textResult.parsed)) return textResult;
-      }
-      console.warn('[invoice-scan] vision returned empty fields, fallback OCR');
-    } catch (err) {
-      visionError = err;
-      console.warn('[invoice-scan] vision failed, fallback OCR:', err.message);
-    }
+  const finish = (result) => ({
+    ...result,
+    parsed: applyFilenameHints(result.parsed, fileName),
+  });
 
-    if (isPdf) {
-      const pageImg = renderedImg || await pdfPageImageForOcr(buf);
-      const ocrText = await imageToText(pageImg);
-      if (ocrText && ocrText.replace(/\s/g, '').length >= 40) {
-        const textResult = await scanWithText(ocrText, 'ocr');
-        if (visionResultUsable(textResult.parsed)) return textResult;
-      }
-      const hint = visionError
-        ? `视觉识别失败：${visionError.message}`
-        : '视觉识别未返回有效字段';
-      throw new Error(`${hint}。可尝试将 DEEPSEEK_VISION_MODEL 改为 Qwen/Qwen3.5-27B，并确认 Railway 已安装 poppler-utils`);
-    }
-  } else if (isPdf) {
-    const pdfText = await pdfToText(buf);
-    if (pdfText && isInvoiceTextUsable(pdfText)) {
-      return scanWithText(pdfText, 'pdf');
-    }
-  }
+  const tryText = async (sourceText, mode) => {
+    const result = await scanWithText(sourceText, mode);
+    return invoiceResultUsable(result.parsed) ? finish(result) : null;
+  };
 
   if (isPdf) {
+    const pdfText = await pdfToText(buf);
+    if (pdfText && isInvoiceTextUsable(pdfText)) {
+      const r = await tryText(pdfText, 'pdf');
+      if (r) return r;
+    }
+
     console.warn('[invoice-scan] PDF text layer insufficient, fallback OCR render');
     const pageImg = await pdfPageImageForOcr(buf);
-    const ocrText = await imageToText(pageImg);
-    if (!ocrText || ocrText.replace(/\s/g, '').length < 4) {
-      throw new Error('未能从 PDF 识别文字，请上传发票照片（PNG/JPG）或手动填写');
+    let ocrText = '';
+    try { ocrText = await imageToText(pageImg); } catch { /* ignore */ }
+
+    if (ocrText && isInvoiceTextUsable(ocrText)) {
+      const r = await tryText(ocrText, 'ocr');
+      if (r) return r;
     }
-    if (!isInvoiceTextUsable(ocrText)) {
-      throw new Error('该 PDF 为扫描件且 OCR 未能可靠识别，请改为上传发票照片（PNG/JPG）或手动填写');
+
+    if (visionEnabled()) {
+      try {
+        const result = await scanWithVision(
+          pageImg.toString('base64'),
+          'image/png',
+          { ocrHint: ocrText }
+        );
+        if (invoiceResultUsable(result.parsed)) return finish(result);
+      } catch (err) {
+        console.warn('[invoice-scan] vision failed:', err.message);
+      }
     }
-    return scanWithText(ocrText, 'ocr');
+
+    if (ocrText && ocrText.replace(/\s/g, '').length >= 40) {
+      const r = await tryText(ocrText, 'ocr');
+      if (r) return r;
+    }
+
+    throw new Error(
+      '未能从 PDF 识别完整发票信息。请确认 Railway 已配置 RAILPACK_DEPLOY_APT_PACKAGES=poppler-utils，或改为上传 PNG/JPG 照片'
+    );
+  }
+
+  if (visionEnabled()) {
+    try {
+      const result = await scanWithVision(buf.toString('base64'), mime || 'image/jpeg');
+      if (invoiceResultUsable(result.parsed)) return finish(result);
+    } catch (err) {
+      console.warn('[invoice-scan] vision failed, fallback OCR:', err.message);
+    }
   }
 
   const ocrText = await imageToText(buf);
@@ -437,5 +437,7 @@ export async function scanInvoiceImage(base64, mime = 'image/jpeg') {
     throw new Error('未能从图片识别文字，请上传更清晰的发票照片，或手动填写');
   }
 
-  return scanWithText(ocrText);
+  const r = await tryText(ocrText, 'ocr');
+  if (r) return r;
+  throw new Error('未能从图片识别完整发票信息，请手动填写');
 }

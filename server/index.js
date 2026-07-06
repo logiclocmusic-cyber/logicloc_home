@@ -197,10 +197,10 @@ app.get('/api/invoices/:id', requireAuth, (req, res) => {
 
 app.post('/api/invoices/scan', requireAuth, async (req, res) => {
   try {
-    const { data, mime } = req.body || {};
+    const { data, mime, fileName } = req.body || {};
     if (!data) return res.status(400).json({ error: '请上传发票图片' });
     const raw = String(data).replace(/^data:[^;]+;base64,/, '');
-    const result = await scanInvoiceImage(raw, mime || 'image/jpeg');
+    const result = await scanInvoiceImage(raw, mime || 'image/jpeg', { fileName });
     res.json({
       ...normalizeInvoiceFields(result.parsed, { sourceText: result.ocrText || '' }),
       rawAi: result.raw
