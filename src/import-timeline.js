@@ -49,6 +49,40 @@ export const ImportTimeline = (() => {
     return map;
   }
 
+  function monthsBetween(startMonth, endMonth) {
+    const start = parseMonth(startMonth);
+    const end = parseMonth(endMonth);
+    if (start === null || end === null || end < start) return [];
+    const months = [];
+    for (let i = start; i <= end; i++) months.push(monthKey(i));
+    return months;
+  }
+
+  function coverageByImportHistory(history) {
+    const map = {};
+    (history || []).forEach(h => {
+      if (!h?.source || !h.startMonth || !h.endMonth) return;
+      if (!map[h.source]) map[h.source] = {};
+      monthsBetween(h.startMonth, h.endMonth).forEach(month => {
+        map[h.source][month] = (map[h.source][month] || 0) + 1;
+      });
+    });
+    return map;
+  }
+
+  function mergeCoverageMaps(...maps) {
+    const out = {};
+    maps.forEach(srcMap => {
+      Object.entries(srcMap || {}).forEach(([src, months]) => {
+        if (!out[src]) out[src] = {};
+        Object.entries(months).forEach(([month, count]) => {
+          out[src][month] = (out[src][month] || 0) + count;
+        });
+      });
+    });
+    return out;
+  }
+
   function countBySourceMonth(records) {
     const map = {};
     records.forEach(r => {
@@ -118,6 +152,7 @@ export const ImportTimeline = (() => {
     const {
       containerId,
       existingData = [],
+      importHistory = [],
       pendingRecords = [],
       pendingAllRecords = [],
       pendingNewRecords = [],
@@ -128,7 +163,10 @@ export const ImportTimeline = (() => {
     const el = document.getElementById(containerId);
     if (!el) return;
 
-    const existingCov = coverageBySource(existingData);
+    const existingCov = mergeCoverageMaps(
+      coverageBySource(existingData),
+      coverageByImportHistory(importHistory)
+    );
     const pendingAll = pendingAllRecords.length ? pendingAllRecords : pendingRecords;
     const pendingNew = pendingNewRecords.length ? pendingNewRecords : pendingRecords;
 

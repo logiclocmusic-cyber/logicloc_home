@@ -4,13 +4,22 @@ export function createBatchId() {
   return `imp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** 从支付宝/微信导出文件名解析账单覆盖月份，如 支付宝交易明细(20250101-20251231).csv */
+export function parseFileNameMonthRange(fileName) {
+  const m = String(fileName || '').match(/\((\d{4})(\d{2})\d{2}-(\d{4})(\d{2})\d{2}\)/);
+  if (!m) return null;
+  return { startMonth: `${m[1]}-${m[2]}`, endMonth: `${m[3]}-${m[4]}` };
+}
+
 export function stampImportBatch(records, meta) {
-  const { batchId, fileName, format, importedAt } = meta;
+  const { batchId, fileName, format, importedAt, fileStartMonth, fileEndMonth } = meta;
   records.forEach(r => {
     r._importBatchId = batchId;
     r._importFileName = fileName;
     r._importFormat = format;
     r._importedAt = importedAt;
+    if (fileStartMonth) r._importFileStartMonth = fileStartMonth;
+    if (fileEndMonth) r._importFileEndMonth = fileEndMonth;
   });
 }
 
@@ -43,7 +52,21 @@ export function deriveImportHistory(allData, savedHistory = []) {
       if (!b.startMonth || m < b.startMonth) b.startMonth = m;
       if (!b.endMonth || m > b.endMonth) b.endMonth = m;
     }
+    if (r._importFileStartMonth && (!b.fileStartMonth || r._importFileStartMonth < b.fileStartMonth)) {
+      b.fileStartMonth = r._importFileStartMonth;
+    }
+    if (r._importFileEndMonth && (!b.fileEndMonth || r._importFileEndMonth > b.fileEndMonth)) {
+      b.fileEndMonth = r._importFileEndMonth;
+    }
   });
+
+  for (const b of Object.values(batchMap)) {
+    const fromName = parseFileNameMonthRange(b.fileName);
+    const fileStart = b.fileStartMonth || fromName?.startMonth;
+    const fileEnd = b.fileEndMonth || fromName?.endMonth;
+    if (fileStart && (!b.startMonth || fileStart < b.startMonth)) b.startMonth = fileStart;
+    if (fileEnd && (!b.endMonth || fileEnd > b.endMonth)) b.endMonth = fileEnd;
+  }
 
   return Object.values(batchMap).sort((a, b) => {
     const da = a.importedAt || a.endMonth || '';

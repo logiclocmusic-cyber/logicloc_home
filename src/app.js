@@ -126,12 +126,14 @@ function renderImportPage() {
 }
 
 function renderImportTimelineView() {
+  syncImportHistory();
   ImportTimeline.render({
     containerId: 'importTimeline',
     existingData: allData,
+    importHistory,
     pendingRecords: pendingImport?.records || [],
     pendingAllRecords: pendingImport?.allRecords || [],
-    pendingNewRecords: pendingImport?.records || [],
+    pendingNewRecords: pendingImport?.newRecords || pendingImport?.records || [],
     activeSource: pendingImport?.sourceName || importActiveSource || '',
     fileName: pendingImport?.fileName || ''
   });
@@ -3341,11 +3343,13 @@ async function handleImportFile(file) {
     };
 
     const pending = newRecords.filter(r => Categorizer.isPending(r)).length;
+    const crossOnly = !newRecords.length && crossDup > 0;
     document.getElementById('importPreview').innerHTML =
       `识别格式：<strong>${Parsers.FORMAT_LABELS[format] || format}</strong><br>` +
       `来源：<strong>${sourceName}</strong><br>` +
       `时间范围：<strong>${range.months[0] ? ImportTimeline.yearMonthLabel(range.months[0]) : '—'}</strong> 至 <strong>${range.months.length ? ImportTimeline.yearMonthLabel(range.months[range.months.length - 1]) : '—'}</strong><br>` +
-      `解析 ${classified.length} 笔 · 新增 ${newRecords.length} 笔 · 重复 ${dup} 笔${crossDup ? `（含跨来源 ${crossDup} 笔，银行流水优先保留微信/支付宝）` : ''}${dup ? '（可在下方勾选导入）' : ''} · 待确认 ${pending} 笔`;
+      `解析 ${classified.length} 笔 · 新增 ${newRecords.length} 笔 · 重复 ${dup} 笔${crossDup ? `（含跨来源 ${crossDup} 笔，银行流水优先保留微信/支付宝）` : ''}${dup ? '（可在下方勾选导入）' : ''} · 待确认 ${pending} 笔` +
+      (crossOnly ? `<br><span style="color:var(--amb-t)">本次解析记录均与已有微信/支付宝账单重复。若仍希望在时间轴显示该来源覆盖，请勾选下方重复记录后确认导入。</span>` : '');
 
     document.getElementById('importStats').innerHTML = `
       <div class="import-stat"><div class="n">${newRecords.length}</div><div class="l">将导入</div></div>
@@ -3404,7 +3408,9 @@ function confirmImport() {
     batchId,
     fileName: pendingImport.fileName,
     format: pendingImport.format,
-    importedAt
+    importedAt,
+    fileStartMonth: pendingImport.startMonth,
+    fileEndMonth: pendingImport.endMonth
   });
 
   allData.push(...pendingImport.records);
