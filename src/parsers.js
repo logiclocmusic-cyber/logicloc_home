@@ -271,10 +271,20 @@ export const Parsers = (() => {
     const s = String(source || '');
     if (s.startsWith('微信')) return 'wechat';
     if (s.startsWith('支付宝')) return 'alipay';
-    if (s.startsWith('银行') || s.startsWith('建行') || s.startsWith('中信')) return 'bank';
+    if (s.startsWith('银行') || s.startsWith('建行') || s.startsWith('中信') || s.startsWith('招行')) return 'bank';
     if (s.startsWith('京东')) return 'jd';
     return s || 'other';
   }
+
+  function isWalletPlatform(plat) {
+    return plat === 'wechat' || plat === 'alipay';
+  }
+
+  function isBankPlatform(plat) {
+    return plat === 'bank';
+  }
+
+  const BANK_PAY_RE = /银行|建行|中信|招商|工商|农业|交通|储蓄|信用|借记|贷记|花呗|余额宝|\(\d{4}\)/;
 
   function peersLooselyMatch(a, b) {
     const pa = String(a || '').replace(/\*/g, '').trim();
@@ -294,11 +304,46 @@ export const Parsers = (() => {
     const pay = String(row['支付方式'] || '');
     const otherPlat = sourcePlatform(other['来源']);
     const rowPlat = sourcePlatform(row['来源']);
-    if (otherPlat === 'bank' && rowPlat === 'wechat' && /银行|建行|工商|农业|交通|储蓄|信用|借记|贷记|\(\d{4}\)/.test(pay)) return true;
+    if (otherPlat === 'bank' && rowPlat === 'wechat' && BANK_PAY_RE.test(pay)) return true;
     if (otherPlat === 'wechat' && rowPlat === 'bank' && /微信/.test(`${other['商品说明'] || ''}${other['备注'] || ''}${other['交易对方'] || ''}`)) return true;
     if (otherPlat === 'bank' && rowPlat === 'alipay' && /支付宝|花呗|余额宝/.test(pay)) return true;
-    if (otherPlat === 'alipay' && rowPlat === 'bank' && /银行|建行|工商|农业|交通|储蓄|信用|借记|贷记|\(\d{4}\)/.test(other['支付方式'] || '')) return true;
+    if (otherPlat === 'alipay' && rowPlat === 'bank' && BANK_PAY_RE.test(other['支付方式'] || '')) return true;
     return false;
+  }
+
+  function bankWalletChannelHint(row) {
+    const text = `${row['商品说明'] || ''}${row['交易对方'] || ''}${row['支付方式'] || ''}${row['备注'] || ''}`;
+    return /财付通|微信支付|微信|支付宝|花呗|余额宝|银联快捷|掌上生活|网联|数字人民币/.test(text);
+  }
+
+  function isBankWalletCrossMatch(a, b) {
+    if (!a?.['日期'] || !b?.['日期'] || a['日期'] !== b['日期']) return false;
+    if (a['收支'] !== b['收支']) return false;
+    if (Number(a['金额'] || 0).toFixed(2) !== Number(b['金额'] || 0).toFixed(2)) return false;
+
+    const pa = sourcePlatform(a['来源']);
+    const pb = sourcePlatform(b['来源']);
+    if (!((isBankPlatform(pa) && isWalletPlatform(pb)) || (isWalletPlatform(pa) && isBankPlatform(pb)))) {
+      return false;
+    }
+
+    const bank = isBankPlatform(pa) ? a : b;
+    const wallet = isWalletPlatform(pa) ? a : b;
+
+    if (timesHighlyConsistent(a['时间'], b['时间'])) return true;
+
+    const peerHint = peersLooselyMatch(a['交易对方'], b['交易对方'])
+      || peersLooselyMatch(a['商品说明'], b['交易对方'])
+      || peersLooselyMatch(b['商品说明'], a['交易对方']);
+    const payHint = paymentSuggestsCrossRecord(a, b) || paymentSuggestsCrossRecord(b, a);
+    const descHint = descSuggestsSameTxn(a, b);
+    const channelHint = bankWalletChannelHint(bank) || bankWalletChannelHint(wallet);
+
+    if (isMidnightPlaceholder(bank['时间'])) {
+      return !!(payHint || peerHint || descHint || channelHint);
+    }
+
+    return !!(payHint && (peerHint || descHint));
   }
 
   function descSuggestsSameTxn(a, b) {
@@ -314,6 +359,8 @@ export const Parsers = (() => {
     if (Number(a['金额'] || 0).toFixed(2) !== Number(b['金额'] || 0).toFixed(2)) return false;
     if (sourcePlatform(a['来源']) === sourcePlatform(b['来源'])) return false;
 
+    if (isBankWalletCrossMatch(a, b)) return true;
+
     const aMid = isMidnightPlaceholder(a['时间']);
     const bMid = isMidnightPlaceholder(b['时间']);
     const peerHint = peersLooselyMatch(a['交易对方'], b['交易对方'])
@@ -325,6 +372,15 @@ export const Parsers = (() => {
     if (!aMid && !bMid) return timesHighlyConsistent(a['时间'], b['时间']);
     if (payHint && (peerHint || descHint)) return true;
     return false;
+  }
+
+  /** 跨来源重复时：银行让位给微信/支付宝 */
+  function crossSourceDedupDecision(incoming, existing) {
+    const inPlat = sourcePlatform(incoming['来源']);
+    const exPlat = sourcePlatform(existing['来源']);
+    if (isBankPlatform(inPlat) && isWalletPlatform(exPlat)) return 'skip_incoming';
+    if (isWalletPlatform(inPlat) && isBankPlatform(exPlat)) return 'replace_existing';
+    return 'skip_incoming';
   }
 
   function crossSourceBucketKey(row) {
@@ -348,6 +404,14 @@ export const Parsers = (() => {
     if (!key) return;
     if (!index.has(key)) index.set(key, []);
     index.get(key).push(row);
+  }
+
+  function removeFromCrossSourceIndex(index, row) {
+    const key = crossSourceBucketKey(row);
+    if (!key || !index.has(key)) return;
+    const next = (index.get(key) || []).filter(r => r !== row && r.id !== row.id);
+    if (next.length) index.set(key, next);
+    else index.delete(key);
   }
 
   function findCrossSourceDuplicate(row, index) {
@@ -431,8 +495,8 @@ export const Parsers = (() => {
     };
   }
 
-  const PLATFORM_PREFIX = { wechat: '微信', alipay: '支付宝', bank: '银行', ccb: '建行', citic: '中信', jd: '京东' };
-  const FORMAT_LABELS = { wechat: '微信支付', alipay: '支付宝', bank: '银行流水', ccb: '建设银行流水', citic: '中信银行流水' };
+  const PLATFORM_PREFIX = { wechat: '微信', alipay: '支付宝', bank: '银行', ccb: '建行', citic: '中信', cmb: '招行', jd: '京东' };
+  const FORMAT_LABELS = { wechat: '微信支付', alipay: '支付宝', bank: '银行流水', ccb: '建设银行流水', citic: '中信银行流水', cmb: '招商银行流水' };
 
   /** 文件名/表头中的公司关键词 → 账本来源名称 */
   const COMPANY_SOURCE_HINTS = [
@@ -474,6 +538,13 @@ export const Parsers = (() => {
       && /\d{8}\s+RMB\s+[\d.]+\s+RMB\s+[\d.]+/.test(s);
   }
 
+  function isCmbBankStatement(text) {
+    const s = String(text || '');
+    return /招商银行交易流水|Transaction Statement of China Merchants Bank/.test(s)
+      && /记账日期/.test(s)
+      && /\d{4}-\d{2}-\d{2}\s+CNY\s+-?[\d,]+\.\d{2}/.test(s);
+  }
+
   function isCcbBankStatement(rows) {
     const head = rows.slice(0, 8).map(r => r.join(',')).join('\n');
     return /中国建设银行/.test(head)
@@ -512,6 +583,7 @@ export const Parsers = (() => {
     if (/交易时间,交易类型,交易对方/.test(sample)) return 'wechat';
     if (isCcbBankStatement(rows)) return 'ccb';
     if (isCiticBankStatement(sample)) return 'citic';
+    if (isCmbBankStatement(sample)) return 'cmb';
     if (/记账日期|交易日期|摘要|对方户名|借贷/.test(sample)) return 'bank';
     return 'unknown';
   }
@@ -543,6 +615,8 @@ export const Parsers = (() => {
       if (inline?.[1]) hints.add(inline[1].trim());
       const citicName = joined.match(/户名[：:]\s*(\S+)/);
       if (citicName?.[1]) hints.add(citicName[1]);
+      const cmbName = joined.match(/户\s*名[：:]\s*(\S+)/);
+      if (cmbName?.[1]) hints.add(cmbName[1]);
     }
     return [...hints].filter(Boolean);
   }
@@ -551,7 +625,7 @@ export const Parsers = (() => {
   function resolveSourceName(file, rows, format, sources) {
     if (!sources?.length) throw new Error('请先在系统中配置账单来源');
 
-    if (format === 'bank' || format === 'ccb' || format === 'citic') {
+    if (format === 'bank' || format === 'ccb' || format === 'citic' || format === 'cmb') {
       const companySource = matchCompanySource(file, rows, sources);
       if (companySource) return companySource;
     }
@@ -582,7 +656,7 @@ export const Parsers = (() => {
         }
       }
 
-      if (format === 'bank' || format === 'ccb' || format === 'citic') {
+      if (format === 'bank' || format === 'ccb' || format === 'citic' || format === 'cmb') {
         if (/信用|信用卡/.test(hints.join(' ')) && /信用/.test(s.name)) score += 30;
         if (/储蓄|借记/.test(hints.join(' ')) && /储蓄/.test(s.name)) score += 30;
       }
@@ -895,6 +969,94 @@ export const Parsers = (() => {
     return out;
   }
 
+  const CMB_TXN_START_RE = /^\d{4}-\d{2}-\d{2}\s+CNY\s+/;
+  const CMB_TXN_RE = /^(\d{4}-\d{2}-\d{2})\s+CNY\s+(-?[\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+(.+)$/;
+  const CMB_SUMMARIES = [
+    '银联无卡自助消费', '银联快捷支付', '一网通支付鼓励金', '数字人民币自动兑换',
+    '掌上生活还款', '信用卡还款', '银联代付', '转账汇款', '账户结息', '赎回'
+  ].sort((a, b) => b.length - a.length);
+
+  function mergeCmbPdfLines(rows) {
+    const merged = [];
+    let carry = '';
+    for (const row of rows) {
+      const line = row.join(' ').trim();
+      if (!line || /^-- \d+ of \d+ --$/.test(line)) continue;
+      if (/^记账日期|^温馨提示|^——/.test(line)) continue;
+      if (/Transaction Statement|招商银行交易流水|Transaction Type|Counter Party|^Date Currency|^Amount Balance/.test(line)) continue;
+      if (/^户\s*名|^Name$|^Account Type|^Account No|^Sub Branch|^Verification Code|^Transaction$/.test(line)) continue;
+      if (/^\d+\/\d+$/.test(line)) continue;
+      if (CMB_TXN_START_RE.test(line)) {
+        if (carry) merged.push(carry);
+        carry = line;
+      } else if (carry) {
+        carry += line;
+      }
+    }
+    if (carry) merged.push(carry);
+    return merged;
+  }
+
+  function parseCmbTail(tail) {
+    const s = cleanField(tail);
+    if (!s) return { summary: '', peer: '' };
+    for (const sum of CMB_SUMMARIES) {
+      if (s.startsWith(sum)) {
+        return { summary: sum, peer: s.slice(sum.length).trim() };
+      }
+    }
+    const idx = s.lastIndexOf(' ');
+    if (idx > 0) return { summary: s.slice(0, idx).trim(), peer: s.slice(idx + 1).trim() };
+    return { summary: s, peer: '' };
+  }
+
+  function parseCmbSignedAmount(raw) {
+    const n = parseFloat(String(raw || '').replace(/,/g, ''));
+    if (isNaN(n) || n === 0) return null;
+    return { amount: Math.abs(n), type: n < 0 ? '支出' : '收入' };
+  }
+
+  function parseCmbBank(rows, sourceName) {
+    const text = rows.map(r => r.join(' ')).join('\n');
+    if (!isCmbBankStatement(text)) {
+      throw new Error('未识别到招商银行流水，请确认导出的是「招商银行交易流水」PDF');
+    }
+
+    const out = [];
+    for (const line of mergeCmbPdfLines(rows)) {
+      const m = line.match(CMB_TXN_RE);
+      if (!m) continue;
+
+      const { summary, peer } = parseCmbTail(m[4]);
+      if (isBankRefundRow(summary)) continue;
+
+      const txn = parseCmbSignedAmount(m[2]);
+      if (!txn) continue;
+
+      const balance = parseFloat(String(m[3]).replace(/,/g, ''));
+      const dt = parseDateTime(m[1]);
+      const counterparty = peer || summary;
+      const desc = summary || counterparty;
+      const note = !isNaN(balance) ? `余额 ${balance.toFixed(2)}` : '';
+
+      out.push(makeRow({
+        date: dt.date,
+        time: dt.time,
+        source: sourceName,
+        peer: counterparty,
+        desc,
+        type: txn.type,
+        amount: txn.amount,
+        pay: sourceName,
+        note,
+        rawCategory: summary
+      }));
+    }
+
+    if (!out.length) throw new Error('未解析到招商银行交易记录，请检查 PDF 内容');
+    return out;
+  }
+
   async function parseFile(file, sourceName, formatHint, sources) {
     const rows = await readRows(file);
     if (!rows.length) throw new Error('文件为空或无法解析');
@@ -913,6 +1075,7 @@ export const Parsers = (() => {
       case 'alipay': records = parseAlipay(rows, resolvedSource); break;
       case 'ccb': records = parseCcbBank(rows, resolvedSource); break;
       case 'citic': records = parseCiticBank(rows, resolvedSource); break;
+      case 'cmb': records = parseCmbBank(rows, resolvedSource); break;
       case 'bank': records = parseBank(rows, resolvedSource); break;
       default:
         throw new Error('无法识别账单格式，请手动选择：微信 / 支付宝 / 银行流水');
@@ -924,9 +1087,11 @@ export const Parsers = (() => {
 
   return {
     parseFile, detectFormat, resolveSourceName, extractFileHints, FORMAT_LABELS,
-    isPdfFile, readPdfText, parseCiticBank, isCiticBankStatement,
+    isPdfFile, readPdfText, parseCiticBank, isCiticBankStatement, parseCmbBank, isCmbBankStatement,
     txnHash, txnDedupKey, buildDedupSet, addToDedupSet, isDuplicate,
-    buildCrossSourceIndex, addToCrossSourceIndex, findCrossSourceDuplicate, summarizeDupMatch,
+    buildCrossSourceIndex, addToCrossSourceIndex, removeFromCrossSourceIndex,
+    findCrossSourceDuplicate, crossSourceDedupDecision, summarizeDupMatch,
+    isBankWalletCrossMatch, isWalletPlatform, isBankPlatform, sourcePlatform,
     readText, parseCSV, readRows, isExcelFile
   };
 })();

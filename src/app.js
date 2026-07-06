@@ -106,6 +106,14 @@ function ensureCiticChenchengSource() {
   return true;
 }
 
+function ensureCmbHuhanSource() {
+  const name = '招行-胡晗';
+  if (SOURCES.find(s => s.name === name)) return false;
+  const def = DEFAULT_SOURCES.find(s => s.name === name);
+  SOURCES.push(def ? { ...def } : { name, color: '#c41230' });
+  return true;
+}
+
 function renderImportPage() {
   if (!importActiveSource && !pendingImport && SOURCES.some(s => s.name === DEFAULT_IMPORT_SOURCE)) {
     importActiveSource = DEFAULT_IMPORT_SOURCE;
@@ -228,7 +236,12 @@ function peerDescCell(row) {
 }
 
 function dupReasonLabel(reason) {
-  return { file: '文件内重复', existing: '与已有账目重复', cross: '跨来源疑似重复' }[reason] || '重复';
+  return {
+    file: '文件内重复',
+    existing: '与已有账目重复',
+    cross: '跨来源疑似重复',
+    cross_wallet: '与微信/支付宝重复（保留钱包记录）'
+  }[reason] || '重复';
 }
 
 function dupMatchMeta(row) {
@@ -478,6 +491,7 @@ async function loadData() {
     else SOURCE_CHIP_ORDER = [];
     if (ensureCcbChenchengSource()) await persistNow();
     if (ensureCiticChenchengSource()) await persistNow();
+    if (ensureCmbHuhanSource()) await persistNow();
     allData = state.transactions || [];
     const maxId = allData.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0);
     nextId = Math.max(Number(state.nextId) || 1, maxId + 1);
@@ -3271,6 +3285,7 @@ async function handleImportFile(file) {
     const crossIndex = Parsers.buildCrossSourceIndex(allData);
     const newRecords = [];
     const duplicateRecords = [];
+    const replaceIds = new Set();
     let dup = 0;
     let crossDup = 0;
 
@@ -3285,12 +3300,22 @@ async function handleImportFile(file) {
       }
       const crossMatch = Parsers.findCrossSourceDuplicate(r, crossIndex);
       if (crossMatch) {
-        dup++;
-        crossDup++;
-        r._dupReason = 'cross';
-        r._dupMatch = Parsers.summarizeDupMatch(crossMatch);
-        duplicateRecords.push(r);
-        return;
+        const decision = Parsers.crossSourceDedupDecision(r, crossMatch);
+        if (decision === 'skip_incoming') {
+          dup++;
+          crossDup++;
+          r._dupReason = Parsers.isBankPlatform(Parsers.sourcePlatform(r['来源']))
+            && Parsers.isWalletPlatform(Parsers.sourcePlatform(crossMatch['来源']))
+            ? 'cross_wallet'
+            : 'cross';
+          r._dupMatch = Parsers.summarizeDupMatch(crossMatch);
+          duplicateRecords.push(r);
+          return;
+        }
+        if (decision === 'replace_existing') {
+          replaceIds.add(crossMatch.id);
+          Parsers.removeFromCrossSourceIndex(crossIndex, crossMatch);
+        }
       }
       r._hash = Parsers.txnHash(r);
       Parsers.addToDedupSet(fileDedup, r);
@@ -3308,6 +3333,7 @@ async function handleImportFile(file) {
       format,
       dup,
       crossDup,
+      replaceIds: [...replaceIds],
       sourceName,
       fileName: file.name,
       startMonth: range.months[0] || '',
@@ -3319,7 +3345,7 @@ async function handleImportFile(file) {
       `识别格式：<strong>${Parsers.FORMAT_LABELS[format] || format}</strong><br>` +
       `来源：<strong>${sourceName}</strong><br>` +
       `时间范围：<strong>${range.months[0] ? ImportTimeline.yearMonthLabel(range.months[0]) : '—'}</strong> 至 <strong>${range.months.length ? ImportTimeline.yearMonthLabel(range.months[range.months.length - 1]) : '—'}</strong><br>` +
-      `解析 ${classified.length} 笔 · 新增 ${newRecords.length} 笔 · 重复 ${dup} 笔${crossDup ? `（含跨来源 ${crossDup} 笔）` : ''}${dup ? '（可在下方勾选导入）' : ''} · 待确认 ${pending} 笔`;
+      `解析 ${classified.length} 笔 · 新增 ${newRecords.length} 笔 · 重复 ${dup} 笔${crossDup ? `（含跨来源 ${crossDup} 笔，银行流水优先保留微信/支付宝）` : ''}${dup ? '（可在下方勾选导入）' : ''} · 待确认 ${pending} 笔`;
 
     document.getElementById('importStats').innerHTML = `
       <div class="import-stat"><div class="n">${newRecords.length}</div><div class="l">将导入</div></div>
@@ -3366,6 +3392,11 @@ function confirmImport() {
       }
     }
   });
+
+  if (pendingImport.replaceIds?.length) {
+    const remove = new Set(pendingImport.replaceIds);
+    allData = allData.filter(r => !remove.has(r.id));
+  }
 
   const batchId = createBatchId();
   const importedAt = new Date().toISOString();
