@@ -25,6 +25,41 @@ export const Parsers = (() => {
     return name.endsWith('.xlsx') || name.endsWith('.xls');
   }
 
+  function isPdfFile(file) {
+    const name = (file.name || '').toLowerCase();
+    return file.type === 'application/pdf' || name.endsWith('.pdf');
+  }
+
+  let pdfjsReady = null;
+  async function getPdfJs() {
+    if (!pdfjsReady) {
+      pdfjsReady = (async () => {
+        const pdfjs = await import('pdfjs-dist');
+        const worker = await import('pdfjs-dist/build/pdf.worker.min.mjs?url');
+        pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
+        return pdfjs;
+      })();
+    }
+    return pdfjsReady;
+  }
+
+  async function readPdfText(file) {
+    const pdfjs = await getPdfJs();
+    const data = new Uint8Array(await readArrayBuffer(file));
+    const doc = await pdfjs.getDocument({ data }).promise;
+    const chunks = [];
+    for (let page = 1; page <= doc.numPages; page++) {
+      const pg = await doc.getPage(page);
+      const content = await pg.getTextContent();
+      chunks.push(content.items.map(item => item.str).join(' '));
+    }
+    return chunks.join('\n');
+  }
+
+  function pdfTextToRows(text) {
+    return String(text || '').split(/\n/).map(line => [line.trim()]).filter(r => r[0]);
+  }
+
   function normalizeCell(cell) {
     if (cell == null || cell === '') return '';
     if (cell instanceof Date) {
@@ -50,6 +85,10 @@ export const Parsers = (() => {
   }
 
   async function readRows(file) {
+    if (isPdfFile(file)) {
+      const text = await readPdfText(file);
+      return pdfTextToRows(text);
+    }
     if (isExcelFile(file)) return parseExcel(file);
     const buf = new Uint8Array(await readArrayBuffer(file));
     return parseCSV(decodeCsvBytes(buf));
@@ -232,7 +271,7 @@ export const Parsers = (() => {
     const s = String(source || '');
     if (s.startsWith('微信')) return 'wechat';
     if (s.startsWith('支付宝')) return 'alipay';
-    if (s.startsWith('银行') || s.startsWith('建行')) return 'bank';
+    if (s.startsWith('银行') || s.startsWith('建行') || s.startsWith('中信')) return 'bank';
     if (s.startsWith('京东')) return 'jd';
     return s || 'other';
   }
@@ -392,8 +431,8 @@ export const Parsers = (() => {
     };
   }
 
-  const PLATFORM_PREFIX = { wechat: '微信', alipay: '支付宝', bank: '银行', ccb: '建行', jd: '京东' };
-  const FORMAT_LABELS = { wechat: '微信支付', alipay: '支付宝', bank: '银行流水', ccb: '建设银行流水' };
+  const PLATFORM_PREFIX = { wechat: '微信', alipay: '支付宝', bank: '银行', ccb: '建行', citic: '中信', jd: '京东' };
+  const FORMAT_LABELS = { wechat: '微信支付', alipay: '支付宝', bank: '银行流水', ccb: '建设银行流水', citic: '中信银行流水' };
 
   /** 文件名/表头中的公司关键词 → 账本来源名称 */
   const COMPANY_SOURCE_HINTS = [
@@ -426,6 +465,13 @@ export const Parsers = (() => {
       if (companySources.length === 1) return companySources[0].name;
     }
     return null;
+  }
+
+  function isCiticBankStatement(text) {
+    const s = String(text || '');
+    return /账户交易明细/.test(s)
+      && /户名[：:]/.test(s)
+      && /\d{8}\s+RMB\s+[\d.]+\s+RMB\s+[\d.]+/.test(s);
   }
 
   function isCcbBankStatement(rows) {
@@ -465,6 +511,7 @@ export const Parsers = (() => {
     if (/交易时间,交易分类,交易对方/.test(sample)) return 'alipay';
     if (/交易时间,交易类型,交易对方/.test(sample)) return 'wechat';
     if (isCcbBankStatement(rows)) return 'ccb';
+    if (isCiticBankStatement(sample)) return 'citic';
     if (/记账日期|交易日期|摘要|对方户名|借贷/.test(sample)) return 'bank';
     return 'unknown';
   }
@@ -487,13 +534,15 @@ export const Parsers = (() => {
       for (let j = 0; j < row.length; j++) {
         const cell = String(row[j] ?? '').trim();
         const next = String(row[j + 1] ?? '').trim();
-        if (/微信昵称|^姓名$|支付宝账户|账户名称|户名|客户名称/.test(cell) && next) hints.add(next);
-        const kv = cell.match(/^(微信昵称|姓名|支付宝账户|账户名称|户名|客户名称)[：:]\s*(.+)$/);
+        if (/微信昵称|^姓名$|支付宝账户|账户名称|户名|客户名称|Account name/i.test(cell) && next) hints.add(next);
+        const kv = cell.match(/^(微信昵称|姓名|支付宝账户|账户名称|户名|客户名称|Account name)[：:]\s*(.+)$/i);
         if (kv?.[2]) hints.add(kv[2].trim());
       }
       const joined = row.join(',');
       const inline = joined.match(/微信昵称[：:]\s*([^,]+)/);
       if (inline?.[1]) hints.add(inline[1].trim());
+      const citicName = joined.match(/户名[：:]\s*(\S+)/);
+      if (citicName?.[1]) hints.add(citicName[1]);
     }
     return [...hints].filter(Boolean);
   }
@@ -502,7 +551,7 @@ export const Parsers = (() => {
   function resolveSourceName(file, rows, format, sources) {
     if (!sources?.length) throw new Error('请先在系统中配置账单来源');
 
-    if (format === 'bank' || format === 'ccb') {
+    if (format === 'bank' || format === 'ccb' || format === 'citic') {
       const companySource = matchCompanySource(file, rows, sources);
       if (companySource) return companySource;
     }
@@ -533,7 +582,7 @@ export const Parsers = (() => {
         }
       }
 
-      if (format === 'bank' || format === 'ccb') {
+      if (format === 'bank' || format === 'ccb' || format === 'citic') {
         if (/信用|信用卡/.test(hints.join(' ')) && /信用/.test(s.name)) score += 30;
         if (/储蓄|借记/.test(hints.join(' ')) && /储蓄/.test(s.name)) score += 30;
       }
@@ -766,6 +815,86 @@ export const Parsers = (() => {
     return out;
   }
 
+  const CITIC_TXN_RE = /^(\d{8})\s+RMB\s+([\d.]+)\s+RMB\s+([\d.]+)\s+(.+)$/;
+
+  function parseCiticPeerTail(tail) {
+    const s = cleanField(tail);
+    if (!s) return { summary: '', peer: '', account: '' };
+    const m = s.match(/^(.+?)\s+(\d{6,})(?:\s+(.+))?$/);
+    if (!m) return { summary: s, peer: '', account: '' };
+    return {
+      summary: m[1].trim(),
+      account: m[2].trim(),
+      peer: (m[3] || '').trim()
+    };
+  }
+
+  function resolveCiticTxn(amount1, amount2, summary, prevBalance) {
+    const a1 = parseFloat(amount1);
+    const a2 = parseFloat(amount2);
+    const tol = 0.02;
+
+    if (prevBalance != null && !isNaN(prevBalance)) {
+      if (Math.abs(prevBalance + a1 - a2) < tol) return { type: '收入', amount: a1, balance: a2 };
+      if (Math.abs(prevBalance - a1 - a2) < tol) return { type: '支出', amount: a1, balance: a2 };
+      if (Math.abs(prevBalance + a2 - a1) < tol) return { type: '收入', amount: a2, balance: a1 };
+      if (Math.abs(prevBalance - a2 - a1) < tol) return { type: '支出', amount: a2, balance: a1 };
+    }
+
+    if (/转入|入账|退库|结息/.test(summary)) {
+      return { type: '收入', amount: Math.min(a1, a2), balance: Math.max(a1, a2) };
+    }
+    if (a1 > a2) {
+      if (a2 === 0) return { type: '支出', amount: a1, balance: a2 };
+      return { type: '支出', amount: a2, balance: a1 };
+    }
+    return { type: '收入', amount: a1, balance: a2 };
+  }
+
+  function parseCiticBank(rows, sourceName) {
+    const text = rows.map(r => r.join(' ')).join('\n');
+    if (!isCiticBankStatement(text)) {
+      throw new Error('未识别到中信银行流水，请确认导出的是「账户交易明细」PDF');
+    }
+
+    const out = [];
+    let prevBalance = null;
+
+    for (const row of rows) {
+      const line = row.join(' ').trim();
+      const m = line.match(CITIC_TXN_RE);
+      if (!m) continue;
+
+      const { summary, peer, account } = parseCiticPeerTail(m[4]);
+      if (isBankRefundRow(summary)) continue;
+
+      const txn = resolveCiticTxn(m[2], m[3], summary, prevBalance);
+      if (!txn.amount) continue;
+      prevBalance = txn.balance;
+
+      const dt = parseDateTime(m[1]);
+      const counterparty = peer || account || summary;
+      const desc = summary || counterparty;
+      const note = txn.balance != null && !isNaN(txn.balance) ? `余额 ${txn.balance.toFixed(2)}` : '';
+
+      out.push(makeRow({
+        date: dt.date,
+        time: dt.time,
+        source: sourceName,
+        peer: counterparty,
+        desc,
+        type: txn.type,
+        amount: txn.amount,
+        pay: sourceName,
+        note,
+        rawCategory: summary
+      }));
+    }
+
+    if (!out.length) throw new Error('未解析到中信银行交易记录，请检查 PDF 内容');
+    return out;
+  }
+
   async function parseFile(file, sourceName, formatHint, sources) {
     const rows = await readRows(file);
     if (!rows.length) throw new Error('文件为空或无法解析');
@@ -783,6 +912,7 @@ export const Parsers = (() => {
       case 'wechat': records = parseWeChat(rows, resolvedSource); break;
       case 'alipay': records = parseAlipay(rows, resolvedSource); break;
       case 'ccb': records = parseCcbBank(rows, resolvedSource); break;
+      case 'citic': records = parseCiticBank(rows, resolvedSource); break;
       case 'bank': records = parseBank(rows, resolvedSource); break;
       default:
         throw new Error('无法识别账单格式，请手动选择：微信 / 支付宝 / 银行流水');
@@ -794,6 +924,7 @@ export const Parsers = (() => {
 
   return {
     parseFile, detectFormat, resolveSourceName, extractFileHints, FORMAT_LABELS,
+    isPdfFile, readPdfText, parseCiticBank, isCiticBankStatement,
     txnHash, txnDedupKey, buildDedupSet, addToDedupSet, isDuplicate,
     buildCrossSourceIndex, addToCrossSourceIndex, findCrossSourceDuplicate, summarizeDupMatch,
     readText, parseCSV, readRows, isExcelFile

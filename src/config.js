@@ -115,6 +115,7 @@ export const DEFAULT_SOURCES = [
   { name:'微信-陈橙', color:'#ff6d00' },
   { name:'支付宝-陈橙', color:'#9c27b0' },
   { name:'建行-陈橙', color:'#0066b3' },
+  { name:'中信-陈橙', color:'#c41230' },
   { name:'小河帮公司', color:'#795548' },
   { name:'乐极客公司', color:'#0097a7' },
   { name:'银行-储蓄卡', color:'#795548' },

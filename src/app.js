@@ -98,6 +98,14 @@ function ensureCcbChenchengSource() {
   return true;
 }
 
+function ensureCiticChenchengSource() {
+  const name = '中信-陈橙';
+  if (SOURCES.find(s => s.name === name)) return false;
+  const def = DEFAULT_SOURCES.find(s => s.name === name);
+  SOURCES.push(def ? { ...def } : { name, color: '#c41230' });
+  return true;
+}
+
 function renderImportPage() {
   if (!importActiveSource && !pendingImport && SOURCES.some(s => s.name === DEFAULT_IMPORT_SOURCE)) {
     importActiveSource = DEFAULT_IMPORT_SOURCE;
@@ -469,6 +477,7 @@ async function loadData() {
     if (Array.isArray(state.sourceChipOrder)) SOURCE_CHIP_ORDER = [...state.sourceChipOrder];
     else SOURCE_CHIP_ORDER = [];
     if (ensureCcbChenchengSource()) await persistNow();
+    if (ensureCiticChenchengSource()) await persistNow();
     allData = state.transactions || [];
     const maxId = allData.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0);
     nextId = Math.max(Number(state.nextId) || 1, maxId + 1);
