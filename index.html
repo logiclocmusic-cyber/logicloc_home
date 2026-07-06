@@ -349,7 +349,10 @@
           <h2>INVOICE VAULT <span>发票库</span></h2>
           <p class="inv-vault-sub inv-intro">按公司分别查看、打印、下载发票</p>
         </div>
-        <button type="button" class="btn inv-upload-btn" onclick="triggerInvoiceUpload()"><i class="ti ti-upload"></i> 上传发票</button>
+        <div class="inv-vault-actions">
+          <button type="button" class="btn inv-upload-btn" onclick="triggerInvoiceUpload()"><i class="ti ti-scan"></i> AI 识别上传</button>
+          <button type="button" class="btn inv-manual-btn" onclick="triggerManualInvoiceUpload()"><i class="ti ti-pencil"></i> 手动录入</button>
+        </div>
       </div>
 
       <div class="inv-year-cards" id="invYearCards"></div>

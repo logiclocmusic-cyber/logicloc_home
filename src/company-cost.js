@@ -26,8 +26,14 @@ function currentQuarter() {
 let invoices = [];
 let openId = null;
 let pendingFile = null;
+let uploadMode = 'ai';
 let buyerColorMap = new Map();
 let filters = { buyer: '', search: '', year: currentYear(), quarter: currentQuarter(), status: '' };
+
+function invoiceNoFromFilename(fileName) {
+  const m = String(fileName || '').match(/(\d{18,22})/);
+  return m ? m[1] : '';
+}
 
 function readFileAsDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -270,7 +276,7 @@ function renderTable() {
   const list = filteredInvoices();
   renderSummary(list);
   if (!list.length) {
-    body.innerHTML = `<tr><td colspan="8" class="inv-empty">暂无发票，点击右上角「上传发票」添加</td></tr>`;
+    body.innerHTML = `<tr><td colspan="8" class="inv-empty">暂无发票，点击「AI 识别上传」或「手动录入」添加</td></tr>`;
     return;
   }
   body.innerHTML = list.map(inv => {
@@ -354,6 +360,38 @@ export async function renderCompanyCostPage() {
   }
 }
 
+async function processManualUpload(file) {
+  if (!isInvoiceFile(file)) {
+    alert('请上传图片或 PDF 发票');
+    return;
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    alert('文件不能超过 10MB');
+    return;
+  }
+  try {
+    const dataUrl = await readFileAsDataUrl(file);
+    pendingFile = { dataUrl, file };
+    openId = null;
+    const invoiceNo = invoiceNoFromFilename(file.name);
+    const dup = invoiceNo ? findLocalDuplicate(invoiceNo) : null;
+    if (dup) {
+      alert(duplicateInvoiceMessage(dup));
+      pendingFile = null;
+      return;
+    }
+    openInvoiceModal({
+      invoiceNo,
+      fileName: file.name,
+      mimeType: file.type,
+      category: '其他'
+    }, dataUrl, '手动录入发票');
+  } catch (err) {
+    alert('读取文件失败：' + err.message);
+    pendingFile = null;
+  }
+}
+
 async function processUpload(file) {
   if (!isInvoiceFile(file)) {
     alert('请上传图片或 PDF 发票');
@@ -385,12 +423,14 @@ async function processUpload(file) {
   }
 }
 
-function openInvoiceModal(data = {}, previewUrl = null) {
+function openInvoiceModal(data = {}, previewUrl = null, modalTitle = null) {
   const modal = document.getElementById('moInvoice');
   const title = document.getElementById('invModalTitle');
   const form = document.getElementById('invForm');
   const preview = document.getElementById('invPreview');
-  if (title) title.textContent = openId ? '编辑发票' : '新增发票';
+  if (title) {
+    title.textContent = modalTitle || (openId ? '编辑发票' : '新增发票');
+  }
   if (form) form.innerHTML = formFieldsHtml(data);
   if (preview) {
     const url = previewUrl || (data.fileUrl ? assetUrl(data.fileUrl) : null);
@@ -487,6 +527,12 @@ export function printInvoiceFile(id) {
 }
 
 export function triggerInvoiceUpload() {
+  uploadMode = 'ai';
+  document.getElementById('invFileInp')?.click();
+}
+
+export function triggerManualInvoiceUpload() {
+  uploadMode = 'manual';
   document.getElementById('invFileInp')?.click();
 }
 
@@ -495,7 +541,9 @@ export function setupCompanyCost() {
   inp?.addEventListener('change', e => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (file) processUpload(file);
+    if (!file) return;
+    if (uploadMode === 'manual') processManualUpload(file);
+    else processUpload(file);
   });
 
   document.getElementById('invSearch')?.addEventListener('input', e => {

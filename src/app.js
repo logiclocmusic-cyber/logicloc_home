@@ -20,7 +20,7 @@ import {
 } from './gear.js';
 import {
   renderCompanyCostPage, setupCompanyCost,
-  openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload,
+  openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload, triggerManualInvoiceUpload,
   toggleInvoicePrinted, downloadInvoiceFile, printInvoiceFile
 } from './company-cost.js';
 import {
@@ -4370,7 +4370,7 @@ Object.assign(window, {
   toggleDetSelect, toggleDetSelectAll, clearDetSelection, applyDetBulkCat, applyDetBulkSubCat, detBulkToggleRefund,
   openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload, submitGearImageUrl,
   addIncomeMonitorCat, addIncomeMonitorCatFromSel, removeIncomeMonitorCat,
-  openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload,
+  openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload, triggerManualInvoiceUpload,
   toggleInvoicePrinted, downloadInvoiceFile, printInvoiceFile,
   openSplitEditor, closeSplitEditor, addSplitLine, saveSplitEdit: handleSaveSplit,
   clearSplit: handleClearSplit, clearSplitFromModal, toggleSplitExpand: handleToggleSplitExpand,
