@@ -461,37 +461,8 @@ async function loadData() {
     excluded = new Set((state.excluded || []).map(id => typeof id === 'string' ? parseInt(id, 10) : id));
 
     if (state.categories) {
-      CATS = [...state.categories.cats];
-      DEFAULT_CATS.forEach(c => { if (!CATS.includes(c)) CATS.push(c); });
-      EMOJIS = { ...DEFAULT_EMOJIS };
-      if (state.categories.emojis) {
-        for (const [cat, val] of Object.entries(state.categories.emojis)) {
-          const legacy = LEGACY_DEFAULT_EMOJIS[cat];
-          if (legacy && val === legacy) continue;
-          EMOJIS[cat] = val;
-        }
-      }
+      applyLoadedCategories(state.categories);
       if (migrateCatEmojisToIcons()) persist();
-      SUBCATS = { ...DEFAULT_SUBCATS, ...(state.categories.subcats || {}) };
-      const babySubs = SUBCATS['母婴亲子'];
-      if (babySubs && !babySubs.includes('母婴装备')) {
-        SUBCATS['母婴亲子'] = [...babySubs, '母婴装备'];
-      }
-      if (Array.isArray(state.categories.statsExclude)) {
-        CAT_STATS_EXCLUDE = new Set(state.categories.statsExclude);
-      } else {
-        CAT_STATS_EXCLUDE = new Set(DEFAULT_CAT_STATS_EXCLUDE);
-      }
-      if (Array.isArray(state.categories.offsetCats)) {
-        OFFSET_CATS_SET = new Set(state.categories.offsetCats);
-      } else {
-        OFFSET_CATS_SET = new Set(DEFAULT_OFFSET_CATS);
-      }
-      if (Array.isArray(state.categories.incomeDataCats) && state.categories.incomeDataCats.length) {
-        INCOME_DATA_CATS_LIST = [...state.categories.incomeDataCats];
-      } else {
-        INCOME_DATA_CATS_LIST = [...DEFAULT_INCOME_DATA_CATS];
-      }
     }
 
     if (state.sources) SOURCES = state.sources;
@@ -3694,6 +3665,66 @@ function catIconValue(cat) {
   });
 }
 
+function pruneCategoryMeta() {
+  const active = new Set(CATS);
+  for (const key of Object.keys(SUBCATS)) {
+    if (!active.has(key)) delete SUBCATS[key];
+  }
+  for (const key of Object.keys(EMOJIS)) {
+    if (!active.has(key)) delete EMOJIS[key];
+  }
+  CAT_STATS_EXCLUDE = new Set([...CAT_STATS_EXCLUDE].filter(c => active.has(c)));
+  OFFSET_CATS_SET = new Set([...OFFSET_CATS_SET].filter(c => active.has(c)));
+  INCOME_DATA_CATS_LIST = INCOME_DATA_CATS_LIST.filter(c => active.has(c));
+  for (const key of [...catSubExpanded]) {
+    if (!active.has(key)) catSubExpanded.delete(key);
+  }
+}
+
+function applyLoadedCategories(categories) {
+  CATS = [...(categories.cats || [])];
+  EMOJIS = {};
+  for (const cat of CATS) {
+    EMOJIS[cat] = DEFAULT_EMOJIS[cat] || iconRef('1F4CC');
+  }
+  if (categories.emojis) {
+    for (const [cat, val] of Object.entries(categories.emojis)) {
+      if (!CATS.includes(cat)) continue;
+      const legacy = LEGACY_DEFAULT_EMOJIS[cat];
+      if (legacy && val === legacy) continue;
+      EMOJIS[cat] = val;
+    }
+  }
+  SUBCATS = { ...(categories.subcats || {}) };
+  for (const cat of CATS) {
+    if (!SUBCATS[cat]?.length && DEFAULT_SUBCATS[cat]?.length) {
+      SUBCATS[cat] = [...DEFAULT_SUBCATS[cat]];
+    }
+  }
+  if (CATS.includes('母婴亲子')) {
+    const babySubs = SUBCATS['母婴亲子'] || [];
+    if (babySubs.length && !babySubs.includes('母婴装备')) {
+      SUBCATS['母婴亲子'] = [...babySubs, '母婴装备'];
+    }
+  }
+  if (Array.isArray(categories.statsExclude)) {
+    CAT_STATS_EXCLUDE = new Set(categories.statsExclude.filter(c => CATS.includes(c)));
+  } else {
+    CAT_STATS_EXCLUDE = new Set(DEFAULT_CAT_STATS_EXCLUDE.filter(c => CATS.includes(c)));
+  }
+  if (Array.isArray(categories.offsetCats)) {
+    OFFSET_CATS_SET = new Set(categories.offsetCats.filter(c => CATS.includes(c)));
+  } else {
+    OFFSET_CATS_SET = new Set(DEFAULT_OFFSET_CATS.filter(c => CATS.includes(c)));
+  }
+  if (Array.isArray(categories.incomeDataCats) && categories.incomeDataCats.length) {
+    INCOME_DATA_CATS_LIST = categories.incomeDataCats.filter(c => CATS.includes(c));
+  } else {
+    INCOME_DATA_CATS_LIST = DEFAULT_INCOME_DATA_CATS.filter(c => CATS.includes(c));
+  }
+  pruneCategoryMeta();
+}
+
 function migrateCatEmojisToIcons() {
   let changed = false;
   for (const cat of CATS) {
@@ -3919,6 +3950,21 @@ function saveCat() {
     return;
   }
 
+  const modal = document.getElementById('moCat');
+  const saveBtn = modal?.querySelector('.mf .btn-p');
+  const prevLabel = saveBtn?.textContent || '保存';
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = '保存中…';
+  }
+
+  const finishSaveUi = () => {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = prevLabel;
+    }
+  };
+
   for (const row of rows) {
     if (row.name === row.oldName) continue;
     renameCategoryInTransactions(row.oldName, row.name);
@@ -3963,7 +4009,10 @@ function saveCat() {
   CATS = nextCats;
   CAT_STATS_EXCLUDE = nextExclude;
   OFFSET_CATS_SET = nextOffset;
+  pruneCategoryMeta();
+
   persistNow().then(ok => {
+    finishSaveUi();
     if (!ok) return;
     buildCatFilter();
     applyF();
@@ -3971,6 +4020,10 @@ function saveCat() {
     renderMonitor();
     closeCat();
     refreshActiveViews();
+    flash();
+  }).catch(err => {
+    finishSaveUi();
+    alert('保存失败：' + (err?.message || err));
   });
 }
 
