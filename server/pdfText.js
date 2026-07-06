@@ -60,7 +60,7 @@ function renderWithPoppler(buffer) {
   writeFileSync(paths.pdfPath, buffer);
   try {
     execFileSync(pdftoppm, [
-      '-png', '-f', '1', '-l', '1', '-r', '300', '-singlefile',
+      '-png', '-f', '1', '-l', '1', '-r', '400', '-singlefile',
       paths.pdfPath, paths.pngPrefix
     ], { stdio: 'pipe' });
     return readFileSync(paths.pngPath);
@@ -104,7 +104,10 @@ export async function pdfPageImageForOcr(buffer) {
   for (const [name, fn] of renderers) {
     try {
       const img = await fn();
-      if (img?.length) return img;
+      if (img?.length) {
+        console.log(`[invoice-scan] PDF rendered via ${name}, ${img.length} bytes`);
+        return img;
+      }
     } catch (err) {
       console.warn(`[invoice-scan] ${name} render failed:`, err.message);
     }

@@ -14,6 +14,7 @@ async function getWorker() {
     workerReady = (async () => {
       // chi_sim 已覆盖中文发票；chi_sim+eng 在 tesseract.js v7 会触发多语言包加载异常
       const worker = await createWorker('chi_sim', undefined, { cachePath: TESS_CACHE });
+      await worker.setParameters({ tessedit_pageseg_mode: '6' });
       return worker;
     })();
   }
