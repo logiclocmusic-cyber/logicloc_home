@@ -1,5 +1,5 @@
 import { imageToText } from './ocr.js';
-import { pdfToText } from './pdfText.js';
+import { pdfToText, isInvoiceTextUsable, pdfPageImageForOcr } from './pdfText.js';
 
 const API_BASE = (process.env.DEEPSEEK_API_BASE || 'https://api.deepseek.com').replace(/\/+$/, '');
 const MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
@@ -208,6 +208,27 @@ async function chatCompletion(messages, { json = true } = {}) {
   }
 }
 
+function visionEnabled() {
+  return !!(VISION_BASE && VISION_MODEL);
+}
+
+async function visionInputFromBuffer(buf, mime) {
+  const isPdf = mime === 'application/pdf' || String(mime || '').includes('pdf');
+  if (!isPdf) {
+    return { base64: buf.toString('base64'), mime: mime || 'image/jpeg' };
+  }
+  const pdfText = await pdfToText(buf);
+  if (pdfText && isInvoiceTextUsable(pdfText)) {
+    return { text: pdfText };
+  }
+  const pageImg = await pdfPageImageForOcr(buf);
+  return { base64: pageImg.toString('base64'), mime: 'image/png' };
+}
+
+function visionResultUsable(parsed = {}) {
+  return !!(parsed.invoiceNo || parsed.total || parsed.vendor);
+}
+
 async function scanWithVision(base64, mime) {
   const apiKey = process.env.DEEPSEEK_VISION_API_KEY || process.env.DEEPSEEK_API_KEY;
   const base = VISION_BASE || API_BASE;
@@ -265,33 +286,54 @@ export function getAiStatus() {
   const configured = !!process.env.DEEPSEEK_API_KEY;
   let mode = 'disabled';
   if (configured) {
-    mode = VISION_BASE && VISION_MODEL ? 'vision' : 'ocr+deepseek';
+    mode = visionEnabled() ? 'vision' : 'ocr+deepseek';
   }
-  return { configured, mode, model: MODEL };
+  return {
+    configured,
+    mode,
+    model: visionEnabled() ? VISION_MODEL : MODEL,
+    visionModel: visionEnabled() ? VISION_MODEL : null,
+  };
 }
 
 export async function scanInvoiceImage(base64, mime = 'image/jpeg') {
   if (!process.env.DEEPSEEK_API_KEY) {
-    throw new Error('未配置 DEEPSEEK_API_KEY，请在 Railway Variables 中添加');
-  }
-
-  if (VISION_BASE && VISION_MODEL) {
-    try {
-      return await scanWithVision(base64, mime);
-    } catch (err) {
-      console.warn('[invoice-scan] vision failed, fallback OCR:', err.message);
-    }
+    throw new Error('未配置 DEEPSEEK_API_KEY，请在 Railway 环境变量中添加');
   }
 
   const buf = Buffer.from(base64, 'base64');
   const isPdf = mime === 'application/pdf' || String(mime || '').includes('pdf');
 
-  if (isPdf) {
-    const pdfText = await pdfToText(buf);
-    if (!pdfText || pdfText.replace(/\s/g, '').length < 4) {
-      throw new Error('未能从 PDF 提取文字，请上传电子版发票或手动填写');
+  if (visionEnabled()) {
+    try {
+      const input = await visionInputFromBuffer(buf, mime);
+      if (input.text) {
+        return scanWithText(input.text, 'pdf');
+      }
+      const result = await scanWithVision(input.base64, input.mime);
+      if (visionResultUsable(result.parsed)) return result;
+      console.warn('[invoice-scan] vision returned empty fields, fallback OCR');
+    } catch (err) {
+      console.warn('[invoice-scan] vision failed, fallback OCR:', err.message);
     }
-    return scanWithText(pdfText, 'pdf');
+  } else if (isPdf) {
+    const pdfText = await pdfToText(buf);
+    if (pdfText && isInvoiceTextUsable(pdfText)) {
+      return scanWithText(pdfText, 'pdf');
+    }
+  }
+
+  if (isPdf) {
+    console.warn('[invoice-scan] PDF text layer insufficient, fallback OCR render');
+    const pageImg = await pdfPageImageForOcr(buf);
+    const ocrText = await imageToText(pageImg);
+    if (!ocrText || ocrText.replace(/\s/g, '').length < 4) {
+      throw new Error('未能从 PDF 识别文字，请上传发票照片（PNG/JPG）或手动填写');
+    }
+    if (!isInvoiceTextUsable(ocrText)) {
+      throw new Error('该 PDF 为扫描件且 OCR 未能可靠识别，请改为上传发票照片（PNG/JPG）或手动填写');
+    }
+    return scanWithText(ocrText, 'ocr');
   }
 
   const ocrText = await imageToText(buf);

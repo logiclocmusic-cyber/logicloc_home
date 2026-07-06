@@ -5,6 +5,8 @@ data/*.db-wal
 data/*.db-shm
 data/last-cloud-pull.json
 data/invoices/
+data/tesseract-cache/
+*.traineddata
 .DS_Store
 .env
 .env.local

@@ -336,6 +336,8 @@ async function updateAiStatusBanner() {
     const st = await fetchInvoiceAiStatus();
     if (!st.configured) {
       intro.innerHTML = '按公司分别查看、打印、下载发票。<span class="inv-ai-warn">AI 识别未启用：请在 Railway 配置 <code>DEEPSEEK_API_KEY</code>。</span>';
+    } else if (st.mode === 'vision') {
+      intro.textContent = '按公司分别查看、打印、下载发票。上传后由视觉 AI 自动识别，可手动校对保存。';
     } else {
       intro.textContent = '按公司分别查看、打印、下载发票。上传后由 AI 自动识别，可手动校对保存。';
     }
