@@ -60,7 +60,7 @@ function renderWithPoppler(buffer) {
   writeFileSync(paths.pdfPath, buffer);
   try {
     execFileSync(pdftoppm, [
-      '-png', '-f', '1', '-l', '1', '-r', '200', '-singlefile',
+      '-png', '-f', '1', '-l', '1', '-r', '300', '-singlefile',
       paths.pdfPath, paths.pngPrefix
     ], { stdio: 'pipe' });
     return readFileSync(paths.pngPath);

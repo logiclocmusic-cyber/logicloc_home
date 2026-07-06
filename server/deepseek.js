@@ -1,10 +1,14 @@
 import { imageToText } from './ocr.js';
 import { pdfToText, isInvoiceTextUsable, pdfPageImageForOcr } from './pdfText.js';
 
-const API_BASE = (process.env.DEEPSEEK_API_BASE || 'https://api.deepseek.com').replace(/\/+$/, '');
+const API_BASE = normalizeApiBase(process.env.DEEPSEEK_API_BASE || 'https://api.deepseek.com');
 const MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
-const VISION_BASE = (process.env.DEEPSEEK_VISION_API_BASE || '').replace(/\/+$/, '');
+const VISION_BASE = normalizeApiBase(process.env.DEEPSEEK_VISION_API_BASE || '');
 const VISION_MODEL = process.env.DEEPSEEK_VISION_MODEL || '';
+
+function normalizeApiBase(url) {
+  return String(url || '').trim().replace(/\/+$/, '').replace(/\/v1$/i, '');
+}
 
 const INVOICE_CATEGORIES = ['办公用品', '差旅', '餐饮', '设备', '服务', '租金', '其他'];
 
@@ -231,28 +235,43 @@ function visionResultUsable(parsed = {}) {
 
 async function scanWithVision(base64, mime) {
   const apiKey = process.env.DEEPSEEK_VISION_API_KEY || process.env.DEEPSEEK_API_KEY;
+  if (!apiKey) throw new Error('未配置 DEEPSEEK_VISION_API_KEY');
   const base = VISION_BASE || API_BASE;
   const model = VISION_MODEL || MODEL;
   const dataUrl = `data:${mime};base64,${base64}`;
 
-  const res = await fetch(`${base}/v1/chat/completions`, {
+  const payload = {
+    model,
+    temperature: 0.1,
+    enable_thinking: false,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: `你是发票识别助手。请从这张发票/收据图片中提取信息，只返回 JSON，不要 markdown 代码块。\n\n${FIELDS_HINT}` },
+        { type: 'image_url', image_url: { url: dataUrl } }
+      ]
+    }]
+  };
+
+  let res = await fetch(`${base}/v1/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`
     },
-    body: JSON.stringify({
-      model,
-      temperature: 0.1,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'text', text: `你是发票识别助手。请从这张发票/收据图片中提取信息，只返回 JSON，不要 markdown 代码块。\n\n${FIELDS_HINT}` },
-          { type: 'image_url', image_url: { url: dataUrl } }
-        ]
-      }]
-    })
+    body: JSON.stringify({ ...payload, response_format: { type: 'json_object' } })
   });
+
+  if (!res.ok) {
+    res = await fetch(`${base}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(payload)
+    });
+  }
 
   if (!res.ok) {
     const err = await res.text();
@@ -305,6 +324,7 @@ export async function scanInvoiceImage(base64, mime = 'image/jpeg') {
   const isPdf = mime === 'application/pdf' || String(mime || '').includes('pdf');
 
   if (visionEnabled()) {
+    let visionError = null;
     try {
       const input = await visionInputFromBuffer(buf, mime);
       if (input.text) {
@@ -314,7 +334,21 @@ export async function scanInvoiceImage(base64, mime = 'image/jpeg') {
       if (visionResultUsable(result.parsed)) return result;
       console.warn('[invoice-scan] vision returned empty fields, fallback OCR');
     } catch (err) {
+      visionError = err;
       console.warn('[invoice-scan] vision failed, fallback OCR:', err.message);
+    }
+
+    if (isPdf) {
+      console.warn('[invoice-scan] PDF text layer insufficient, fallback OCR render');
+      const pageImg = await pdfPageImageForOcr(buf);
+      const ocrText = await imageToText(pageImg);
+      if (ocrText && isInvoiceTextUsable(ocrText)) {
+        return scanWithText(ocrText, 'ocr');
+      }
+      const hint = visionError
+        ? `视觉识别失败：${visionError.message}`
+        : '视觉识别未返回有效字段';
+      throw new Error(`${hint}。请确认 DEEPSEEK_VISION_MODEL 为 Qwen/Qwen3.5-9B，且 DEEPSEEK_VISION_API_KEY 为硅基流动密钥`);
     }
   } else if (isPdf) {
     const pdfText = await pdfToText(buf);
