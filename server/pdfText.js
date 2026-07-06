@@ -111,3 +111,7 @@ export async function pdfPageImageForOcr(buffer) {
   }
   throw new Error('无法渲染 PDF 页面');
 }
+
+export function hasPoppler() {
+  return !!findPdftoppm();
+}

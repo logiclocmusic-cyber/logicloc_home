@@ -1,5 +1,5 @@
 import { imageToText } from './ocr.js';
-import { pdfToText, isInvoiceTextUsable, pdfPageImageForOcr } from './pdfText.js';
+import { pdfToText, isInvoiceTextUsable, pdfPageImageForOcr, hasPoppler } from './pdfText.js';
 
 const API_BASE = normalizeApiBase(process.env.DEEPSEEK_API_BASE || 'https://api.deepseek.com');
 const MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
@@ -122,6 +122,7 @@ function normalizeInvoiceCategory(value) {
 
 export function normalizeInvoiceFields(parsed = {}, opts = {}) {
   const sourceText = opts.sourceText || '';
+  parsed = mapChineseInvoiceFields(parsed);
   let vendor = String(parsed.vendor || parsed.seller || '').trim();
   let buyer = String(parsed.buyer || parsed.buyer_name || '').trim();
 
@@ -226,67 +227,117 @@ async function visionInputFromBuffer(buf, mime) {
     return { text: pdfText };
   }
   const pageImg = await pdfPageImageForOcr(buf);
-  return { base64: pageImg.toString('base64'), mime: 'image/png' };
+  return { base64: pageImg.toString('base64'), mime: 'image/png', pageImg };
+}
+
+function mapChineseInvoiceFields(parsed = {}) {
+  const p = parsed && typeof parsed === 'object' ? parsed : {};
+  return {
+    ...p,
+    vendor: p.vendor || p.seller || p['销售方'] || p['销方名称'] || p['销方'],
+    buyer: p.buyer || p.buyer_name || p['购买方'] || p['购方名称'] || p['购方'],
+    invoiceNo: p.invoiceNo || p.invoice_no || p['发票号码'] || p['发票号'],
+    invoiceDate: p.invoiceDate || p.invoice_date || p['开票日期'],
+    amount: p.amount ?? p['金额'] ?? p['不含税金额'] ?? null,
+    taxAmount: p.taxAmount ?? p.tax_amount ?? p['税额'] ?? null,
+    total: p.total ?? p['价税合计'] ?? p['合计'] ?? null,
+    category: p.category || p['费用类型'] || p['分类'],
+    notes: p.notes || p['备注'],
+  };
+}
+
+function parseJsonFromText(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      try { return JSON.parse(match[0]); } catch { /* try next */ }
+    }
+  }
+  return null;
+}
+
+function extractAssistantText(message = {}) {
+  const { content, reasoning_content: reasoning } = message;
+  if (typeof content === 'string' && content.trim()) return content;
+  if (Array.isArray(content)) {
+    const text = content
+      .filter(part => part?.type === 'text' && part.text)
+      .map(part => part.text)
+      .join('\n')
+      .trim();
+    if (text) return text;
+  }
+  if (typeof reasoning === 'string' && reasoning.trim()) return reasoning;
+  return '';
 }
 
 function visionResultUsable(parsed = {}) {
-  return !!(parsed.invoiceNo || parsed.total || parsed.vendor);
+  const n = normalizeInvoiceFields(parsed);
+  return !!(n.invoiceNo || n.total || n.vendor || n.buyer);
 }
 
-async function scanWithVision(base64, mime) {
+async function scanWithVision(base64, mime, { ocrHint = '' } = {}) {
   const apiKey = process.env.DEEPSEEK_VISION_API_KEY || process.env.DEEPSEEK_API_KEY;
   if (!apiKey) throw new Error('未配置 DEEPSEEK_VISION_API_KEY');
   const base = VISION_BASE || API_BASE;
   const model = VISION_MODEL || MODEL;
   const dataUrl = `data:${mime};base64,${base64}`;
+  const hint = ocrHint
+    ? `\n\n附带 OCR 参考（可能有误，请结合图片核对）：\n${ocrHint.slice(0, 2500)}`
+    : '';
 
-  const payload = {
+  const buildPayload = (useJsonFormat) => ({
     model,
     temperature: 0.1,
     enable_thinking: false,
+    ...(useJsonFormat ? { response_format: { type: 'json_object' } } : {}),
     messages: [{
       role: 'user',
       content: [
-        { type: 'text', text: `你是发票识别助手。请从这张发票/收据图片中提取信息，只返回 JSON，不要 markdown 代码块。\n\n${FIELDS_HINT}` },
-        { type: 'image_url', image_url: { url: dataUrl } }
+        {
+          type: 'text',
+          text: `你是发票识别助手。请从这张发票/收据图片中提取信息，只返回 JSON，不要 markdown 代码块。\n\n${FIELDS_HINT}${hint}`
+        },
+        { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } }
       ]
     }]
-  };
-
-  let res = await fetch(`${base}/v1/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({ ...payload, response_format: { type: 'json_object' } })
   });
 
-  if (!res.ok) {
-    res = await fetch(`${base}/v1/chat/completions`, {
+  let lastText = '';
+  for (const useJsonFormat of [false, true]) {
+    const res = await fetch(`${base}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(buildPayload(useJsonFormat))
     });
+
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`视觉模型错误 (${res.status}): ${err.slice(0, 300)}`);
+    }
+
+    const json = await res.json();
+    const text = extractAssistantText(json.choices?.[0]?.message || {});
+    lastText = text;
+    const parsed = parseJsonFromText(text);
+    if (parsed && visionResultUsable(parsed)) {
+      return { parsed, raw: text, mode: 'vision' };
+    }
   }
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`视觉模型错误 (${res.status}): ${err.slice(0, 200)}`);
+  const parsed = parseJsonFromText(lastText);
+  if (parsed) {
+    console.warn('[invoice-scan] vision parsed but missing key fields:', lastText.slice(0, 300));
+    return { parsed, raw: lastText, mode: 'vision' };
   }
-
-  const json = await res.json();
-  const text = json.choices?.[0]?.message?.content || '';
-  try {
-    return { parsed: JSON.parse(text), raw: text, mode: 'vision' };
-  } catch {
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) return { parsed: JSON.parse(match[0]), raw: text, mode: 'vision' };
-    throw new Error('视觉模型返回格式无法解析');
-  }
+  throw new Error(`视觉模型返回格式无法解析：${lastText.slice(0, 200) || '(空响应)'}`);
 }
 
 async function scanWithText(sourceText, mode = 'ocr') {
@@ -312,6 +363,7 @@ export function getAiStatus() {
     mode,
     model: visionEnabled() ? VISION_MODEL : MODEL,
     visionModel: visionEnabled() ? VISION_MODEL : null,
+    poppler: hasPoppler(),
   };
 }
 
@@ -325,13 +377,23 @@ export async function scanInvoiceImage(base64, mime = 'image/jpeg') {
 
   if (visionEnabled()) {
     let visionError = null;
+    let renderedImg = null;
     try {
       const input = await visionInputFromBuffer(buf, mime);
       if (input.text) {
         return scanWithText(input.text, 'pdf');
       }
-      const result = await scanWithVision(input.base64, input.mime);
+      renderedImg = input.pageImg || null;
+      let ocrHint = '';
+      if (renderedImg) {
+        try { ocrHint = await imageToText(renderedImg); } catch { /* optional hint */ }
+      }
+      const result = await scanWithVision(input.base64, input.mime, { ocrHint });
       if (visionResultUsable(result.parsed)) return result;
+      if (ocrHint && ocrHint.replace(/\s/g, '').length >= 40) {
+        const textResult = await scanWithText(ocrHint, 'ocr');
+        if (visionResultUsable(textResult.parsed)) return textResult;
+      }
       console.warn('[invoice-scan] vision returned empty fields, fallback OCR');
     } catch (err) {
       visionError = err;
@@ -339,16 +401,16 @@ export async function scanInvoiceImage(base64, mime = 'image/jpeg') {
     }
 
     if (isPdf) {
-      console.warn('[invoice-scan] PDF text layer insufficient, fallback OCR render');
-      const pageImg = await pdfPageImageForOcr(buf);
+      const pageImg = renderedImg || await pdfPageImageForOcr(buf);
       const ocrText = await imageToText(pageImg);
-      if (ocrText && isInvoiceTextUsable(ocrText)) {
-        return scanWithText(ocrText, 'ocr');
+      if (ocrText && ocrText.replace(/\s/g, '').length >= 40) {
+        const textResult = await scanWithText(ocrText, 'ocr');
+        if (visionResultUsable(textResult.parsed)) return textResult;
       }
       const hint = visionError
         ? `视觉识别失败：${visionError.message}`
         : '视觉识别未返回有效字段';
-      throw new Error(`${hint}。请确认 DEEPSEEK_VISION_MODEL 为 Qwen/Qwen3.5-9B，且 DEEPSEEK_VISION_API_KEY 为硅基流动密钥`);
+      throw new Error(`${hint}。可尝试将 DEEPSEEK_VISION_MODEL 改为 Qwen/Qwen3.5-27B，并确认 Railway 已安装 poppler-utils`);
     }
   } else if (isPdf) {
     const pdfText = await pdfToText(buf);
