@@ -17,6 +17,10 @@ export default defineConfig({
       '/invoice-files': {
         target: 'http://localhost:3001',
         changeOrigin: true
+      },
+      '/family-event-files': {
+        target: 'http://localhost:3001',
+        changeOrigin: true
       }
     }
   },

@@ -41,11 +41,12 @@ body{
 
 .app{display:flex;height:100vh}
 
-.logo-mark{position:relative;width:32px;height:32px;flex-shrink:0;display:inline-flex}
-.logo-mark span{position:absolute;border-radius:50%}
-.logo-mark .c1{width:16px;height:16px;background:#a89ee0;top:0;left:0;opacity:.95}
-.logo-mark .c2{width:14px;height:14px;background:#8b7fd4;top:3px;left:10px;opacity:.9}
-.logo-mark .c3{width:12px;height:12px;background:#c4b8f0;bottom:0;left:5px;opacity:.9}
+.logo-mark{
+  position:relative;width:32px;height:32px;flex-shrink:0;
+  display:inline-flex;align-items:center;justify-content:center;
+  border-radius:8px;overflow:hidden;background:#000;
+}
+.logo-mark-img{width:100%;height:100%;object-fit:cover;display:block}
 
 /* ── Sidebar ── */
 .sb{
@@ -60,14 +61,9 @@ body{
 }
 .sb-logo{padding:0;display:flex;align-items:center;justify-content:center}
 .sb .logo-mark{
-  position:relative;width:30px;height:30px;flex-shrink:0;
-  border-radius:0;background:transparent;display:block;
+  width:34px;height:34px;border-radius:10px;background:#000;
+  box-shadow:0 1px 4px rgba(0,0,0,.12);
 }
-.sb .logo-mark span{position:absolute;border-radius:50%;display:block}
-.sb .logo-mark .c1{width:15px;height:15px;background:#5b9fd4;top:0;left:0;opacity:.95}
-.sb .logo-mark .c2{width:13px;height:13px;background:#3d6fd4;top:2px;left:9px;opacity:.92}
-.sb .logo-mark .c3{width:11px;height:11px;background:#7ec8e8;bottom:0;left:4px;opacity:.9}
-.sb .logo-mark::after{display:none}
 
 .nav{padding:0;flex:1;display:flex;flex-direction:column;gap:4px;overflow-y:auto;overflow-x:hidden}
 .ni{
@@ -300,6 +296,17 @@ body{
   padding:16px 16px 14px;box-shadow:var(--shadow-sm);
   display:flex;align-items:flex-end;justify-content:space-between;gap:12px;min-height:118px;
 }
+.home-cat-card-click{
+  cursor:pointer;transition:border-color .15s,box-shadow .15s,transform .15s;
+}
+.home-cat-card-click:hover{
+  border-color:color-mix(in srgb, var(--card-accent) 45%, var(--bdr));
+  box-shadow:var(--shadow);transform:translateY(-1px);
+}
+.home-cat-card-click:focus-visible{
+  outline:2px solid color-mix(in srgb, var(--card-accent) 55%, transparent);
+  outline-offset:2px;
+}
 .home-cat-main{min-width:0;flex:1}
 .home-cat-name{
   font-size:12px;font-weight:600;color:var(--txt3);margin-bottom:8px;
@@ -376,7 +383,7 @@ body{
 .home-donut-wrap{
   position:relative;width:min(100%,280px);aspect-ratio:1;margin:0 auto 16px;
 }
-.home-donut-wrap canvas{width:100%!important;height:100%!important}
+.home-donut-wrap canvas{width:100%!important;height:100%!important;cursor:pointer}
 .home-donut-center{
   position:absolute;inset:0;display:flex;flex-direction:column;
   align-items:center;justify-content:center;pointer-events:none;text-align:center;
@@ -395,6 +402,12 @@ body{
   display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:500;
   color:var(--txt2);line-height:1.3;
 }
+.home-leg-item-click{
+  appearance:none;border:0;background:transparent;padding:2px 4px;margin:-2px -4px;
+  border-radius:6px;cursor:pointer;font:inherit;transition:background .12s;
+}
+.home-leg-item-click:hover{background:var(--surf2)}
+.home-leg-item-click:focus-visible{outline:2px solid var(--primary-l);outline-offset:1px}
 .home-leg-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .home-leg-name{font-weight:500;color:var(--txt)}
 .home-leg-amt{font-size:10.5px;font-weight:500;color:var(--txt3);font-variant-numeric:tabular-nums}
@@ -2925,7 +2938,7 @@ body{
   box-shadow:var(--shadow);padding:36px 32px 32px;border:1px solid var(--bdr);
 }
 .login-logo{text-align:center;margin-bottom:28px}
-.login-logo .logo-mark{justify-content:center;margin-bottom:14px}
+.login-logo .logo-mark{width:56px;height:56px;border-radius:14px;margin:0 auto 14px}
 .login-logo h1{font-size:22px;font-weight:700;margin-bottom:6px}
 .login-logo p{font-size:13px;color:var(--txt3)}
 .login-form{display:flex;flex-direction:column;gap:14px}
