@@ -2482,6 +2482,10 @@ select.btn:hover:not(:disabled){
   background:var(--surf2);
 }
 .income-toolbar-inner{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.income-year-wrap{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.income-year-sel{
+  height:30px;min-width:96px;padding:0 32px 0 12px;font-size:12px;font-weight:600;
+}
 .income-toolbar-label{font-size:12px;font-weight:600;color:var(--txt2);flex-shrink:0}
 .income-cat-chips{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1;min-width:0}
 .income-cat-chip{

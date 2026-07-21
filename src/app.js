@@ -82,6 +82,7 @@ let OFFSET_CATS_SET = new Set(DEFAULT_OFFSET_CATS);
 let CAT_STATS_EXCLUDE = new Set(DEFAULT_CAT_STATS_EXCLUDE);
 let INCOME_CATS_SET = new Set(DEFAULT_INCOME_CATS);
 let INCOME_DATA_CATS_LIST = [...DEFAULT_INCOME_DATA_CATS];
+let incomeYear = null;
 
 let allData = [], filteredData = [], curPage = 1;
 let PG = 30;
@@ -2762,7 +2763,7 @@ const catReportBarValueLabelsPlugin = {
       });
 
       ctx.save();
-      ctx.fillStyle = 'rgba(42,40,56,0.72)';
+      ctx.fillStyle = '#fff';
       ctx.font = '600 10px system-ui, -apple-system, "PingFang SC", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
@@ -3421,9 +3422,35 @@ function incomeChartOptions(months, cat) {
   };
 }
 
+function incomeYearsFromData() {
+  const years = [...new Set(allData.map(r => r['日期'].slice(0, 4)).filter(Boolean))]
+    .sort((a, b) => b.localeCompare(a));
+  return years.length ? years : [String(new Date().getFullYear())];
+}
+
+function ensureIncomeYear() {
+  const years = incomeYearsFromData();
+  if (!incomeYear || !years.includes(incomeYear)) {
+    const current = String(new Date().getFullYear());
+    incomeYear = years.includes(current) ? current : years[0];
+  }
+}
+
+function incomeMonthsForYear(year) {
+  return [...new Set(allData.map(r => r['日期'].slice(0, 7)).filter(m => m.startsWith(`${year}-`)))].sort();
+}
+
+function onIncomeYearChange(year) {
+  incomeYear = String(year || '');
+  ensureIncomeYear();
+  renderIncomeData();
+}
+
 function renderIncomeToolbar() {
   const bar = document.getElementById('incomeToolbar');
   if (!bar) return;
+  ensureIncomeYear();
+  const years = incomeYearsFromData();
   const available = CATS.filter(c => isIncomeCategory(c) && !INCOME_DATA_CATS_LIST.includes(c));
   const chips = INCOME_DATA_CATS_LIST.map(cat => {
     const safe = cat.replace(/'/g, "\\'");
@@ -3434,6 +3461,12 @@ function renderIncomeToolbar() {
     </span>`;
   }).join('');
   bar.innerHTML = `<div class="income-toolbar-inner">
+    <div class="income-year-wrap">
+      <span class="income-toolbar-label">年份</span>
+      <select id="incomeYearSel" class="income-year-sel" onchange="onIncomeYearChange(this.value)" aria-label="选择年份">
+        ${years.map(y => `<option value="${y}"${y === incomeYear ? ' selected' : ''}>${y}年</option>`).join('')}
+      </select>
+    </div>
     <span class="income-toolbar-label">监视分类</span>
     <div class="income-cat-chips">${chips || '<span class="income-toolbar-empty">点击下方添加要监视的分类</span>'}</div>
     ${available.length ? `<div class="income-cat-add">
@@ -3465,14 +3498,15 @@ function removeIncomeMonitorCat(cat) {
 
 function renderIncomeData() {
   renderIncomeToolbar();
-  const months = [...new Set(allData.map(r => r['日期'].slice(0, 7)))].sort();
+  ensureIncomeYear();
+  const months = incomeMonthsForYear(incomeYear);
   const grid = document.getElementById('incomeGrid');
   if (!grid) return;
 
   if (charts.income) Object.values(charts.income).forEach(c => c?.destroy?.());
   charts.income = {};
 
-  if (!months.length) {
+  if (!allData.length) {
     grid.innerHTML = '<div class="income-card income-card-empty" style="grid-column:1/-1">暂无收入数据</div>';
     return;
   }
@@ -3480,13 +3514,18 @@ function renderIncomeData() {
     grid.innerHTML = '<div class="income-card income-card-empty" style="grid-column:1/-1">请先在上方添加要监视的分类</div>';
     return;
   }
+  if (!months.length) {
+    grid.innerHTML = `<div class="income-card income-card-empty" style="grid-column:1/-1">${incomeYear}年暂无数据</div>`;
+    return;
+  }
 
   grid.innerHTML = INCOME_DATA_CATS_LIST.map((cat, i) => {
     const catRows = incomeCatRows(cat);
+    const yearRows = catRows.filter(r => r['日期'].startsWith(`${incomeYear}-`));
     const costView = incomeCatHasCostView(cat);
-    const { net: total } = incomeCatBreakdown(catRows);
+    const { net: total } = incomeCatBreakdown(yearRows);
     const totalFmt = costView ? fmtMoneySigned(total) : fmtMoney(total);
-    const subTotals = incomeSubcatTotalsHtml(cat, catRows);
+    const subTotals = incomeSubcatTotalsHtml(cat, yearRows);
     const subSummary = '';
     const tag = costView ? '<span class="income-net-tag">净值</span>' : '';
     const footer = costView
@@ -3511,29 +3550,30 @@ function renderIncomeData() {
 
   INCOME_DATA_CATS_LIST.forEach((cat, i) => {
     const catRows = incomeCatRows(cat);
+    const yearRows = catRows.filter(r => r['日期'].startsWith(`${incomeYear}-`));
     const costView = incomeCatHasCostView(cat);
 
     const monthlyTotals = months.map(m =>
-      +incomeCatNet(catRows.filter(r => r['日期'].startsWith(m))).toFixed(2)
+      +incomeCatNet(yearRows.filter(r => r['日期'].startsWith(m))).toFixed(2)
     );
 
     let datasets;
     let chartOptions;
     let chartPlugins;
     if (costView) {
-      datasets = catReportBuildMonthChartDatasets(months, catRows, i);
+      datasets = catReportBuildMonthChartDatasets(months, yearRows, i);
       chartOptions = incomeCatReportChartOptions(months, cat);
-      chartOptions._catReportSlots = incomeCatReportChartSlots(months, catRows, i);
+      chartOptions._catReportSlots = incomeCatReportChartSlots(months, yearRows, i);
       chartOptions._catReportLabelNet = true;
       chartPlugins = [catReportHollowBarPlugin, catReportBarValueLabelsPlugin];
     } else {
       chartPlugins = undefined;
-      let subcats = incomeSubcatsFor(cat, catRows);
+      let subcats = incomeSubcatsFor(cat, yearRows);
       if (!subcats.length) subcats = ['全部'];
       datasets = subcats.map((sub, si) => ({
         label: sub,
         data: months.map(m => {
-          const mr = catRows.filter(r => r['日期'].startsWith(m));
+          const mr = yearRows.filter(r => r['日期'].startsWith(m));
           return +incomeSubcatNet(mr, sub).toFixed(2);
         }),
         backgroundColor: INCOME_SUB_COLORS[si % INCOME_SUB_COLORS.length],
@@ -3573,7 +3613,7 @@ function renderIncomeData() {
       const tableEl = document.getElementById(`incTable-${i}`);
       if (tableEl) {
         const expColor = EXPENSE_SUB_COLORS[i % EXPENSE_SUB_COLORS.length];
-        const tableHtml = incomeMonthTableHtml(months, catRows, cat);
+        const tableHtml = incomeMonthTableHtml(months, yearRows, cat);
         const wrap = tableHtml.includes('income-month-table')
           ? `<div class="income-month-table-wrap">${tableHtml}</div>`
           : tableHtml;
@@ -3585,7 +3625,7 @@ function renderIncomeData() {
     } else {
       const legEl = document.getElementById(`incLegend-${i}`);
       if (legEl) {
-        let subcats = incomeSubcatsFor(cat, catRows);
+        let subcats = incomeSubcatsFor(cat, yearRows);
         if (!subcats.length) subcats = ['全部'];
         legEl.innerHTML = subcats.map((sub, si) =>
           `<span class="income-leg-item"><span class="income-leg-dot" style="background:${INCOME_SUB_COLORS[si % INCOME_SUB_COLORS.length]}"></span>${sub}</span>`
@@ -5311,7 +5351,7 @@ Object.assign(window, {
   selectGearTab, markGearSold, markGearUnsold, markGearSoldFromModal,
   onGearCatChange, openGearSectionAdd, closeGearSectionAdd, confirmGearSectionAdd,
   onGearSectionCatChange, onGearSectionSubChange, removeGearSection,
-  addIncomeMonitorCat, addIncomeMonitorCatFromSel, removeIncomeMonitorCat,
+  addIncomeMonitorCat, addIncomeMonitorCatFromSel, removeIncomeMonitorCat, onIncomeYearChange,
   openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload, triggerManualInvoiceUpload,
   toggleInvoicePrinted, downloadInvoiceFile, printInvoiceFile, openAppConfig,
   openFamilyCreate, openFamilyEdit, closeFamilyEdit, saveFamilyEdit, removeFamilyEvent, triggerFamilyUpload,
