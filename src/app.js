@@ -821,7 +821,8 @@ function renderHomeCatCards(el, entries, prevMap, type, ym) {
     const amtStr = fmtCompactMoney(amt);
     const amtCls = amtStr.includes('万') || amtStr.length >= 5 ? ' home-cat-amt--sm' : '';
     const bars = renderHomeMonthlyBars(monthlySeriesForCategory(cat, type, ym), accent, ym, cat, type);
-    return `<article class="home-cat-card" style="--card-accent:${accent}">
+    const encCat = encodeURIComponent(cat);
+    return `<article class="home-cat-card home-cat-card-click" style="--card-accent:${accent}" role="button" tabindex="0" data-ym="${ym}" data-cat="${encCat}" data-type="${type}" title="查看 ${catLabel(cat)} 明细">
       <div class="home-cat-main">
         <div class="home-cat-name">${catLabel(cat)}</div>
         <div class="home-cat-row">
@@ -837,18 +838,37 @@ function renderHomeCatCards(el, entries, prevMap, type, ym) {
   }).join('');
 }
 
+function openHomeCatDetail(ym, cat, type) {
+  if (!ym || !cat) return;
+  if (type === '收入') showIncomeDetail(ym, cat);
+  else showDetail(ym, cat);
+}
+
 function ensureHomeCatBarClicks(gridId) {
   const grid = document.getElementById(gridId);
   if (!grid || grid._homeBarClick) return;
   grid._homeBarClick = true;
+  const openFromEl = (el) => {
+    const ym = el.dataset.ym;
+    const cat = decodeURIComponent(el.dataset.cat || '');
+    openHomeCatDetail(ym, cat, el.dataset.type);
+  };
   grid.addEventListener('click', (e) => {
     const bar = e.target.closest('.home-bar[data-ym][data-cat]');
-    if (!bar) return;
-    const ym = bar.dataset.ym;
-    const cat = decodeURIComponent(bar.dataset.cat);
-    if (!ym || !cat) return;
-    if (bar.dataset.type === '收入') showIncomeDetail(ym, cat);
-    else showDetail(ym, cat);
+    if (bar) {
+      e.stopPropagation();
+      openFromEl(bar);
+      return;
+    }
+    const card = e.target.closest('.home-cat-card[data-ym][data-cat]');
+    if (card) openFromEl(card);
+  });
+  grid.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const card = e.target.closest('.home-cat-card[data-ym][data-cat]');
+    if (!card || e.target.closest('.home-bar')) return;
+    e.preventDefault();
+    openFromEl(card);
   });
 }
 
@@ -937,7 +957,7 @@ function homeIncomeCategoryTotals(rows) {
   return categoryTotals(rows, '收入').filter(([cat]) => isIncomeCategory(cat));
 }
 
-function renderHomeLegend(el, entries, colors) {
+function renderHomeLegend(el, entries, colors, type, ym) {
   if (!el) return;
   if (!entries.length) {
     el.innerHTML = '<span class="home-leg-empty">暂无数据</span>';
@@ -945,11 +965,27 @@ function renderHomeLegend(el, entries, colors) {
   }
   el.innerHTML = entries.map(([cat, amt], i) => {
     const amtStr = fmtMoney(amt, { integer: amt >= 10000 });
-    return `<span class="home-leg-item"><span class="home-leg-dot" style="background:${colors[i]}"></span><span class="home-leg-name">${catLabel(cat)}</span><span class="home-leg-amt">${amtStr}</span></span>`;
+    const encCat = encodeURIComponent(cat);
+    return `<button type="button" class="home-leg-item home-leg-item-click" data-ym="${ym}" data-cat="${encCat}" data-type="${type}" title="查看 ${catLabel(cat)} 明细">
+      <span class="home-leg-dot" style="background:${colors[i]}"></span>
+      <span class="home-leg-name">${catLabel(cat)}</span>
+      <span class="home-leg-amt">${amtStr}</span>
+    </button>`;
   }).join('');
 }
 
-function renderHomeDonut(chartKey, canvasId, entries, colors, total, centerEl) {
+function ensureHomeLegendClicks(legId) {
+  const el = document.getElementById(legId);
+  if (!el || el._homeLegClick) return;
+  el._homeLegClick = true;
+  el.addEventListener('click', (e) => {
+    const item = e.target.closest('.home-leg-item-click[data-ym][data-cat]');
+    if (!item) return;
+    openHomeCatDetail(item.dataset.ym, decodeURIComponent(item.dataset.cat || ''), item.dataset.type);
+  });
+}
+
+function renderHomeDonut(chartKey, canvasId, entries, colors, total, centerEl, type, ym) {
   const canvas = document.getElementById(canvasId);
   if (!canvas) return;
   if (charts[chartKey]) charts[chartKey].destroy();
@@ -982,6 +1018,17 @@ function renderHomeDonut(chartKey, canvasId, entries, colors, total, centerEl) {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: chartMoneyTooltip },
       cutout: '72%',
+      onClick(evt, _elements, chart) {
+        const hit = chart.getElementsAtEventForMode(evt, 'nearest', { intersect: true }, false);
+        if (!hit.length) return;
+        const cat = keys[hit[0].index];
+        if (cat) openHomeCatDetail(ym, cat, type);
+      },
+      onHover(evt, elements) {
+        if (evt?.native?.target) {
+          evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+        }
+      },
     },
   });
 }
@@ -1026,10 +1073,12 @@ function renderHome() {
   ensureHomeCatBarClicks('homeExpCats');
   ensureHomeCatBarClicks('homeIncCats');
 
-  renderHomeDonut('homeExpPie', 'homeExpPie', expEntries, expColors, totalExp, document.getElementById('homeExpCenter'));
-  renderHomeDonut('homeIncPie', 'homeIncPie', incEntries, incColors, totalInc, document.getElementById('homeIncCenter'));
-  renderHomeLegend(document.getElementById('homeExpLeg'), expEntries, expColors);
-  renderHomeLegend(document.getElementById('homeIncLeg'), incEntries, incColors);
+  renderHomeDonut('homeExpPie', 'homeExpPie', expEntries, expColors, totalExp, document.getElementById('homeExpCenter'), '支出', ym);
+  renderHomeDonut('homeIncPie', 'homeIncPie', incEntries, incColors, totalInc, document.getElementById('homeIncCenter'), '收入', ym);
+  renderHomeLegend(document.getElementById('homeExpLeg'), expEntries, expColors, '支出', ym);
+  renderHomeLegend(document.getElementById('homeIncLeg'), incEntries, incColors, '收入', ym);
+  ensureHomeLegendClicks('homeExpLeg');
+  ensureHomeLegendClicks('homeIncLeg');
 }
 
 function renderKPI() {
