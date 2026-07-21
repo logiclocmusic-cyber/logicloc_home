@@ -29,7 +29,7 @@ import {
 import {
   loadFamilyEvents, setupFamilyEvents,
   openFamilyCreate, openFamilyEdit, closeFamilyEdit, saveFamilyEdit,
-  removeFamilyEvent, triggerFamilyUpload
+  removeFamilyEvent, triggerFamilyUpload, onFamilySearch, clearFamilySearch,
 } from './family.js';
 import {
   initSplits, hasSplits, expandRowForStats, rowMatchesCat, rowSearchHaystack,
@@ -54,11 +54,11 @@ import {
 } from './txn-pairs.js';
 import {
   initRenqing, loadRenqingState, getRenqingState, renderRenqingPage,
-  selectRenqingPerson, triggerRenqingAvatarUpload, setupRenqingUpload,
+  selectRenqingPerson, goRenqingPage, triggerRenqingAvatarUpload, setupRenqingUpload,
   RENQING_CAT
 } from './renqing.js';
 import {
-  initAccounts, loadAccountsState, getAccountsState, renderAccountsPage, renderHomeLongRemindersSection,
+  initAccounts, loadAccountsState, getAccountsState, renderAccountsPage, renderHomeLongRemindersSection, selectAccountsTab,
   consumeRegistryMigrationPersist,
   setupAccountsEvents,
   openAccountsMgr, closeAccountsMgr, resetAccountsMgrForm, saveAccountsMgr,
@@ -68,6 +68,7 @@ import {
   toggleBudgetEditMode, addBudgetRow, deleteBudget,
   toggleLifeAccountEditMode, addLifeAccountRow, deleteLifeAccount,
   toggleLongReminderEditMode, addLongReminderRow, deleteLongReminder, addLongReminderToCalendar,
+  toggleTopbarReminders, closeTopbarReminders,
   toggleWebAccountEditMode, addWebAccountRow, addWebAccountColumn, deleteWebAccountRow, deleteWebAccountColumn,
   bindSelectedCreditCards, unbindCreditCardFromPool, dissolveCreditPoolById
 } from './accounts.js';
@@ -619,8 +620,11 @@ async function loadData() {
 
 function updateSubtitle() {}
 
-function kpiCard(label, value, sub, icon, iconCls, valCls) {
-  return `<div class="kpi-c">
+function kpiCard(label, value, sub, icon, iconCls, valCls, opts = {}) {
+  const clickable = opts.kind
+    ? ` role="button" tabindex="0" data-home-kpi="${opts.kind}" class="kpi-c kpi-c-click"`
+    : ' class="kpi-c"';
+  return `<div${clickable}>
     <div class="kpi-icon ${iconCls}"><i class="ti ${icon}"></i></div>
     <div class="kpi-body">
       <div class="kpi-l">${label}</div>
@@ -661,13 +665,48 @@ function homeMonthsFromData() {
 }
 
 function syncHomeMonthSelect() {
-  const sel = document.getElementById('homeMonthSel');
-  if (!sel) return;
+  const menu = document.getElementById('homeMonthDropMenu');
+  const label = document.getElementById('homeMonthDropLabel');
+  if (!menu || !label) return;
   const ym = getHomeYm();
   const months = homeMonthsFromData();
-  sel.innerHTML = months.map(m =>
-    `<option value="${m}"${m === ym ? ' selected' : ''}>${fmtMonthLabel(m)}</option>`
+  label.textContent = fmtMonthLabel(ym);
+  menu.innerHTML = months.map(m =>
+    `<button type="button" class="home-month-drop-item${m === ym ? ' on' : ''}" role="option" aria-selected="${m === ym ? 'true' : 'false'}" onclick="selectHomeMonth('${m}')">${fmtMonthLabel(m)}</button>`
   ).join('');
+}
+
+function closeHomeMonthDrop() {
+  document.getElementById('homeMonthDropMenu')?.classList.add('hide');
+  document.getElementById('homeMonthDropBtn')?.setAttribute('aria-expanded', 'false');
+}
+
+function toggleHomeMonthDrop() {
+  const menu = document.getElementById('homeMonthDropMenu');
+  const btn = document.getElementById('homeMonthDropBtn');
+  if (!menu || !btn) return;
+  menu.classList.toggle('hide');
+  const isOpen = !menu.classList.contains('hide');
+  btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  if (isOpen) menu.querySelector('.home-month-drop-item.on')?.scrollIntoView({ block: 'nearest' });
+}
+
+function selectHomeMonth(ym) {
+  closeHomeMonthDrop();
+  onHomeMonthChange(ym);
+}
+
+let homeMonthDropEventsBound = false;
+function ensureHomeMonthDropEvents() {
+  if (homeMonthDropEventsBound) return;
+  homeMonthDropEventsBound = true;
+  document.addEventListener('click', e => {
+    if (e.target.closest('#homeMonthDrop')) return;
+    closeHomeMonthDrop();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeHomeMonthDrop();
+  });
 }
 
 function onHomeMonthChange(ym) {
@@ -779,8 +818,7 @@ function fmtCompactMoney(n) {
   const abs = Math.abs(num);
   const sign = num < 0 ? '-' : '';
   if (abs >= 10000) return `${sign}${(abs / 10000).toFixed(1).replace(/\.0$/, '')}万`;
-  if (abs >= 1000) return `${sign}${(abs / 1000).toFixed(1).replace(/\.0$/, '')}k`;
-  return `${sign}${abs.toFixed(0)}`;
+  return `${sign}${Math.round(abs)}`;
 }
 
 function renderHomeMonthlyBars(series, accent, anchorYm, cat, type) {
@@ -1033,6 +1071,126 @@ function renderHomeDonut(chartKey, canvasId, entries, colors, total, centerEl, t
   });
 }
 
+function homeMonthTxnRows(ym, flow) {
+  const rows = statsData().filter(r => r['日期'].startsWith(ym));
+  if (flow === '支出') return rows.filter(r => r['收支'] === '支出');
+  if (flow === '收入') {
+    return rows.filter(r => r['收支'] === '收入' && isIncomeCategory(r['分类']));
+  }
+  return rows.filter(r =>
+    r['收支'] === '支出' || (r['收支'] === '收入' && isIncomeCategory(r['分类']))
+  );
+}
+
+function openHomeSummaryDetail(kind) {
+  const ym = getHomeYm();
+  const monthLbl = homeMonthKpiLabel(ym);
+  detSort = 'a-';
+  detFilterUnsetSubOnly = false;
+  detSelectedIds.clear();
+
+  if (kind === 'est') {
+    detIsIncome = false;
+    detContext = { type: 'home-est', month: ym };
+    const months = yearMonthsThroughYm(ym);
+    const cats = expenseCategoriesInYear(ym);
+    const list = cats.map(cat => {
+      const { ytd, avg } = categoryYearStats(cat, '支出', ym);
+      return { cat, ytd, avg };
+    }).sort((a, b) => b.avg - a.avg);
+    const estExp = estimatedMonthlyExpense(ym);
+    document.getElementById('detTitle').textContent = `预估月支出 · ${ym.slice(0, 4)}年`;
+    document.getElementById('detSummary').textContent = `${cats.length} 个分类 · 本年已统计 ${months.length} 个月月均`;
+    document.getElementById('detTotal').textContent = fmtMoney(estExp);
+    document.getElementById('detTotal').style.color = 'var(--amb-t)';
+    renderHomeEstDetailBody(list, months.length);
+    updateDetBulkBar();
+    syncDetModalLayout();
+    syncDetFilterBar();
+    document.getElementById('moDet').classList.remove('hide');
+    return;
+  }
+
+  const flow = kind === 'exp' ? '支出' : kind === 'inc' ? '收入' : 'all';
+  const rows = homeMonthTxnRows(ym, flow);
+  detIsIncome = kind !== 'exp';
+  detContext = { type: 'home-month', month: ym, flow: kind };
+  detSelectedIds.clear();
+
+  if (kind === 'exp') {
+    const total = rows.reduce((s, r) => s + r['金额'], 0);
+    document.getElementById('detTitle').textContent = `${monthLbl}支出明细`;
+    document.getElementById('detSummary').textContent = `共 ${fmtCount(rows.length)} 笔支出`;
+    document.getElementById('detTotal').textContent = fmtMoney(total);
+    document.getElementById('detTotal').style.color = 'var(--red-t)';
+  } else if (kind === 'inc') {
+    const total = rows.reduce((s, r) => s + r['金额'], 0);
+    document.getElementById('detTitle').textContent = `${monthLbl}收入明细`;
+    document.getElementById('detSummary').textContent = `共 ${fmtCount(rows.length)} 笔收入`;
+    document.getElementById('detTotal').textContent = fmtMoney(total);
+    document.getElementById('detTotal').style.color = 'var(--grn-t)';
+  } else {
+    const exp = rows.filter(r => r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0);
+    const inc = rows.filter(r => r['收支'] === '收入').reduce((s, r) => s + r['金额'], 0);
+    const net = inc - exp;
+    document.getElementById('detTitle').textContent = `${monthLbl}结余明细`;
+    document.getElementById('detSummary').textContent = `共 ${fmtCount(rows.length)} 笔 · 收入 ${fmtMoney(inc)} · 支出 ${fmtMoney(exp)}`;
+    document.getElementById('detTotal').textContent = fmtMoneySigned(net);
+    document.getElementById('detTotal').style.color = net >= 0 ? 'var(--grn-t)' : 'var(--red-t)';
+  }
+
+  renderDetailBody(rows);
+  updateDetBulkBar();
+  syncDetModalLayout();
+  syncDetFilterBar();
+  document.getElementById('moDet').classList.remove('hide');
+}
+
+function renderHomeEstDetailBody(list, monthCount) {
+  const el = document.getElementById('detBody');
+  detRows = [];
+  if (!list.length) {
+    el.innerHTML = '<div class="det-empty">暂无预估数据</div>';
+    return;
+  }
+  el.innerHTML = `
+    <div class="home-est-list">
+      <div class="home-est-head">
+        <span>分类</span>
+        <span>本年合计</span>
+        <span>月均（${monthCount}个月）</span>
+      </div>
+      ${list.map(item => {
+        const year = String(getHomeYm()).slice(0, 4);
+        const catEsc = String(item.cat).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        return `
+        <button type="button" class="home-est-row" onclick="showDetail('${year}','${catEsc}')">
+          <span class="home-est-cat"><span class="inline-cat-icon">${catIconHtml(item.cat, { size: 16 })}</span>${catLabel(item.cat)}</span>
+          <span class="home-est-ytd">${fmtMoney(item.ytd)}</span>
+          <span class="home-est-avg">${fmtMoney(item.avg)}</span>
+        </button>`;
+      }).join('')}
+    </div>`;
+}
+
+function ensureHomeSummaryClicks() {
+  const el = document.getElementById('homeSummary');
+  if (!el || el._homeKpiClick) return;
+  el._homeKpiClick = true;
+  el.addEventListener('click', (e) => {
+    const card = e.target.closest('[data-home-kpi]');
+    if (!card) return;
+    openHomeSummaryDetail(card.dataset.homeKpi);
+  });
+  el.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const card = e.target.closest('[data-home-kpi]');
+    if (!card) return;
+    e.preventDefault();
+    openHomeSummaryDetail(card.dataset.homeKpi);
+  });
+}
+
 function renderHome() {
   renderHomeLongRemindersSection();
 
@@ -1053,12 +1211,13 @@ function renderHome() {
   const summaryEl = document.getElementById('homeSummary');
   if (summaryEl) {
     summaryEl.innerHTML = [
-      kpiCard(`${monthLbl}支出`, fmtMoney(totalExp), `${expEntries.length} 个分类`, 'ti-arrow-down-right', 'pink', 'c-red'),
-      kpiCard('预估月支出', fmtMoney(estExp), `${estExpCats}类月均 · 本年${monthCount}个月`, 'ti-chart-arrows', 'amber', 'c-amb'),
-      kpiCard(`${monthLbl}收入`, fmtMoney(totalInc), `${incEntries.length} 个分类`, 'ti-arrow-up-right', 'green', 'c-grn'),
-      kpiCard(`${monthLbl}结余`, fmtMoneySigned(net), net >= 0 ? '盈余' : '超支', 'ti-scale', 'blue', net >= 0 ? 'c-blu' : 'c-red'),
+      kpiCard(`${monthLbl}支出`, fmtMoney(totalExp), `${expEntries.length} 个分类`, 'ti-arrow-down-right', 'pink', 'c-red', { kind: 'exp' }),
+      kpiCard('预估月支出', fmtMoney(estExp), `${estExpCats}类月均 · 本年${monthCount}个月`, 'ti-chart-arrows', 'amber', 'c-amb', { kind: 'est' }),
+      kpiCard(`${monthLbl}收入`, fmtMoney(totalInc), `${incEntries.length} 个分类`, 'ti-arrow-up-right', 'green', 'c-grn', { kind: 'inc' }),
+      kpiCard(`${monthLbl}结余`, fmtMoneySigned(net), net >= 0 ? '盈余' : '超支', 'ti-scale', 'blue', net >= 0 ? 'c-blu' : 'c-red', { kind: 'net' }),
     ].join('');
   }
+  ensureHomeSummaryClicks();
 
   const expColors = expEntries.map(([c]) => catColor(c));
   const incColors = incEntries.map(([c]) => catColor(c));
@@ -1944,7 +2103,8 @@ function closeDetModal() {
 }
 
 function syncDetModalLayout() {
-  const wide = !!detIsIncome || detContext?.type === 'catreport';
+  const wide = !!detIsIncome || detContext?.type === 'catreport'
+    || (detContext?.type === 'home-month' && detContext.flow !== 'exp');
   document.getElementById('moDet')?.classList.toggle('det-income', wide);
 }
 
@@ -1964,11 +2124,17 @@ function toggleDetUnsetSubFilter(btn) {
 }
 
 function detShowsTypeCol() {
-  return detIsIncome || detContext?.type === 'catreport';
+  return detIsIncome || detContext?.type === 'catreport'
+    || (detContext?.type === 'home-month' && detContext.flow !== 'exp');
 }
 
 function getDetailRows() {
   if (!detContext) return detRows;
+  if (detContext.type === 'home-est') return detRows;
+  if (detContext.type === 'home-month') {
+    const flow = detContext.flow === 'exp' ? '支出' : detContext.flow === 'inc' ? '收入' : 'all';
+    return homeMonthTxnRows(detContext.month, flow);
+  }
   const ad = activeExpanded();
   if (detContext.type === 'catreport') {
     const { month, cat, sub } = detContext;
@@ -1990,8 +2156,45 @@ function getDetailRows() {
 
 function refreshDetailModal() {
   if (!detContext || document.getElementById('moDet').classList.contains('hide')) return;
+  if (detContext.type === 'home-est') {
+    const ym = detContext.month;
+    const months = yearMonthsThroughYm(ym);
+    const cats = expenseCategoriesInYear(ym);
+    const list = cats.map(cat => {
+      const { ytd, avg } = categoryYearStats(cat, '支出', ym);
+      return { cat, ytd, avg };
+    }).sort((a, b) => b.avg - a.avg);
+    const estExp = estimatedMonthlyExpense(ym);
+    document.getElementById('detSummary').textContent = `${cats.length} 个分类 · 本年已统计 ${months.length} 个月月均`;
+    document.getElementById('detTotal').textContent = fmtMoney(estExp);
+    document.getElementById('detTotal').style.color = 'var(--amb-t)';
+    renderHomeEstDetailBody(list, months.length);
+    updateDetBulkBar();
+    refreshActiveViews();
+    return;
+  }
   const rows = getDetailRows();
-  if (detContext.type === 'catreport') {
+  if (detContext.type === 'home-month') {
+    const kind = detContext.flow;
+    if (kind === 'exp') {
+      const total = rows.reduce((s, r) => s + r['金额'], 0);
+      document.getElementById('detSummary').textContent = `共 ${fmtCount(rows.length)} 笔支出`;
+      document.getElementById('detTotal').textContent = fmtMoney(total);
+      document.getElementById('detTotal').style.color = 'var(--red-t)';
+    } else if (kind === 'inc') {
+      const total = rows.reduce((s, r) => s + r['金额'], 0);
+      document.getElementById('detSummary').textContent = `共 ${fmtCount(rows.length)} 笔收入`;
+      document.getElementById('detTotal').textContent = fmtMoney(total);
+      document.getElementById('detTotal').style.color = 'var(--grn-t)';
+    } else {
+      const exp = rows.filter(r => r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0);
+      const inc = rows.filter(r => r['收支'] === '收入').reduce((s, r) => s + r['金额'], 0);
+      const net = inc - exp;
+      document.getElementById('detSummary').textContent = `共 ${fmtCount(rows.length)} 笔 · 收入 ${fmtMoney(inc)} · 支出 ${fmtMoney(exp)}`;
+      document.getElementById('detTotal').textContent = fmtMoneySigned(net);
+      document.getElementById('detTotal').style.color = net >= 0 ? 'var(--grn-t)' : 'var(--red-t)';
+    }
+  } else if (detContext.type === 'catreport') {
     const exp = rows.filter(r => r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0);
     const inc = rows.filter(r => r['收支'] === '收入').reduce((s, r) => s + r['金额'], 0);
     const net = inc - exp;
@@ -4959,6 +5162,28 @@ function clearSplitFromModal() {
 let appReady = false;
 let initPromise = null;
 
+function ensureScrollReveal(el) {
+  if (!el || el._scrollReveal) return;
+  el._scrollReveal = true;
+  let timer = 0;
+  const reveal = () => {
+    el.classList.add('is-scrolling');
+    clearTimeout(timer);
+    timer = window.setTimeout(() => el.classList.remove('is-scrolling'), 900);
+  };
+  el.addEventListener('wheel', reveal, { passive: true });
+  el.addEventListener('scroll', reveal, { passive: true });
+  el.addEventListener('mouseleave', () => {
+    clearTimeout(timer);
+    el.classList.remove('is-scrolling');
+  });
+}
+
+function ensureNavScrollReveal() {
+  ensureScrollReveal(document.querySelector('.sb .nav'));
+  document.querySelectorAll('.fb').forEach(ensureScrollReveal);
+}
+
 export async function initApp() {
   if (initPromise) return initPromise;
   initPromise = initAppInner().catch(err => {
@@ -4991,6 +5216,7 @@ async function initAppInner() {
     },
   });
   syncUnsetSubFilterUI();
+  ensureNavScrollReveal();
   initCatBrowse({
     getCats: () => CATS,
     getEmoji: c => catIconHtml(c, { size: 20, wrapClass: 'catbrowse-tab-emoji-wrap' }),
@@ -5018,7 +5244,8 @@ async function initAppInner() {
   initAccounts({
     getAllRows: () => allData,
     onPersist: persist,
-    persistNow: persistNow
+    persistNow: persistNow,
+    bindScrollReveal: ensureScrollReveal
   });
   setupAccountsEvents();
   initGear({
@@ -5041,6 +5268,7 @@ async function initAppInner() {
   setupGearUpload();
   setupCompanyCost();
   setupFamilyEvents();
+  ensureHomeMonthDropEvents();
   setupDropZone();
   setupImportHistoryActions();
   setupLedgerHeadScrollSync();
@@ -5060,7 +5288,7 @@ Object.assign(window, {
   filterTxnLink, clearTxnLinkFilter, toggleTradeCard, openTradeLink, viewTradeInLedger, unlinkTradeGroup,
   resetImportPreview, confirmImport, onImportSrcChange, toggleDupImport, toggleAllDupImport,
   toggleImportRecordType, updateImportRecordAmount, resetAllLedger,
-  openBatchSrc, closeBatchSrc, saveBatchSrc, onCatReportChange, onCatReportYearChange, selectRenqingPerson, triggerRenqingAvatarUpload,
+  openBatchSrc, closeBatchSrc, saveBatchSrc, onCatReportChange, onCatReportYearChange, selectRenqingPerson, goRenqingPage, triggerRenqingAvatarUpload,
   updRenqingSubCat, updRenqingSplitSub,
   openAccountsMgr, closeAccountsMgr, resetAccountsMgrForm, saveAccountsMgr,
   editAccountsMgr, startAccountMerge, cancelAccountMerge, confirmAccountMerge,
@@ -5069,12 +5297,15 @@ Object.assign(window, {
   toggleBudgetEditMode, addBudgetRow, deleteBudget,
   toggleLifeAccountEditMode, addLifeAccountRow, deleteLifeAccount,
   toggleLongReminderEditMode, addLongReminderRow, deleteLongReminder, addLongReminderToCalendar,
+  toggleTopbarReminders, closeTopbarReminders,
   toggleWebAccountEditMode, addWebAccountRow, addWebAccountColumn, deleteWebAccountRow, deleteWebAccountColumn,
   bindSelectedCreditCards, unbindCreditCardFromPool, dissolveCreditPoolById,
+  selectAccountsTab,
   goP, toggleRf, toggleExclude, updCat, updSubCat, updCatDet, showAllDetail, showDetail, showIncomeDetail, showCatReportDetail, closeDetModal, toggleDetSort, toggleDetUnsetSubFilter,
   openHomeExpCatSettings, closeHomeExpCatSettings, saveHomeExpCatSettings, toggleHomeExpCatSetting,
   openHomeIncCatSettings, closeHomeIncCatSettings, saveHomeIncCatSettings, toggleHomeIncCatSetting,
   onHomeMonthChange,
+  toggleHomeMonthDrop, selectHomeMonth,
   toggleDetSelect, toggleDetSelectAll, clearDetSelection, applyDetBulkCat, applyDetBulkSubCat, detBulkToggleRefund,
   openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload, submitGearImageUrl,
   selectGearTab, markGearSold, markGearUnsold, markGearSoldFromModal,
@@ -5084,6 +5315,7 @@ Object.assign(window, {
   openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload, triggerManualInvoiceUpload,
   toggleInvoicePrinted, downloadInvoiceFile, printInvoiceFile, openAppConfig,
   openFamilyCreate, openFamilyEdit, closeFamilyEdit, saveFamilyEdit, removeFamilyEvent, triggerFamilyUpload,
+  onFamilySearch, clearFamilySearch,
   openSplitEditor, closeSplitEditor, addSplitLine, saveSplitEdit: handleSaveSplit,
   clearSplit: handleClearSplit, clearSplitFromModal, toggleSplitExpand: handleToggleSplitExpand,
   updSplitCat: handleUpdSplitCat, updSplitSub: handleUpdSplitSub,

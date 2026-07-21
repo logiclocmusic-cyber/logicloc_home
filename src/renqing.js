@@ -22,6 +22,8 @@ let onEditRow = () => {};
 let renqingAvatars = {};
 let activePerson = null;
 let pendingUploadPerson = null;
+let renqingPage = 1;
+const RENQING_PG = 10;
 
 export function initRenqing(deps) {
   getExpandedRows = deps.getExpandedRows || getExpandedRows;
@@ -190,6 +192,45 @@ function renderTxnRow(row) {
   </div>`;
 }
 
+function renderRenqingPager(total) {
+  const pagerEl = document.getElementById('renqingPager');
+  const infoEl = document.getElementById('renqingPi');
+  const pagesEl = document.getElementById('renqingPgs');
+  if (!pagerEl || !infoEl || !pagesEl) return;
+
+  if (!total) {
+    pagerEl.classList.add('hide');
+    infoEl.textContent = '';
+    pagesEl.innerHTML = '';
+    return;
+  }
+
+  pagerEl.classList.remove('hide');
+  const tp = Math.ceil(total / RENQING_PG);
+  const s = (renqingPage - 1) * RENQING_PG + 1;
+  const e = Math.min(renqingPage * RENQING_PG, total);
+  infoEl.textContent = `第 ${s}–${e} 条，共 ${total} 条`;
+
+  if (tp <= 1) {
+    pagesEl.innerHTML = '';
+    return;
+  }
+
+  let h = `<button type="button" class="pg" onclick="goRenqingPage(${renqingPage - 1})" ${renqingPage === 1 ? 'disabled' : ''}><i class="ti ti-chevron-left" style="font-size:11px"></i></button>`;
+  const rng = [];
+  for (let i = 1; i <= tp; i++) {
+    if (i === 1 || i === tp || Math.abs(i - renqingPage) <= 1) rng.push(i);
+    else if (rng[rng.length - 1] !== '…') rng.push('…');
+  }
+  rng.forEach(p => {
+    h += p === '…'
+      ? `<button type="button" class="pg" disabled>…</button>`
+      : `<button type="button" class="pg${p === renqingPage ? ' on' : ''}" onclick="goRenqingPage(${p})">${p}</button>`;
+  });
+  h += `<button type="button" class="pg" onclick="goRenqingPage(${renqingPage + 1})" ${renqingPage === tp ? 'disabled' : ''}><i class="ti ti-chevron-right" style="font-size:11px"></i></button>`;
+  pagesEl.innerHTML = h;
+}
+
 function renderPersonDetail(name) {
   const rows = personRows(name);
   const { inc, exp, net } = personStats(rows);
@@ -232,11 +273,16 @@ function renderPersonDetail(name) {
   if (!list) return;
   if (!rows.length) {
     list.innerHTML = '<div class="renqing-empty">暂无往来记录</div>';
+    renderRenqingPager(0);
     return;
   }
 
+  const tp = Math.ceil(rows.length / RENQING_PG);
+  if (renqingPage > tp) renqingPage = tp;
+  const pageRows = rows.slice((renqingPage - 1) * RENQING_PG, renqingPage * RENQING_PG);
+
   const dayMap = new Map();
-  rows.forEach(r => {
+  pageRows.forEach(r => {
     const d = r['日期'];
     if (!dayMap.has(d)) dayMap.set(d, []);
     dayMap.get(d).push(r);
@@ -256,10 +302,21 @@ function renderPersonDetail(name) {
       <div class="renqing-day-rows">${dayRows.map(renderTxnRow).join('')}</div>
     </section>`;
   }).join('');
+  renderRenqingPager(rows.length);
+}
+
+export function goRenqingPage(page) {
+  const rows = activePerson ? personRows(activePerson) : [];
+  const tp = Math.ceil(rows.length / RENQING_PG);
+  if (page < 1 || page > tp) return;
+  renqingPage = page;
+  if (activePerson) renderPersonDetail(activePerson);
+  document.getElementById('renqingPanel')?.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 export function selectRenqingPerson(name) {
   activePerson = name;
+  renqingPage = 1;
   renderRenqingPage();
 }
 

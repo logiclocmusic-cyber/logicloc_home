@@ -26,6 +26,7 @@ const DEFAULT_LONG_REMINDERS = [
 let getAllRows = () => [];
 let onPersist = () => {};
 let persistNowFn = null;
+let bindScrollRevealFn = () => {};
 let registryNeedsPersist = false;
 
 let accountCardFaces = {};
@@ -36,6 +37,16 @@ let budgetEditMode = false;
 let webAccountEditMode = false;
 let lifeAccountEditMode = false;
 let longReminderEditMode = false;
+let accountsActiveTab = 'credit';
+
+const ACCOUNTS_TABS = [
+  { id: 'credit', label: '信用卡', icon: 'ti-credit-card', count: () => creditCardAccounts().length },
+  { id: 'cash', label: '现金', icon: 'ti-wallet', count: () => cashAccountsList().length },
+  { id: 'life', label: '生活', icon: 'ti-home-2', count: () => lifeAccountsList().length },
+  { id: 'budget', label: '预算', icon: 'ti-calendar-event', count: () => expenseBudgetsList().length },
+  { id: 'reminder', label: '提醒', icon: 'ti-bell-ringing', count: () => longRemindersList().length },
+  { id: 'web', label: '网站', icon: 'ti-world', count: () => (accountRegistry.webAccounts?.rows || []).length },
+];
 
 const CORP_MARKS = {
   WECHAT: { bg: '#07c160', icon: 'ti-brand-wechat' },
@@ -47,6 +58,7 @@ export function initAccounts(deps) {
   getAllRows = deps.getAllRows || getAllRows;
   onPersist = deps.onPersist || onPersist;
   persistNowFn = deps.persistNow || null;
+  bindScrollRevealFn = deps.bindScrollReveal || bindScrollRevealFn;
 }
 
 function registryStorageKey(payKey) {
@@ -1166,7 +1178,7 @@ function renderCreditPriorityHtml(cards) {
   </div>`;
 }
 
-function creditNameCell(payKey, labelVal = '', { isNew = false, tagVal = '' } = {}) {
+function creditNameCell(payKey, labelVal = '', { isNew = false } = {}) {
   const logo = isNew
     ? '<span class="fund-brand-mark fund-brand-mark--fb accounts-credit-logo-ph" style="width:24px;height:24px"><i class="ti ti-credit-card" style="font-size:12px"></i></span>'
     : accountBrandMarkHtml(payKey, 24);
@@ -1174,11 +1186,21 @@ function creditNameCell(payKey, labelVal = '', { isNew = false, tagVal = '' } = 
     return `<div class="accounts-credit-name-cell accounts-credit-name-cell--edit">
       ${logo}
       <input type="text" class="accounts-credit-label" placeholder="银行名称 *">
-      <input type="text" class="accounts-credit-tag" placeholder="标签，如 VISA双币">
     </div>`;
   }
   const labelAttr = `value="${esc(labelVal)}" placeholder="银行名称"`;
-  return `<div class="accounts-credit-name-cell accounts-credit-name-cell--edit">${logo}<input type="text" class="accounts-credit-label" ${labelAttr}><input type="text" class="accounts-credit-tag" value="${esc(tagVal)}" placeholder="标签，如 VISA双币"></div>`;
+  return `<div class="accounts-credit-name-cell accounts-credit-name-cell--edit">${logo}<input type="text" class="accounts-credit-label" ${labelAttr}></div>`;
+}
+
+function creditTagDisplayCell(acc) {
+  const tag = (acc.tag || '').trim();
+  if (!tag) return '<span class="accounts-credit-val accounts-credit-val--muted">—</span>';
+  return `<span class="accounts-credit-tag-badge">${esc(tag)}</span>`;
+}
+
+function creditTagEditCell(acc, { isNew = false } = {}) {
+  const tagVal = isNew ? '' : (acc?.tag || '');
+  return `<input type="text" class="accounts-credit-tag" value="${esc(tagVal)}" placeholder="如 VISA双币">`;
 }
 
 function creditBrandMarkHtml(payKey, size = 24, { cancelled = false } = {}) {
@@ -1195,18 +1217,14 @@ function creditCancelActionHtml(payKey, cancelled) {
 
 function creditNameDisplayCell(acc) {
   const displayName = acc.displayName || creditCardDisplayName(acc);
-  const tag = (acc.tag || '').trim();
-  const tagHtml = tag ? `<span class="accounts-credit-tag-badge">${esc(tag)}</span>` : '';
-  return `<div class="accounts-credit-name-cell">${creditBrandMarkHtml(acc.pay, 24, { cancelled: !!acc.cancelled })}<span class="accounts-credit-val accounts-credit-val--name">${esc(displayName)}</span>${tagHtml}</div>`;
+  return `<div class="accounts-credit-name-cell">${creditBrandMarkHtml(acc.pay, 24, { cancelled: !!acc.cancelled })}<span class="accounts-credit-val accounts-credit-val--name">${esc(displayName)}</span></div>`;
 }
 
 function creditNameEditCell(acc) {
   const displayName = acc.displayName || creditCardDisplayName(acc);
-  const tagVal = acc.tag || '';
   return `<div class="accounts-credit-name-cell accounts-credit-name-cell--edit">
     ${creditBrandMarkHtml(acc.pay, 24, { cancelled: !!acc.cancelled })}
     <span class="accounts-credit-val accounts-credit-val--name">${esc(displayName)}</span>
-    <input type="text" class="accounts-credit-tag" value="${esc(tagVal)}" placeholder="标签，如 VISA双币">
   </div>`;
 }
 
@@ -1242,6 +1260,7 @@ function renderCreditCardRow(acc, { isNew = false, editing = false, pooled = fal
     ].filter(Boolean).join(' ');
     return `<tr data-credit-key="${esc(acc.pay)}"${rowCls ? ` class="${rowCls}"` : ''}>
       <td>${creditNameDisplayCell(acc)}</td>
+      <td class="accounts-credit-td-tag">${creditTagDisplayCell(acc)}</td>
       <td><span class="accounts-credit-val">${esc(last4 || '—')}</span></td>
       <td><span class="accounts-credit-val">${limitCell}</span></td>
       <td><span class="accounts-credit-val">${availCell}</span></td>
@@ -1257,6 +1276,7 @@ function renderCreditCardRow(acc, { isNew = false, editing = false, pooled = fal
     return `<tr data-credit-new="1">
       ${bindTd}
       <td class="accounts-credit-td-account">${creditNameCell('', '', { isNew: true })}</td>
+      <td class="accounts-credit-td-tag">${creditTagEditCell(null, { isNew: true })}</td>
       <td class="accounts-credit-td-cardno">${creditDigitsInput(null, { isNew: true })}</td>
       <td class="accounts-credit-td-amt">${fields.limit}</td>
       <td class="accounts-credit-td-amt">${fields.available}</td>
@@ -1281,6 +1301,7 @@ function renderCreditCardRow(acc, { isNew = false, editing = false, pooled = fal
   return `<tr data-credit-key="${esc(acc.pay)}"${rowCls ? ` class="${rowCls}"` : ''}>
     ${bindTd}
     <td class="accounts-credit-td-account">${creditNameEditCell(acc)}</td>
+    <td class="accounts-credit-td-tag">${creditTagEditCell(acc)}</td>
     <td class="accounts-credit-td-cardno">${creditDigitsInput(acc)}</td>
     <td class="accounts-credit-td-amt">${fields.limit}</td>
     <td class="accounts-credit-td-amt">${fields.available}</td>
@@ -1348,7 +1369,7 @@ function renderCreditGroupSummaryRow(group, editing) {
   const actionTd = editing ? '<td class="accounts-credit-td-actions"></td>' : '';
   return `<tr class="accounts-credit-sum-row">
     ${bindTd}
-    <td colspan="2"><span class="accounts-credit-sum-label">合计</span></td>
+    <td colspan="3"><span class="accounts-credit-sum-label">合计</span></td>
     <td class="accounts-credit-td-amt"><span class="accounts-credit-val accounts-credit-val--sum">${formatCreditBrowseAmount(totals.limit)}</span></td>
     <td class="accounts-credit-td-amt"><span class="accounts-credit-val accounts-credit-val--sum">${formatCreditBrowseAmount(totals.available)}</span></td>
     <td class="accounts-credit-td-amt"><span class="accounts-credit-val accounts-credit-val--sum">${formatCreditBrowseAmount(totals.debt)}</span></td>
@@ -1393,6 +1414,7 @@ function renderCreditPoolViewRows(pool, cards) {
     ].filter(Boolean).join(' ');
     return `<tr data-credit-key="${esc(acc.pay)}" class="${rowCls}" data-credit-pool="${esc(pool.id)}">
       ${renderCreditPoolAccountTd(acc, pool, false, i === 0)}
+      <td class="accounts-credit-td-tag">${creditTagDisplayCell(acc)}</td>
       <td><span class="accounts-credit-val">${esc(last4 || '—')}</span></td>
       ${amtCells}
       <td><span class="accounts-credit-val">${formatCreditBrowseDay(c.billDay)}</span></td>
@@ -1422,6 +1444,7 @@ function renderCreditPoolEditRows(pool, cards) {
     return `<tr data-credit-key="${esc(acc.pay)}" class="${rowCls}" data-credit-pool="${esc(pool.id)}">
       ${bindTd}
       ${renderCreditPoolAccountTd(acc, pool, true, i === 0)}
+      <td class="accounts-credit-td-tag">${creditTagEditCell(acc)}</td>
       <td class="accounts-credit-td-cardno">${creditDigitsInput(acc)}</td>
       ${amtCells}
       <td class="accounts-credit-td-day">${fields.billDay}</td>
@@ -1445,7 +1468,7 @@ function renderCreditPoolBlock(pool, cards, editing) {
 
 function renderCreditCardGroupTableBody(group, editing) {
   const blocks = organizeGroupCards(group.cards);
-  const colSpan = editing ? 10 : 8;
+  const colSpan = editing ? 10 : 9;
   if (!blocks.length) {
     return `<tr><td colspan="${colSpan}" class="accounts-credit-group-empty">暂无卡片</td></tr>`;
   }
@@ -1464,13 +1487,14 @@ function renderCreditCardGroupTable(group, editing) {
     ? `<button type="button" class="btn btn-sm btn-p" onclick="addCreditCardRow('${group.id}')"><i class="ti ti-plus"></i> 新增</button>`
     : '';
   const bindBtn = editing
-    ? `<button type="button" class="btn btn-sm" data-bind-credit-group="${group.id}" title="将选中的卡绑定为共享额度"><i class="ti ti-link"></i> 绑定共享额度</button>`
+    ? `<button type="button" class="btn btn-sm btn-p" data-bind-credit-group="${group.id}" title="将选中的卡绑定为共享额度"><i class="ti ti-link"></i> 绑定共享额度</button>`
     : '';
   const tlTh = editing ? '' : '<th class="accounts-credit-col-tl">免息期</th>';
   const colgroup = editing
     ? `<colgroup>
         <col class="accounts-credit-col-bind">
         <col class="accounts-credit-col-name">
+        <col class="accounts-credit-col-tag">
         <col class="accounts-credit-col-cardno">
         <col class="accounts-credit-col-amt">
         <col class="accounts-credit-col-amt">
@@ -1481,6 +1505,7 @@ function renderCreditCardGroupTable(group, editing) {
       </colgroup>`
     : `<colgroup>
         <col class="accounts-credit-col-name">
+        <col class="accounts-credit-col-tag">
         <col class="accounts-credit-col-tail">
         <col class="accounts-credit-col-amt">
         <col class="accounts-credit-col-amt">
@@ -1492,7 +1517,7 @@ function renderCreditCardGroupTable(group, editing) {
   const body = group.cards.length
     ? `${renderCreditCardGroupTableBody(group, editing)}${renderCreditGroupSummaryRow(group, editing)}`
     : (() => {
-        const colSpan = editing ? 10 : 8;
+        const colSpan = editing ? 10 : 9;
         return `<tr><td colspan="${colSpan}" class="accounts-credit-group-empty">暂无卡片</td></tr>`;
       })();
   const digitTh = editing ? '<th class="accounts-credit-th-cardno">卡号</th>' : '<th class="accounts-credit-th-tail">尾号</th>';
@@ -1505,7 +1530,7 @@ function renderCreditCardGroupTable(group, editing) {
       <table class="report-table accounts-credit-table${editing ? ' is-editing' : ' is-viewing'}">
         ${colgroup}
         <thead><tr>
-          ${bindTh}<th class="accounts-credit-th-account">账户</th>${digitTh}<th class="accounts-credit-th-amt">额度</th><th class="accounts-credit-th-amt">可用</th><th class="accounts-credit-th-amt">欠款</th><th class="accounts-credit-th-day">账单日</th><th class="accounts-credit-th-day">还款日</th>${tlTh}${actionTh}
+          ${bindTh}<th class="accounts-credit-th-account">账户</th><th class="accounts-credit-th-tag">标签</th>${digitTh}<th class="accounts-credit-th-amt">额度</th><th class="accounts-credit-th-amt">可用</th><th class="accounts-credit-th-amt">欠款</th><th class="accounts-credit-th-day">账单日</th><th class="accounts-credit-th-day">还款日</th>${tlTh}${actionTh}
         </tr></thead>
         <tbody id="accountsCreditTbody-${group.id}">${body}</tbody>
       </table>
@@ -1532,6 +1557,7 @@ function renderCreditCardSection() {
     <div class="accounts-credit-groups">${groups.map(g => renderCreditCardGroupTable(g, editing)).join('')}</div>
     ${cards.length ? '' : `<div class="accounts-credit-empty">暂无信用卡${editing ? '，可在各分组下新增卡片' : ''}，或在账户管理中将账户设为信用卡。</div>`}
   </div>`;
+  el.querySelectorAll('.accounts-credit-priority-wrap, .accounts-credit-priority-strip').forEach(bindScrollRevealFn);
 }
 
 export function toggleCreditCardEditMode() {
@@ -2122,35 +2148,80 @@ function renderLongRemindersSection() {
   renderHomeLongRemindersSection();
 }
 
+let topbarRemindersOpen = false;
+
+export function closeTopbarReminders() {
+  topbarRemindersOpen = false;
+  const wrap = document.getElementById('topbarReminder');
+  wrap?.classList.remove('is-open');
+  wrap?.querySelector('.topbar-reminder-btn')?.setAttribute('aria-expanded', 'false');
+}
+
+export function toggleTopbarReminders(force) {
+  topbarRemindersOpen = typeof force === 'boolean' ? force : !topbarRemindersOpen;
+  const wrap = document.getElementById('topbarReminder');
+  if (!wrap) return;
+  wrap.classList.toggle('is-open', topbarRemindersOpen);
+  wrap.querySelector('.topbar-reminder-btn')?.setAttribute('aria-expanded', topbarRemindersOpen ? 'true' : 'false');
+}
+
+function ensureTopbarReminderOutsideClose() {
+  if (document.documentElement._topbarReminderOutside) return;
+  document.documentElement._topbarReminderOutside = true;
+  document.addEventListener('click', (e) => {
+    if (!topbarRemindersOpen) return;
+    const wrap = document.getElementById('topbarReminder');
+    if (!wrap || wrap.contains(e.target)) return;
+    closeTopbarReminders();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && topbarRemindersOpen) closeTopbarReminders();
+  });
+}
+
 export function renderHomeLongRemindersSection() {
-  const el = document.getElementById('homeReminderSection');
+  const el = document.getElementById('topbarReminder');
   if (!el) return;
   ensureLongReminders();
+  ensureTopbarReminderOutsideClose();
   const items = sortedLongReminders();
-  if (!items.length) {
-    el.innerHTML = '';
-    el.hidden = true;
-    return;
-  }
-  el.hidden = false;
-  const rows = items.map(item => {
-    const remaining = reminderRemainingInfo(item.expiry);
-    return `<div class="home-reminder-item">
-      <span class="home-reminder-name">${esc(item.name)}</span>
-      <span class="home-reminder-expiry">${formatBudgetDateLabel(item.expiry)}</span>
-      <span class="home-reminder-tail">
-        <span class="home-reminder-remain is-${remaining.status}">${esc(remaining.label)}</span>
+  const urgentCount = items.filter(item => {
+    const s = reminderRemainingInfo(item.expiry).status;
+    return s === 'expired' || s === 'urgent' || s === 'soon';
+  }).length;
+  const badge = items.length
+    ? `<span class="topbar-reminder-badge${urgentCount ? ' is-alert' : ''}">${items.length}</span>`
+    : '';
+  const rows = items.length
+    ? items.map(item => {
+      const remaining = reminderRemainingInfo(item.expiry);
+      return `<div class="topbar-reminder-item">
+        <div class="topbar-reminder-item-main">
+          <span class="topbar-reminder-name" title="${esc(item.name)}">${esc(item.name)}</span>
+          <span class="topbar-reminder-expiry">${formatBudgetDateLabel(item.expiry)}</span>
+          <span class="topbar-reminder-remain is-${remaining.status}">${esc(remaining.label)}</span>
+        </div>
         ${reminderCalendarBtnHtml(item.id, true)}
-      </span>
+      </div>`;
+    }).join('')
+    : `<div class="topbar-reminder-empty">暂无长期提醒</div>`;
+
+  el.innerHTML = `
+    <button type="button" class="topbar-reminder-btn" onclick="event.stopPropagation();toggleTopbarReminders()" title="长期提醒" aria-label="长期提醒" aria-expanded="${topbarRemindersOpen ? 'true' : 'false'}" aria-haspopup="true">
+      <i class="ti ti-bell-ringing"></i>
+      ${badge}
+    </button>
+    <div class="topbar-reminder-pop" role="dialog" aria-label="长期提醒" onclick="event.stopPropagation()">
+      <div class="topbar-reminder-pop-head">
+        <h3 class="topbar-reminder-pop-title"><i class="ti ti-bell-ringing"></i> 长期提醒</h3>
+        <div class="topbar-reminder-pop-actions">
+          <button type="button" class="btn btn-sm" onclick="closeTopbarReminders();sw('accounts', document.querySelector('.ni[title=\\'信用账户\\']'))" title="在账户页管理"><i class="ti ti-arrow-right"></i></button>
+          <button type="button" class="btn btn-sm" onclick="closeTopbarReminders()" title="关闭" aria-label="关闭"><i class="ti ti-x"></i></button>
+        </div>
+      </div>
+      <div class="topbar-reminder-list">${rows}</div>
     </div>`;
-  }).join('');
-  el.innerHTML = `<div class="home-reminder-card">
-    <div class="home-reminder-head">
-      <h3 class="home-reminder-title"><i class="ti ti-bell-ringing"></i> 长期提醒</h3>
-      <button type="button" class="btn btn-sm home-reminder-link" onclick="sw('accounts', document.querySelector('.ni[title=\\'信用账户\\']'))" title="在账户页管理"><i class="ti ti-arrow-right"></i></button>
-    </div>
-    <div class="home-reminder-list">${rows}</div>
-  </div>`;
+  el.classList.toggle('is-open', topbarRemindersOpen);
 }
 
 export function toggleLongReminderEditMode() {
@@ -3149,10 +3220,39 @@ export function setupAccountsEvents() {
 
 export function renderAccountsPage() {
   renderAccountsStatusSection();
+  renderAccountsTabs();
   renderCreditCardSection();
   renderCashAccountsSection();
   renderLifeAccountsSection();
   renderExpenseBudgetsSection();
   renderLongRemindersSection();
   renderWebAccountsSection();
+  syncAccountsTabPanels();
+}
+
+export function selectAccountsTab(tabId) {
+  if (!ACCOUNTS_TABS.some(t => t.id === tabId)) return;
+  accountsActiveTab = tabId;
+  renderAccountsTabs();
+  syncAccountsTabPanels();
+}
+
+function renderAccountsTabs() {
+  const el = document.getElementById('accountsTabs');
+  if (!el) return;
+  el.innerHTML = ACCOUNTS_TABS.map(tab => {
+    const on = tab.id === accountsActiveTab ? ' on' : '';
+    const cnt = tab.count();
+    return `<button type="button" class="accounts-tab${on}" data-tab="${tab.id}" onclick="selectAccountsTab('${tab.id}')">
+      <i class="ti ${tab.icon}"></i>
+      <span class="accounts-tab-label">${tab.label}</span>
+      <span class="accounts-tab-count">${cnt}</span>
+    </button>`;
+  }).join('');
+}
+
+function syncAccountsTabPanels() {
+  document.querySelectorAll('.accounts-tab-panel').forEach(panel => {
+    panel.classList.toggle('on', panel.dataset.tab === accountsActiveTab);
+  });
 }

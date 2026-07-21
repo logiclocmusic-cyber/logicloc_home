@@ -49,8 +49,8 @@
 <aside class="sb" id="sidebar">
   <div class="sb-head">
     <div class="sb-logo">
-      <div class="logo-mark" title="Loc's Home" aria-label="Loc's Home">
-        <img class="logo-mark-img" src="/logo.png" alt="Loc's Home">
+      <div class="logo-mark logo-mark--avatar" title="Loc's Home" aria-label="Loc's Home">
+        <img class="logo-mark-img" src="/avatar.png" alt="Loc's Home">
       </div>
     </div>
   </div>
@@ -87,11 +87,12 @@
       <i class="ti ti-search"></i>
       <input id="topSearch" placeholder="搜索对方、说明、分类…" oninput="syncSearch(this.value)">
     </div>
+    <div class="topbar-reminder" id="topbarReminder"></div>
     <button class="btn-cta" onclick="openImport()"><i class="ti ti-plus"></i> 导入账单</button>
     <div class="topbar-actions">
       <div class="sv" id="sv"><i class="ti ti-check"></i> 已保存</div>
       <div class="user-pill" id="userPill" title="点击退出登录">
-        <div class="avatar" id="userAvatar">L</div>
+        <div class="avatar" id="userAvatar"><img src="/avatar.png" alt=""></div>
         <span id="userDisplayName">Logic Loc</span>
         <button type="button" class="logout-btn" id="logoutBtn" title="退出登录"><i class="ti ti-logout"></i></button>
       </div>
@@ -100,10 +101,15 @@
   </div>
 
   <div class="page view on" id="view-home">
-    <div id="homeReminderSection" class="home-reminder-section" hidden></div>
     <div class="home-head">
       <div class="home-head-row">
-        <select id="homeMonthSel" class="home-month-sel" onchange="onHomeMonthChange(this.value)" aria-label="选择月份"></select>
+        <div class="home-month-drop" id="homeMonthDrop">
+          <button type="button" class="home-month-drop-btn" id="homeMonthDropBtn" onclick="toggleHomeMonthDrop()" aria-haspopup="listbox" aria-expanded="false" aria-label="选择月份">
+            <span id="homeMonthDropLabel">—</span>
+            <i class="ti ti-chevron-down" aria-hidden="true"></i>
+          </button>
+          <div class="home-month-drop-menu hide" id="homeMonthDropMenu" role="listbox" aria-label="月份列表"></div>
+        </div>
       </div>
       <p class="home-sub">收支概览 · 按分类统计</p>
     </div>
@@ -307,11 +313,18 @@
 
   <div class="page view" id="view-family">
     <div class="family-head">
-      <div>
-        <p class="family-intro">记录家里的重要日子与瞬间，可写备注并上传照片。</p>
-        <span class="family-count" id="familyCount"></span>
+      <div class="family-head-top">
+        <div>
+          <p class="family-intro">记录家里的重要日子与瞬间，可写备注并上传照片。</p>
+          <span class="family-count" id="familyCount"></span>
+        </div>
+        <button type="button" class="btn btn-p" onclick="openFamilyCreate()"><i class="ti ti-plus"></i> 新增事件</button>
       </div>
-      <button type="button" class="btn btn-p" onclick="openFamilyCreate()"><i class="ti ti-plus"></i> 新增事件</button>
+      <label class="family-search" for="familySearchInp">
+        <i class="ti ti-search" aria-hidden="true"></i>
+        <input id="familySearchInp" type="search" placeholder="搜索标题、备注、日期…" oninput="onFamilySearch(this.value)" aria-label="搜索家庭事件">
+        <button type="button" class="family-search-clear hide" id="familySearchClear" onclick="clearFamilySearch()" title="清除搜索" aria-label="清除搜索"><i class="ti ti-x"></i></button>
+      </label>
     </div>
     <div class="family-list" id="familyList"></div>
   </div>
@@ -323,11 +336,14 @@
         <div class="renqing-people" id="renqingPeople"></div>
       </aside>
       <main class="renqing-main hide" id="renqingPanel">
-        <div class="renqing-head" id="renqingHead"></div>
-        <div class="renqing-kpi" id="renqingKpi"></div>
+        <div class="renqing-profile">
+          <div class="renqing-head" id="renqingHead"></div>
+          <div class="renqing-kpi" id="renqingKpi"></div>
+        </div>
         <div class="cc full renqing-list-card">
           <div class="ct"><i class="ti ti-list-details"></i> 往来明细</div>
           <div class="renqing-list" id="renqingList"></div>
+          <div class="pager renqing-pager hide" id="renqingPager"><span id="renqingPi"></span><div class="pgs" id="renqingPgs"></div></div>
         </div>
       </main>
     </div>
@@ -339,12 +355,17 @@
       <button type="button" class="accounts-settings-btn" onclick="openAccountsMgr()" title="账户管理" aria-label="账户管理"><i class="ti ti-settings"></i></button>
     </div>
     <div id="accountsStatusSection"></div>
-    <div id="accountsCreditSection"></div>
-    <div id="accountsCashSection"></div>
-    <div id="accountsLifeSection"></div>
-    <div id="accountsBudgetSection"></div>
-    <div id="accountsReminderSection"></div>
-    <div id="accountsWebSection"></div>
+    <div class="accounts-panel cc full">
+      <div class="accounts-tabs" id="accountsTabs"></div>
+      <div class="accounts-tab-body">
+        <div id="accountsCreditSection" class="accounts-tab-panel on" data-tab="credit"></div>
+        <div id="accountsCashSection" class="accounts-tab-panel" data-tab="cash"></div>
+        <div id="accountsLifeSection" class="accounts-tab-panel" data-tab="life"></div>
+        <div id="accountsBudgetSection" class="accounts-tab-panel" data-tab="budget"></div>
+        <div id="accountsReminderSection" class="accounts-tab-panel" data-tab="reminder"></div>
+        <div id="accountsWebSection" class="accounts-tab-panel" data-tab="web"></div>
+      </div>
+    </div>
   </div>
 
   <div class="page view" id="view-catreport">

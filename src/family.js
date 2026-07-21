@@ -11,6 +11,7 @@ import {
 let events = [];
 let editingId = null;
 let pendingFiles = [];
+let familySearchQuery = '';
 
 function esc(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
@@ -27,20 +28,106 @@ function formatDateLabel(ymd) {
   return `${m[1]}年${Number(m[2])}月${Number(m[3])}日`;
 }
 
-function groupByYear(list) {
-  const map = new Map();
-  for (const ev of list) {
-    const y = String(ev.eventDate || '').slice(0, 4) || '未定';
-    if (!map.has(y)) map.set(y, []);
-    map.get(y).push(ev);
-  }
-  return [...map.entries()].sort((a, b) => String(b[0]).localeCompare(String(a[0])));
+function formatTimelineDate(ymd) {
+  const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return ymd || '';
+  return `${m[1]}.${m[2]}.${m[3]}`;
+}
+
+function parseEventDateParts(ymd) {
+  const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return { year: '—', month: '—', day: '—' };
+  return {
+    year: m[1],
+    month: `${Number(m[2])}月`,
+    day: String(Number(m[3])),
+  };
+}
+
+function sortedFamilyEvents() {
+  return [...events].sort((a, b) =>
+    String(a.eventDate).localeCompare(String(b.eventDate)) || (a.id || 0) - (b.id || 0)
+  );
+}
+
+function familyMatchesSearch(ev, query) {
+  const needle = String(query || '').trim().toLowerCase();
+  if (!needle) return true;
+  const hay = [
+    ev.title,
+    ev.notes,
+    ev.eventDate,
+    formatDateLabel(ev.eventDate),
+    formatTimelineDate(ev.eventDate),
+  ].join(' ').toLowerCase();
+  return hay.includes(needle);
+}
+
+function filteredFamilyEvents() {
+  return sortedFamilyEvents().filter(ev => familyMatchesSearch(ev, familySearchQuery));
+}
+
+function syncFamilySearchClear() {
+  const btn = document.getElementById('familySearchClear');
+  if (!btn) return;
+  btn.classList.toggle('hide', !familySearchQuery.trim());
+}
+
+function renderFamilyImages(imgs) {
+  if (!imgs?.length) return '';
+  const cells = imgs.map(img => `
+    <a class="family-feed-img" href="${esc(assetUrl(img.url))}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
+      <img src="${esc(assetUrl(img.url))}" alt="">
+    </a>
+  `).join('');
+  const cls = imgs.length === 1 ? 'family-feed-media--1'
+    : imgs.length === 2 ? 'family-feed-media--2'
+      : imgs.length === 4 ? 'family-feed-media--4'
+        : 'family-feed-media--n';
+  return `<div class="family-feed-media ${cls}">${cells}</div>`;
+}
+
+function renderFamilyMilestoneItem(ev, index, showYear, year) {
+  const side = index % 2 === 0 ? 'is-left' : 'is-right';
+  const imgs = ev.images || [];
+  const date = parseEventDateParts(ev.eventDate);
+  const mediaHtml = renderFamilyImages(imgs);
+  const dateHtml = `<div class="family-milestone-date" aria-label="${esc(formatDateLabel(ev.eventDate))}">
+          <span class="family-milestone-month">${esc(date.month)}</span>
+          <span class="family-milestone-day">${esc(date.day)}</span>
+          <span class="family-milestone-year-num">${esc(date.year)}</span>
+        </div>`;
+  const mainHtml = `<div class="family-milestone-main">
+          <div class="family-milestone-head">
+            <h3 class="family-milestone-title">${esc(ev.title)}</h3>
+            <button type="button" class="family-milestone-edit" onclick="event.stopPropagation();openFamilyEdit(${ev.id})" title="编辑" aria-label="编辑"><i class="ti ti-pencil"></i></button>
+          </div>
+          ${ev.notes ? `<p class="family-milestone-notes">${esc(ev.notes)}</p>` : ''}
+          ${mediaHtml}
+        </div>`;
+  const bodyHtml = side === 'is-left' ? `${dateHtml}${mainHtml}` : `${mainHtml}${dateHtml}`;
+  return `${showYear ? `<div class="family-milestone-year"><span>${esc(year)}</span></div>` : ''}
+  <article class="family-milestone ${side}" onclick="openFamilyEdit(${ev.id})">
+    <div class="family-milestone-card">
+      <div class="family-milestone-body">${bodyHtml}</div>
+    </div>
+    <div class="family-milestone-marker" aria-hidden="true"><span class="family-milestone-dot"></span></div>
+  </article>`;
 }
 
 function syncEvents(list) {
   events = Array.isArray(list) ? list : [];
   const countEl = document.getElementById('familyCount');
-  if (countEl) countEl.textContent = events.length ? `${events.length} 条` : '';
+  if (countEl) {
+    const total = events.length;
+    const shown = filteredFamilyEvents().length;
+    if (familySearchQuery.trim() && total) {
+      countEl.textContent = shown ? `匹配 ${shown} / ${total} 条` : `无匹配 · 共 ${total} 条`;
+    } else {
+      countEl.textContent = total ? `${total} 条` : '';
+    }
+  }
+  syncFamilySearchClear();
 }
 
 function renderPendingPreviews() {
@@ -111,31 +198,39 @@ export function renderFamilyPage() {
     return;
   }
 
-  const groups = groupByYear(events);
-  listEl.innerHTML = groups.map(([year, items]) => `
-    <section class="family-year">
-      <h3 class="family-year-title">${esc(year)}</h3>
-      <div class="family-cards">
-        ${items.map(ev => {
-          const cover = ev.images?.[0];
-          const more = Math.max(0, (ev.images?.length || 0) - 1);
-          return `<article class="family-card" onclick="openFamilyEdit(${ev.id})">
-            <div class="family-card-media ${cover ? '' : 'is-empty'}">
-              ${cover
-                ? `<img src="${esc(assetUrl(cover.url))}" alt="">`
-                : `<i class="ti ti-photo"></i>`}
-              ${more ? `<span class="family-card-more">+${more}</span>` : ''}
-            </div>
-            <div class="family-card-body">
-              <div class="family-card-date">${esc(formatDateLabel(ev.eventDate))}</div>
-              <div class="family-card-title">${esc(ev.title)}</div>
-              ${ev.notes ? `<div class="family-card-notes">${esc(ev.notes)}</div>` : ''}
-            </div>
-          </article>`;
-        }).join('')}
-      </div>
-    </section>
-  `).join('');
+  const items = filteredFamilyEvents();
+  if (!items.length) {
+    listEl.innerHTML = `<div class="family-empty">
+      <i class="ti ti-search"></i>
+      <p>没有匹配的事件</p>
+      <button type="button" class="btn btn-sm" onclick="clearFamilySearch()">清除搜索</button>
+    </div>`;
+    return;
+  }
+
+  let lastYear = '';
+  const rows = items.map((ev, index) => {
+    const year = String(ev.eventDate || '').slice(0, 4);
+    const showYear = !!(year && year !== lastYear);
+    if (showYear) lastYear = year;
+    return renderFamilyMilestoneItem(ev, index, showYear, year);
+  }).join('');
+
+  listEl.innerHTML = `<div class="family-timeline">${rows}</div>`;
+}
+
+export function onFamilySearch(query) {
+  familySearchQuery = query;
+  syncEvents(events);
+  renderFamilyPage();
+}
+
+export function clearFamilySearch() {
+  familySearchQuery = '';
+  const inp = document.getElementById('familySearchInp');
+  if (inp) inp.value = '';
+  syncEvents(events);
+  renderFamilyPage();
 }
 
 export async function loadFamilyEvents() {

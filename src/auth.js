@@ -33,7 +33,14 @@ export function updateUserUI() {
   const pill = document.getElementById('userDisplayName');
   const av = document.getElementById('userAvatar');
   if (pill) pill.textContent = name || '本地账本';
-  if (av) av.textContent = avatarLetter(name);
+  if (av) {
+    const img = av.querySelector('img');
+    if (img) {
+      img.alt = name || '用户头像';
+    } else {
+      av.textContent = avatarLetter(name);
+    }
+  }
 }
 
 function networkLoginHint() {
