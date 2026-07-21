@@ -44,19 +44,19 @@ export function fmtChartAxis(v) {
   return `¥${num}`;
 }
 
-/** Chart.js 浅色薰衣草主题 */
+/** Chart.js 深色仪表盘主题 */
 export const CHART_THEME = {
-  pieBorder: '#ffffff',
-  inc: '#3d9b72',
-  exp: '#d95665',
-  grid: 'rgba(42,40,56,.06)',
-  gridY: 'rgba(42,40,56,.08)',
-  tick: 'rgba(42,40,56,.45)',
+  pieBorder: '#17171f',
+  inc: '#34d399',
+  exp: '#f472b6',
+  grid: 'rgba(255,255,255,.05)',
+  gridY: 'rgba(255,255,255,.07)',
+  tick: 'rgba(242,242,247,.45)',
   tooltip: {
-    backgroundColor: '#ffffff',
-    titleColor: '#2a2838',
-    bodyColor: '#5c5a6e',
-    borderColor: 'rgba(139,127,212,.2)',
+    backgroundColor: '#1e1e28',
+    titleColor: '#f2f2f7',
+    bodyColor: '#a8a8b8',
+    borderColor: 'rgba(91,140,255,.28)',
     borderWidth: 1,
     padding: 10
   }
