@@ -1,5 +1,8 @@
 // ── CSV / Excel 解析工具 ─────────────────────────────────────────────────────
 import * as XLSX from 'xlsx';
+import { ensurePdfJsUint8Polyfills } from './pdfjs-polyfill.js';
+
+ensurePdfJsUint8Polyfills();
 
 export const Parsers = (() => {
   function readText(file) {
@@ -33,7 +36,15 @@ export const Parsers = (() => {
   let pdfjsReady = null;
   async function getPdfJs() {
     if (!pdfjsReady) {
-      pdfjsReady = import('pdfjs-dist');
+      pdfjsReady = (async () => {
+        ensurePdfJsUint8Polyfills();
+        // pdfjs 5.7 在 Web Worker 内调用 Uint8Array.toHex；Electron 无此 API。
+        // 预载 worker 到主线程（fake worker），使 polyfill 对解析逻辑生效。
+        if (!globalThis.pdfjsWorker?.WorkerMessageHandler) {
+          globalThis.pdfjsWorker = await import('pdfjs-dist/build/pdf.worker.mjs');
+        }
+        return import('pdfjs-dist');
+      })();
     }
     return pdfjsReady;
   }
@@ -61,7 +72,11 @@ export const Parsers = (() => {
   async function readPdfText(file) {
     const pdfjs = await getPdfJs();
     const data = new Uint8Array(await readArrayBuffer(file));
-    const doc = await pdfjs.getDocument({ data, disableWorker: true }).promise;
+    const doc = await pdfjs.getDocument({
+      data,
+      useWorkerFetch: false,
+      disableFontFace: true
+    }).promise;
     const chunks = [];
     for (let page = 1; page <= doc.numPages; page++) {
       const pg = await doc.getPage(page);
@@ -934,6 +949,7 @@ export const Parsers = (() => {
     const a1 = parseFloat(amount1);
     const a2 = parseFloat(amount2);
     const tol = 0.02;
+    const s = String(summary || '');
 
     if (prevBalance != null && !isNaN(prevBalance)) {
       if (Math.abs(prevBalance + a1 - a2) < tol) return { type: '收入', amount: a1, balance: a2 };
@@ -942,9 +958,12 @@ export const Parsers = (() => {
       if (Math.abs(prevBalance - a2 - a1) < tol) return { type: '支出', amount: a2, balance: a1 };
     }
 
-    if (/转入|入账|退库|结息/.test(summary)) {
-      return { type: '收入', amount: Math.min(a1, a2), balance: Math.max(a1, a2) };
-    }
+    const incomeHint = /转入|入账|退库|结息/.test(s);
+    const expenseHint = /还款|转出|消费|代付|无卡|扣|缴费|贷款/.test(s) && !incomeHint;
+
+    if (expenseHint) return { type: '支出', amount: a1, balance: a2 };
+    if (incomeHint) return { type: '收入', amount: a1, balance: a2 };
+
     if (a1 > a2) {
       if (a2 === 0) return { type: '支出', amount: a1, balance: a2 };
       return { type: '支出', amount: a2, balance: a1 };

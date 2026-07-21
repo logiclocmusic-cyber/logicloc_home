@@ -4,9 +4,9 @@ import { ImportTimeline } from './import-timeline.js';
 import { Parsers } from './parsers.js';
 import {
   DEFAULT_CATS, DEFAULT_EMOJIS, LEGACY_DEFAULT_EMOJIS, CAT_ICON_NAME_ALIASES, DEFAULT_SOURCES, DEFAULT_IMPORT_SOURCE, DEFAULT_SUBCATS, CAT_COLORS,
-  MONITOR_CATS, EXCLUDE_CATS, DEFAULT_OFFSET_CATS, DEFAULT_CAT_STATS_EXCLUDE, MONITOR_EMOJIS, DEFAULT_INCOME_DATA_CATS
+  MONITOR_CATS, EXCLUDE_CATS, DEFAULT_OFFSET_CATS, DEFAULT_CAT_STATS_EXCLUDE, MONITOR_EMOJIS, DEFAULT_INCOME_DATA_CATS, DEFAULT_INCOME_CATS
 } from './config.js';
-import { renderCatIcon, iconRef, isIconRef, resolveCatIconValue } from './cat-icons.js';
+import { renderCatIcon, iconRef, isIconRef, isIconifyRef, normalizeIconRef, resolveCatIconValue } from './cat-icons.js';
 import { fetchState, saveState, resetLedger, deleteImportBatchApi, changeImportBatchSourceApi, checkHealth } from './api.js';
 import {
   createBatchId, stampImportBatch, deriveImportHistory,
@@ -16,13 +16,21 @@ import { API_BASE } from './apiBase.js';
 import { fmtMoney, fmtMoneySigned, fmtCount, fmtChartAxis, chartMoneyTooltip, CHART_THEME, chartDarkScalesY, chartDarkScalesXY } from './format.js';
 import {
   initGear, loadGearState, getGearState, renderGearPage,
-  openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload, setupGearUpload, submitGearImageUrl
+  openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload, setupGearUpload, submitGearImageUrl,
+  selectGearTab, markGearSold, markGearUnsold, markGearSoldFromModal,
+  onGearCatChange, openGearSectionAdd, closeGearSectionAdd, confirmGearSectionAdd,
+  onGearSectionCatChange, onGearSectionSubChange, removeGearSection
 } from './gear.js';
 import {
   renderCompanyCostPage, setupCompanyCost,
   openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload, triggerManualInvoiceUpload,
-  toggleInvoicePrinted, downloadInvoiceFile, printInvoiceFile
+  toggleInvoicePrinted, downloadInvoiceFile, printInvoiceFile, openAppConfig
 } from './company-cost.js';
+import {
+  loadFamilyEvents, setupFamilyEvents,
+  openFamilyCreate, openFamilyEdit, closeFamilyEdit, saveFamilyEdit,
+  removeFamilyEvent, triggerFamilyUpload
+} from './family.js';
 import {
   initSplits, hasSplits, expandRowForStats, rowMatchesCat, rowSearchHaystack,
   toggleSplitExpand, isSplitExpanded, openSplitEditor, closeSplitEditor, getSplitEditId,
@@ -30,7 +38,7 @@ import {
   parentCatCellHtml, splitSubRowHtml, splitSubRowNoDateHtml
 } from './splits.js';
 import { initCatPicker, catCellInnerHtml, openEmojiPicker, closeEmojiPicker } from './cat-picker.js';
-import { subCatSelectHtml, rowHasUnsetSub } from './subcat-ui.js';
+import { subCatSelectHtml, rowHasUnsetSub, rowMatchesSubCat, SUBCAT_UNSET_LABEL } from './subcat-ui.js';
 import { srcMarkHtml, srcBrandColor } from './source-logos.js';
 import {
   initCatBrowse, renderCatBrowse, selectCatBrowse,
@@ -39,8 +47,10 @@ import {
   toggleCatBrowseSelect, toggleCatBrowseGroupSelect, toggleCatBrowseSelectAll
 } from './cat-browse.js';
 import {
-  loadTxnPairs, getTxnPairs, validateTxnPair, addTxnPair,
-  removeTxnPairByKey, removeTxnPair, findPairForKey
+  loadTxnPairs, getTxnPairs, validateTxnPair, validateTxnLink, addTxnPair, addTxnLink,
+  removeTxnPairByKey, removeTxnLinkById,
+  findPairForKey, findLinkForKey, findLinkById, rowInLink, rowsForLinkKeys,
+  computeLinkStats, linkBalanceMeta, suggestTxnLinkName
 } from './txn-pairs.js';
 import {
   initRenqing, loadRenqingState, getRenqingState, renderRenqingPage,
@@ -48,14 +58,17 @@ import {
   RENQING_CAT
 } from './renqing.js';
 import {
-  initAccounts, loadAccountsState, getAccountsState, renderAccountsPage,
+  initAccounts, loadAccountsState, getAccountsState, renderAccountsPage, renderHomeLongRemindersSection,
   consumeRegistryMigrationPersist,
   setupAccountsEvents,
   openAccountsMgr, closeAccountsMgr, resetAccountsMgrForm, saveAccountsMgr,
   editAccountsMgr, startAccountMerge, cancelAccountMerge, confirmAccountMerge,
-  addCreditCardRow, deleteCreditCard, toggleCreditCardEditMode,
+  addCreditCardRow, deleteCreditCard, toggleCreditCardEditMode, toggleCreditCancelled,
   toggleCashAccountEditMode, addCashAccountRow, deleteCashAccount,
   toggleBudgetEditMode, addBudgetRow, deleteBudget,
+  toggleLifeAccountEditMode, addLifeAccountRow, deleteLifeAccount,
+  toggleLongReminderEditMode, addLongReminderRow, deleteLongReminder, addLongReminderToCalendar,
+  toggleWebAccountEditMode, addWebAccountRow, addWebAccountColumn, deleteWebAccountRow, deleteWebAccountColumn,
   bindSelectedCreditCards, unbindCreditCardFromPool, dissolveCreditPoolById
 } from './accounts.js';
 
@@ -66,12 +79,17 @@ let SOURCES = JSON.parse(JSON.stringify(DEFAULT_SOURCES));
 let SOURCE_CHIP_ORDER = [];
 let OFFSET_CATS_SET = new Set(DEFAULT_OFFSET_CATS);
 let CAT_STATS_EXCLUDE = new Set(DEFAULT_CAT_STATS_EXCLUDE);
+let INCOME_CATS_SET = new Set(DEFAULT_INCOME_CATS);
 let INCOME_DATA_CATS_LIST = [...DEFAULT_INCOME_DATA_CATS];
 
 let allData = [], filteredData = [], curPage = 1;
 let PG = 30;
 let activeSrc = 'all', refunded = new Set(), excluded = new Set(), charts = {};
 let filterUnsetSubOnly = false;
+let filterSubCat = '';
+let activeTxnLinkId = null;
+let activeTradeLinkId = null;
+let dayNotes = {};
 let detRows = [], detSort = 'a-';
 let detIsIncome = false;
 let detFilterUnsetSubOnly = false;
@@ -224,6 +242,10 @@ function dateTimeCell(date, time) {
   </div>`;
 }
 
+function escHtml(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function peerDescCell(row) {
   const product = (row['产品名称'] || '').trim();
   const peer = (row['交易对方'] || '').trim();
@@ -234,7 +256,11 @@ function peerDescCell(row) {
   const dupTag = row._dupSuspect
     ? '<span class="ledger-dup-flag" title="疑似与其他来源账单重复，可手动删除或标记不计入"><i class="ti ti-copy"></i></span>'
     : '';
-  return `<div class="td peer-desc" title="${title}"><div class="peer-main">${dupTag}${main}</div>${showDesc ? `<div class="peer-sub">${d}</div>` : ''}</div>`;
+  const link = findLinkForKey(String(row.id));
+  const linkTag = link
+    ? `<button type="button" class="ledger-link-tag" onclick="event.stopPropagation();filterTxnLink('${escHtml(link.id)}')" title="查看关联账目并核对收支"><i class="ti ti-link"></i>${escHtml(link.name)}</button>`
+    : '';
+  return `<div class="td peer-desc" title="${title}"><div class="peer-main">${dupTag}${main}${linkTag}</div>${showDesc ? `<div class="peer-sub">${d}</div>` : ''}</div>`;
 }
 
 function dupReasonLabel(reason) {
@@ -253,22 +279,61 @@ function dupMatchMeta(row) {
   return ` · 匹配 ${m['来源']} ${m['日期']} ${formatTimeShort(m['时间'])} ${peer}`;
 }
 
+function findImportPreviewRecord(uid) {
+  if (!pendingImport || !uid) return null;
+  const pools = [pendingImport.allRecords, pendingImport.newRecords, pendingImport.duplicateRecords];
+  for (const list of pools) {
+    const row = (list || []).find(r => r._importUid === uid);
+    if (row) return row;
+  }
+  return null;
+}
+
 function renderImportRecordTable(records) {
   const wrap = document.getElementById('importRecordPreview');
   const el = document.getElementById('importRecordTable');
-  if (!records.length) { wrap.style.display = 'none'; return; }
+  if (!records?.length) { wrap.style.display = 'none'; return; }
   wrap.style.display = '';
+  const show = records.slice(0, 50);
   el.innerHTML = `
-    <div class="th-row import-rec-cols">
-      <div class="th">日期</div><div class="th">交易对方</div><div class="th">收支</div><div class="th">分类</div>
+    <div class="th-row import-rec-cols import-rec-cols--edit">
+      <div class="th">日期</div><div class="th">交易对方</div><div class="th">收支</div><div class="th">金额</div><div class="th">分类</div>
     </div>
-    ${records.slice(0, 20).map(r => `
-      <div class="tr import-rec-cols">
+    ${show.map(r => {
+      const uid = r._importUid || '';
+      const typeCls = r['收支'] === '收入' ? 'import-rec-type-inc' : 'import-rec-type-exp';
+      const dupTag = r._dupReason ? `<span class="import-rec-dup-tag">重复</span>` : '';
+      return `<div class="tr import-rec-cols import-rec-cols--edit">
         ${dateTimeCell(r['日期'], r['时间'])}
         ${peerDescCell(r)}
-        <div class="td">${r['收支']}</div>
+        <div class="td import-rec-type-cell">
+          <button type="button" class="btn btn-sm import-rec-type-btn ${typeCls}" onclick="toggleImportRecordType('${uid}')" title="点击切换收支">${r['收支']}</button>
+          ${dupTag}
+        </div>
+        <div class="td import-rec-amt-cell">
+          <input type="text" class="import-rec-amt-inp" value="${Number(r['金额'] || 0).toFixed(2)}" inputmode="decimal"
+            onchange="updateImportRecordAmount('${uid}', this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">
+        </div>
         <div class="td">${catLabel(r['分类'])}${r['子分类'] ? ' · ' + r['子分类'] : ''}</div>
-      </div>`).join('')}`;
+      </div>`;
+    }).join('')}
+    ${records.length > show.length ? `<div class="import-rec-more">另有 ${records.length - show.length} 条未显示，确认导入后可在明细中继续修改</div>` : ''}`;
+}
+
+function toggleImportRecordType(uid) {
+  const r = findImportPreviewRecord(uid);
+  if (!r) return;
+  r['收支'] = r['收支'] === '收入' ? '支出' : '收入';
+  renderImportRecordTable(pendingImport?.allRecords || []);
+}
+
+function updateImportRecordAmount(uid, value) {
+  const r = findImportPreviewRecord(uid);
+  if (!r) return;
+  const n = parseFloat(String(value ?? '').replace(/[,，\s¥￥]/g, ''));
+  if (!Number.isFinite(n) || n <= 0) return;
+  r['金额'] = Math.abs(n);
+  renderImportRecordTable(pendingImport?.allRecords || []);
 }
 
 function subcatsFor(cat) {
@@ -315,6 +380,10 @@ function homeCardAccent(accent) {
 function srcColor(s) { const f = SOURCES.find(x => x.name === s); return f ? f.color : '#98a2b3'; }
 function isCatExcludedFromStats(cat) {
   return CAT_STATS_EXCLUDE.has(cat);
+}
+
+function isIncomeCategory(cat) {
+  return INCOME_CATS_SET.has(cat);
 }
 
 function isCountedInStats(r) {
@@ -381,7 +450,7 @@ function buildState() {
     transactions: allData,
     refunded: [...refunded],
     excluded: [...excluded],
-    categories: { cats: CATS, emojis: EMOJIS, subcats: SUBCATS, statsExclude: [...CAT_STATS_EXCLUDE], offsetCats: [...OFFSET_CATS_SET], incomeDataCats: [...INCOME_DATA_CATS_LIST] },
+    categories: { cats: CATS, emojis: EMOJIS, subcats: SUBCATS, statsExclude: [...CAT_STATS_EXCLUDE], offsetCats: [...OFFSET_CATS_SET], incomeCats: [...INCOME_CATS_SET], incomeDataCats: [...INCOME_DATA_CATS_LIST] },
     sources: SOURCES,
     sourceChipOrder: SOURCE_CHIP_ORDER,
     rules: { peerRules: Categorizer.peerRules, keywordRules: Categorizer.keywordRules },
@@ -390,10 +459,12 @@ function buildState() {
     stateVersion,
     gearLibrary: gear.gearLibrary,
     nextGearId: gear.nextGearId,
+    gearSections: gear.gearSections || [],
     renqingAvatars: getRenqingState().renqingAvatars,
     accountCardFaces: getAccountsState().accountCardFaces,
     accountRegistry: getAccountsState().accountRegistry,
-    txnPairs: getTxnPairs()
+    txnPairs: getTxnPairs(),
+    dayNotes: { ...dayNotes }
   };
 }
 
@@ -467,11 +538,17 @@ async function updateBackendFooter(count) {
       : `Railway · ${host}`;
     btn?.setAttribute('title', `云端数据库 · Railway · ${host}${count != null ? ` · ${count} 笔` : ''}`);
   } else {
-    if (titleEl) titleEl.textContent = 'SQLite 数据库';
+    if (titleEl) titleEl.textContent = '本地账本';
+    let mobileLine = '';
+    try {
+      const health = await checkHealth().catch(() => null);
+      const urls = health?.mobileUrls || [];
+      if (urls.length) mobileLine = ` · 手机 ${urls[0].replace(/^https?:\/\//, '')}`;
+    } catch { /* ignore */ }
     sub.textContent = count != null
-      ? `本地开发 · data/ledger.db · ${count} 笔`
-      : '本地开发 · data/ledger.db';
-    btn?.setAttribute('title', `SQLite 数据库 · 本地 data/ledger.db${count != null ? ` · ${count} 笔` : ''}`);
+      ? `本机 SQLite · ${count} 笔${mobileLine}`
+      : `本机 SQLite${mobileLine}`;
+    btn?.setAttribute('title', `本地账本 · SQLite${mobileLine}`);
   }
 }
 
@@ -504,6 +581,7 @@ async function loadData() {
     loadAccountsState(state);
     if (consumeRegistryMigrationPersist()) await persistNow();
     loadTxnPairs(state);
+    dayNotes = (state.dayNotes && typeof state.dayNotes === 'object') ? { ...state.dayNotes } : {};
 
     allData.forEach(r => {
       if (!r['子分类']) r['子分类'] = '';
@@ -570,6 +648,36 @@ const HOME_EXP_CAT_HIDDEN_KEY = 'home_exp_cat_hidden';
 const HOME_INC_CAT_HIDDEN_KEY = 'home_inc_cat_hidden';
 let homeExpCatSettingsDraft = null;
 let homeIncCatSettingsDraft = null;
+let homeSelectedYm = null;
+
+function getHomeYm() {
+  return homeSelectedYm || getLastMonthYm();
+}
+
+function homeMonthsFromData() {
+  const months = new Set(statsData().map(r => r['日期'].slice(0, 7)));
+  months.add(getLastMonthYm());
+  return [...months].sort((a, b) => b.localeCompare(a));
+}
+
+function syncHomeMonthSelect() {
+  const sel = document.getElementById('homeMonthSel');
+  if (!sel) return;
+  const ym = getHomeYm();
+  const months = homeMonthsFromData();
+  sel.innerHTML = months.map(m =>
+    `<option value="${m}"${m === ym ? ' selected' : ''}>${fmtMonthLabel(m)}</option>`
+  ).join('');
+}
+
+function onHomeMonthChange(ym) {
+  homeSelectedYm = ym;
+  renderHome();
+}
+
+function homeMonthKpiLabel(ym) {
+  return ym === getLastMonthYm() ? '上月' : fmtMonthLabel(ym);
+}
 
 function getHomeExpCatHidden() {
   return getHomeCatHiddenSet(HOME_EXP_CAT_HIDDEN_KEY);
@@ -703,7 +811,7 @@ function homeCatDeltaHtml(delta, type) {
 function renderHomeCatCards(el, entries, prevMap, type, ym) {
   if (!el) return;
   if (!entries.length) {
-    el.innerHTML = '<div class="home-cat-empty">上月暂无数据</div>';
+    el.innerHTML = `<div class="home-cat-empty">${fmtMonthLabel(ym)}暂无数据</div>`;
     return;
   }
   el.innerHTML = entries.map(([cat, amt]) => {
@@ -746,14 +854,16 @@ function ensureHomeCatBarClicks(gridId) {
 
 function openHomeCatSettings(type) {
   const isInc = type === '收入';
-  const entries = categoryTotals(lastMonthStatsRows(), type);
+  const ym = getHomeYm();
+  const rows = monthStatsRows(ym);
+  const entries = isInc ? homeIncomeCategoryTotals(rows) : categoryTotals(rows, type);
   const hidden = isInc ? getHomeIncCatHidden() : getHomeExpCatHidden();
   const allCats = [...new Set([...entries.map(([c]) => c), ...hidden])];
   const draft = new Set(hidden);
   if (isInc) homeIncCatSettingsDraft = draft;
   else homeExpCatSettingsDraft = draft;
   const list = document.getElementById(isInc ? 'homeIncCatSettingsList' : 'homeExpCatSettingsList');
-  const emptyLabel = isInc ? '上月暂无收入分类' : '上月暂无支出分类';
+  const emptyLabel = isInc ? `${fmtMonthLabel(ym)}暂无收入分类` : `${fmtMonthLabel(ym)}暂无支出分类`;
   const toggleFn = isInc ? 'toggleHomeIncCatSetting' : 'toggleHomeExpCatSetting';
   if (list) {
     list.innerHTML = allCats.length
@@ -823,6 +933,10 @@ function categoryTotals(rows, type) {
   return Object.entries(map).sort((a, b) => b[1] - a[1]);
 }
 
+function homeIncomeCategoryTotals(rows) {
+  return categoryTotals(rows, '收入').filter(([cat]) => isIncomeCategory(cat));
+}
+
 function renderHomeLegend(el, entries, colors) {
   if (!el) return;
   if (!entries.length) {
@@ -873,27 +987,29 @@ function renderHomeDonut(chartKey, canvasId, entries, colors, total, centerEl) {
 }
 
 function renderHome() {
-  const ym = getLastMonthYm();
-  const titleEl = document.getElementById('homeMonthTitle');
-  if (titleEl) titleEl.textContent = fmtMonthLabel(ym);
+  renderHomeLongRemindersSection();
 
-  const rows = lastMonthStatsRows();
+  const ym = getHomeYm();
+  syncHomeMonthSelect();
+
+  const rows = monthStatsRows(ym);
   const expEntries = categoryTotals(rows, '支出');
-  const incEntries = categoryTotals(rows, '收入');
+  const incEntries = homeIncomeCategoryTotals(rows);
   const totalExp = expEntries.reduce((s, [, v]) => s + v, 0);
   const totalInc = incEntries.reduce((s, [, v]) => s + v, 0);
   const net = totalInc - totalExp;
   const estExp = estimatedMonthlyExpense(ym);
   const estExpCats = expenseCategoriesInYear(ym).length;
   const monthCount = yearMonthsThroughYm(ym).length;
+  const monthLbl = homeMonthKpiLabel(ym);
 
   const summaryEl = document.getElementById('homeSummary');
   if (summaryEl) {
     summaryEl.innerHTML = [
-      kpiCard('上月支出', fmtMoney(totalExp), `${expEntries.length} 个分类`, 'ti-arrow-down-right', 'pink', 'c-red'),
+      kpiCard(`${monthLbl}支出`, fmtMoney(totalExp), `${expEntries.length} 个分类`, 'ti-arrow-down-right', 'pink', 'c-red'),
       kpiCard('预估月支出', fmtMoney(estExp), `${estExpCats}类月均 · 本年${monthCount}个月`, 'ti-chart-arrows', 'amber', 'c-amb'),
-      kpiCard('上月收入', fmtMoney(totalInc), `${incEntries.length} 个分类`, 'ti-arrow-up-right', 'green', 'c-grn'),
-      kpiCard('上月结余', fmtMoneySigned(net), net >= 0 ? '盈余' : '超支', 'ti-scale', 'blue', net >= 0 ? 'c-blu' : 'c-red'),
+      kpiCard(`${monthLbl}收入`, fmtMoney(totalInc), `${incEntries.length} 个分类`, 'ti-arrow-up-right', 'green', 'c-grn'),
+      kpiCard(`${monthLbl}结余`, fmtMoneySigned(net), net >= 0 ? '盈余' : '超支', 'ti-scale', 'blue', net >= 0 ? 'c-blu' : 'c-red'),
     ].join('');
   }
 
@@ -902,7 +1018,7 @@ function renderHome() {
 
   const prevYm = getPrevMonthYm(ym);
   const prevExpMap = new Map(categoryTotals(monthStatsRows(prevYm), '支出'));
-  const prevIncMap = new Map(categoryTotals(monthStatsRows(prevYm), '收入'));
+  const prevIncMap = new Map(homeIncomeCategoryTotals(monthStatsRows(prevYm)));
   const hiddenExpCats = getHomeExpCatHidden();
   const hiddenIncCats = getHomeIncCatHidden();
   renderHomeCatGrid(document.getElementById('homeExpCats'), expEntries, prevExpMap, '支出', ym, hiddenExpCats, 'openHomeExpCatSettings');
@@ -1008,7 +1124,7 @@ function ensureSrcChipsDrag() {
     }
     const chip = e.target.closest('.chip-src[data-src]');
     if (!chip) return;
-    filterSrc(chip.dataset.src, chip);
+    filterSrc(chip.dataset.src);
   });
 
   list.addEventListener('dragstart', e => {
@@ -1063,16 +1179,15 @@ function buildSrcChips() {
     const bg = s === 'all' ? '#98a2b3' : srcBrandColor(s, srcColor(s));
     const label = s === 'all' ? '全部' : s;
     const srcAttr = s.replace(/"/g, '&quot;');
-    return `<div class="chip chip-src${on ? ' on' : ''}" style="--src-chip-bg:${bg}" data-src="${srcAttr}">${label}</div>`;
+    const mark = on ? '<i class="ti ti-check chip-src-mark" aria-hidden="true"></i>' : '';
+    return `<div class="chip chip-src${on ? ' on' : ''}" style="--src-chip-bg:${bg}" data-src="${srcAttr}" role="button"${on ? ' aria-pressed="true"' : ' aria-pressed="false"'}>${mark}<span class="chip-src-label">${label}</span></div>`;
   }).join('');
   ensureSrcChipsDrag();
 }
 
-function filterSrc(s, el) {
+function filterSrc(s) {
   activeSrc = s;
-  document.querySelectorAll('#srcChips .chip').forEach(c => c.classList.remove('on'));
-  if (el) el.classList.add('on');
-  else document.querySelector(`#srcChips .chip[data-src="${CSS.escape(s)}"]`)?.classList.add('on');
+  buildSrcChips();
   applyF();
 }
 
@@ -1094,8 +1209,79 @@ function syncCatFilterBtn(cat) {
   }
 }
 
+function subcatsForFilter(cat) {
+  if (!cat) return [];
+  const configured = subcatsFor(cat);
+  const used = new Set();
+  allData.forEach(r => {
+    if (!rowMatchesCat(r, cat)) return;
+    if (hasSplits(r)) {
+      r.splits.forEach(sp => {
+        if (sp.category === cat) {
+          used.add((sp.subcategory || '').trim() || SUBCAT_UNSET_LABEL);
+        }
+      });
+    } else {
+      used.add((r['子分类'] || '').trim() || SUBCAT_UNSET_LABEL);
+    }
+  });
+  const merged = [...new Set([...configured, ...used])];
+  return merged.sort((a, b) => {
+    if (a === SUBCAT_UNSET_LABEL) return 1;
+    if (b === SUBCAT_UNSET_LABEL) return -1;
+    return a.localeCompare(b, 'zh-CN');
+  });
+}
+
+function syncSubFilterOptions(cat, reset = false) {
+  const sel = document.getElementById('subf');
+  if (!sel) return;
+  if (reset) filterSubCat = '';
+  const activeCat = cat ?? document.getElementById('cf')?.value ?? '';
+  sel.replaceChildren();
+  const addOpt = (val, label) => {
+    const o = document.createElement('option');
+    o.value = val;
+    o.textContent = label;
+    sel.appendChild(o);
+  };
+  if (!activeCat) {
+    sel.disabled = true;
+    addOpt('', '全部子分类');
+    sel.value = '';
+    filterSubCat = '';
+    sel.classList.remove('on');
+    return;
+  }
+  const subs = subcatsForFilter(activeCat);
+  if (!subs.length) {
+    sel.disabled = true;
+    addOpt('', '无子分类');
+    sel.value = '';
+    filterSubCat = '';
+    sel.classList.remove('on');
+    return;
+  }
+  sel.disabled = false;
+  addOpt('', '全部子分类');
+  subs.forEach(s => addOpt(s, s));
+  if (filterSubCat && !subs.includes(filterSubCat)) filterSubCat = '';
+  sel.value = filterSubCat;
+  sel.classList.toggle('on', !!filterSubCat);
+}
+
+function onSubFilterChange(val) {
+  filterSubCat = val || '';
+  const sel = document.getElementById('subf');
+  if (sel) sel.classList.toggle('on', !!filterSubCat);
+  curPage = 1;
+  applyF();
+}
+
 function buildCatFilter() {
-  syncCatFilterBtn(document.getElementById('cf')?.value || '');
+  const cat = document.getElementById('cf')?.value || '';
+  syncCatFilterBtn(cat);
+  syncSubFilterOptions(cat, false);
   const fs = document.getElementById('f-cat');
   if (fs) {
     fs.innerHTML = '';
@@ -1123,11 +1309,16 @@ function applyF() {
   const d2 = document.getElementById('d2').value;
 
   filteredData = allData.filter(r => {
+    if (activeTxnLinkId) {
+      const link = findLinkById(activeTxnLinkId);
+      if (!link || !rowInLink(r, link)) return false;
+    }
     if (activeSrc !== 'all' && r['来源'] !== activeSrc) return false;
     if (cat && !rowMatchesCat(r, cat)) return false;
     if (tp && r['收支'] !== tp) return false;
     if (hideRf && r['退款状态'] === 'refunded') return false;
     if (filterUnsetSubOnly && !rowHasUnsetSub(r, subcatsFor)) return false;
+    if (filterSubCat && !rowMatchesSubCat(r, filterSubCat, subcatsFor, cat)) return false;
     if (q && !rowMatchesSearch(r, q)) return false;
     if (d1 && r['日期'] < d1) return false;
     if (d2 && r['日期'] > d2) return false;
@@ -1178,6 +1369,34 @@ function applyF() {
   curPage = 1;
   renderTable();
   syncSortHeaders();
+  syncDateSortBtn();
+  updateTxnLinkFilterBar();
+}
+
+function syncDateSortBtn() {
+  const btn = document.getElementById('dateSortBtn');
+  const sf = document.getElementById('sf');
+  if (!btn || !sf) return;
+  const onDate = sf.value.startsWith('d');
+  const desc = sf.value === 'd-';
+  btn.classList.toggle('on', onDate);
+  btn.title = onDate
+    ? (desc ? '当前：日期从新到旧，点击改为从旧到新' : '当前：日期从旧到新，点击改为从新到旧')
+    : '按日期排序（当前为其他排序）';
+  btn.innerHTML = onDate
+    ? `<i class="ti ti-sort-${desc ? 'descending' : 'ascending'}"></i> 日期`
+    : '<i class="ti ti-calendar"></i> 日期';
+}
+
+function toggleDateSort() {
+  const sf = document.getElementById('sf');
+  if (!sf) return;
+  if (sf.value.startsWith('d')) {
+    sf.value = sf.value === 'd-' ? 'd+' : 'd-';
+  } else {
+    sf.value = 'd-';
+  }
+  applyF();
 }
 
 function syncSortHeaders() {
@@ -1224,6 +1443,8 @@ function resetF() {
   updateSearchClear();
   document.getElementById('cf').value = '';
   syncCatFilterBtn('');
+  filterSubCat = '';
+  syncSubFilterOptions('', true);
   document.getElementById('tf').value = '';
   syncTypeSegUI();
   document.getElementById('rfHide').checked = true;
@@ -1231,8 +1452,8 @@ function resetF() {
   syncUnsetSubFilterUI();
   document.getElementById('sf').value = 'd-';
   activeSrc = 'all';
-  document.querySelectorAll('#srcChips .chip').forEach(c => c.classList.remove('on'));
-  document.querySelector('#srcChips .chip[data-src="all"]')?.classList.add('on');
+  activeTxnLinkId = null;
+  buildSrcChips();
   applyF();
 }
 
@@ -1255,6 +1476,40 @@ function typeBadge(t, rf, cat) {
   return t === '收入' ? '<span class="type-lbl inc">收入</span>' : '<span class="type-lbl exp">支出</span>';
 }
 
+
+function dayNoteHtml(date) {
+  const raw = dayNotes[date] || '';
+  const val = raw.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  return `<input type="text" class="ledger-day-note" data-date="${date}" value="${val}" placeholder="当天备注…" maxlength="120" onclick="event.stopPropagation()" aria-label="当天备注">`;
+}
+
+function setDayNote(date, text) {
+  if (!date) return;
+  const note = String(text || '').trim();
+  const prev = dayNotes[date] || '';
+  if (note === prev) return;
+  if (note) dayNotes[date] = note;
+  else delete dayNotes[date];
+  persist();
+}
+
+let dayNoteEventsBound = false;
+function ensureDayNoteEvents() {
+  const el = document.getElementById('tbody');
+  if (!el || dayNoteEventsBound) return;
+  dayNoteEventsBound = true;
+  el.addEventListener('change', e => {
+    const inp = e.target.closest('.ledger-day-note');
+    if (!inp) return;
+    setDayNote(inp.dataset.date, inp.value);
+  });
+  el.addEventListener('keydown', e => {
+    const inp = e.target.closest('.ledger-day-note');
+    if (!inp || e.key !== 'Enter') return;
+    e.preventDefault();
+    inp.blur();
+  });
+}
 
 function renderTable() {
   const start = (curPage - 1) * PG;
@@ -1284,11 +1539,13 @@ function renderTable() {
     return `<section class="ledger-day-card">
       <header class="ledger-day-head">
         <span class="ledger-day-date"><i class="ti ti-calendar" aria-hidden="true"></i>${formatDayHeader(date)}</span>
+        ${dayNoteHtml(date)}
         ${daySumHtml(t.inc, t.exp)}
       </header>
       <div class="ledger-day-rows">${rows.map(renderLedgerDayRow).join('')}</div>
     </section>`;
   }).join('');
+  ensureDayNoteEvents();
   renderPager();
 }
 
@@ -1486,7 +1743,13 @@ function unlinkCatBrowsePair() {
     }
     removeTxnPairByKey(keys[0]);
   } else if (keys.length === 2) {
-    removeTxnPair(keys[0], keys[1]);
+    const linkA = findLinkForKey(keys[0]);
+    const linkB = findLinkForKey(keys[1]);
+    if (!linkA || linkA !== linkB) {
+      alert('两条账目不在同一关联中');
+      return;
+    }
+    removeTxnLinkById(linkA.id);
   } else {
     alert('请选择已配对的账目');
     return;
@@ -1707,6 +1970,7 @@ function refreshActiveViews() {
   if (document.getElementById('view-report')?.classList.contains('on')) renderReport();
   if (document.getElementById('view-catreport')?.classList.contains('on')) renderCatReport();
   if (document.getElementById('view-catbrowse')?.classList.contains('on')) renderCatBrowse();
+  if (document.getElementById('view-trades')?.classList.contains('on')) renderTradesPage();
   if (document.getElementById('view-renqing')?.classList.contains('on')) renderRenqingPage();
   if (document.getElementById('view-accounts')?.classList.contains('on')) renderAccountsPage();
 }
@@ -2908,7 +3172,7 @@ function incomeChartOptions(months, cat) {
 function renderIncomeToolbar() {
   const bar = document.getElementById('incomeToolbar');
   if (!bar) return;
-  const available = CATS.filter(c => !INCOME_DATA_CATS_LIST.includes(c));
+  const available = CATS.filter(c => isIncomeCategory(c) && !INCOME_DATA_CATS_LIST.includes(c));
   const chips = INCOME_DATA_CATS_LIST.map(cat => {
     const safe = cat.replace(/'/g, "\\'");
     return `<span class="income-cat-chip">
@@ -2929,7 +3193,7 @@ function renderIncomeToolbar() {
 
 function addIncomeMonitorCat(cat) {
   const name = String(cat || '').trim();
-  if (!name || !CATS.includes(name) || INCOME_DATA_CATS_LIST.includes(name)) return;
+  if (!name || !CATS.includes(name) || !isIncomeCategory(name) || INCOME_DATA_CATS_LIST.includes(name)) return;
   INCOME_DATA_CATS_LIST.push(name);
   persist();
   renderIncomeData();
@@ -3084,8 +3348,9 @@ function sw(name, el) {
   document.querySelectorAll('.ni').forEach(n => n.classList.remove('on'));
   document.getElementById('view-' + name).classList.add('on');
   el.classList.add('on');
-  document.getElementById('vt').textContent = { home: '首页', ledger: '明细列表', catbrowse: '分类检索', catreport: '分类报表', renqing: '人情往来', accounts: '信用账户', charts: '统计图表', monitor: '统计监控', gear: '装备库', report: '收支报告', income: '收入数据', company: '公司成本', refunds: '退款管理', import: '导入预览' }[name];
+  document.getElementById('vt').textContent = { home: '首页', ledger: '明细列表', trades: '交易', catbrowse: '分类检索', catreport: '分类报表', renqing: '人情往来', accounts: '信用账户', charts: '统计图表', monitor: '统计监控', gear: '装备库', family: '家庭', report: '收支报告', income: '收入数据', company: '公司成本', refunds: '退款管理', import: '导入预览' }[name];
   if (name === 'home') setTimeout(renderHome, 60);
+  if (name === 'trades') setTimeout(renderTradesPage, 60);
   if (name === 'charts') setTimeout(renderCharts, 60);
   if (name === 'report') setTimeout(renderReport, 60);
   if (name === 'income') setTimeout(renderIncomeData, 60);
@@ -3095,6 +3360,7 @@ function sw(name, el) {
   if (name === 'refunds') renderRfView();
   if (name === 'monitor') renderMonitor();
   if (name === 'gear') renderGearPage();
+  if (name === 'family') setTimeout(() => { loadFamilyEvents().catch(err => alert(err.message || '加载失败')); }, 60);
   if (name === 'company') renderCompanyCostPage();
   if (name === 'import') renderImportPage();
   if (name === 'catbrowse') setTimeout(renderCatBrowse, 60);
@@ -3229,6 +3495,7 @@ function refreshImportRecords() {
     <div class="import-stat"><div class="n">${pending}</div><div class="l">待确认</div></div>`;
   document.getElementById('importConfirmBtn').disabled = pendingImport.records.length === 0;
   renderImportTimelineView();
+  renderImportRecordTable(pendingImport.allRecords || []);
   updateImportStepUI(3);
 }
 
@@ -3358,7 +3625,7 @@ async function handleImportFile(file) {
       <div class="import-stat"><div class="n">${range.months.length}</div><div class="l">覆盖月份</div></div>`;
 
     renderImportTimelineView();
-    renderImportRecordTable(newRecords);
+    renderImportRecordTable(pendingImport.allRecords);
     renderDuplicateReview();
     document.getElementById('importConfirmBtn').disabled = pendingImport.records.length === 0;
     updateImportStepUI(3);
@@ -3721,7 +3988,8 @@ function pruneCategoryMeta() {
   }
   CAT_STATS_EXCLUDE = new Set([...CAT_STATS_EXCLUDE].filter(c => active.has(c)));
   OFFSET_CATS_SET = new Set([...OFFSET_CATS_SET].filter(c => active.has(c)));
-  INCOME_DATA_CATS_LIST = INCOME_DATA_CATS_LIST.filter(c => active.has(c));
+  INCOME_CATS_SET = new Set([...INCOME_CATS_SET].filter(c => active.has(c)));
+  INCOME_DATA_CATS_LIST = INCOME_DATA_CATS_LIST.filter(c => active.has(c) && isIncomeCategory(c));
   for (const key of [...catSubExpanded]) {
     if (!active.has(key)) catSubExpanded.delete(key);
   }
@@ -3736,8 +4004,6 @@ function applyLoadedCategories(categories) {
   if (categories.emojis) {
     for (const [cat, val] of Object.entries(categories.emojis)) {
       if (!CATS.includes(cat)) continue;
-      const legacy = LEGACY_DEFAULT_EMOJIS[cat];
-      if (legacy && val === legacy) continue;
       EMOJIS[cat] = val;
     }
   }
@@ -3763,18 +4029,29 @@ function applyLoadedCategories(categories) {
   } else {
     OFFSET_CATS_SET = new Set(DEFAULT_OFFSET_CATS.filter(c => CATS.includes(c)));
   }
+  if (Array.isArray(categories.incomeCats) && categories.incomeCats.length) {
+    INCOME_CATS_SET = new Set(categories.incomeCats.filter(c => CATS.includes(c)));
+  } else {
+    const named = CATS.filter(c => c.includes('收入'));
+    INCOME_CATS_SET = new Set([...DEFAULT_INCOME_CATS, ...named].filter(c => CATS.includes(c)));
+  }
   if (Array.isArray(categories.incomeDataCats) && categories.incomeDataCats.length) {
     INCOME_DATA_CATS_LIST = categories.incomeDataCats.filter(c => CATS.includes(c));
   } else {
     INCOME_DATA_CATS_LIST = DEFAULT_INCOME_DATA_CATS.filter(c => CATS.includes(c));
   }
+  INCOME_DATA_CATS_LIST = INCOME_DATA_CATS_LIST.filter(c => INCOME_CATS_SET.has(c));
   pruneCategoryMeta();
 }
 
 function migrateCatEmojisToIcons() {
   let changed = false;
   for (const cat of CATS) {
-    const resolved = resolveCatIconValue(cat, EMOJIS[cat], {
+    const stored = EMOJIS[cat];
+    if (!stored || isIconRef(stored) || isIconifyRef(stored)) continue;
+    const legacy = LEGACY_DEFAULT_EMOJIS[cat];
+    if (!legacy || stored !== legacy) continue;
+    const resolved = resolveCatIconValue(cat, stored, {
       iconMap: DEFAULT_EMOJIS,
       legacyMap: LEGACY_DEFAULT_EMOJIS,
       nameAliases: CAT_ICON_NAME_ALIASES,
@@ -3793,9 +4070,14 @@ function catIconHtml(cat, opts = {}) {
 }
 
 function setCatIconBtn(btn, value) {
-  const v = value || iconRef('1F4CC');
+  const v = normalizeIconRef(value) || value || iconRef('1F4CC');
   btn.dataset.emoji = v;
   btn.innerHTML = renderCatIcon(v, { size: 22 });
+}
+
+function readCatEmojiFromBtn(btn) {
+  if (!btn) return '';
+  return (btn.getAttribute('data-emoji') ?? btn.dataset.emoji ?? '').trim();
 }
 
 function openCat() { renderCatList(); document.getElementById('moCat').classList.remove('hide'); }
@@ -3821,12 +4103,15 @@ function collectCatListFromDom() {
   return [...document.querySelectorAll('#catList .cat-edit-item')].map(item => {
     const origIdx = parseInt(item.dataset.i, 10);
     const oldName = CATS[origIdx];
+    const emojiBtn = item.querySelector('.cat-emoji-btn');
+    const pickedEmoji = readCatEmojiFromBtn(emojiBtn);
     return {
       origIdx,
       oldName,
       name: item.querySelector('.ni2')?.value.trim() || oldName,
-      emoji: item.querySelector('.cat-emoji-btn')?.dataset.emoji?.trim() || catIconValue(oldName),
+      emoji: pickedEmoji || catIconValue(oldName),
       statsExclude: !!item.querySelector('.cat-stats-exclude-cb')?.checked,
+      income: !!item.querySelector('.cat-income-cb')?.checked,
       offset: !!item.querySelector('.cat-offset-cb')?.checked,
       subsRaw: item.querySelector('.subcat-inp')?.value || '',
     };
@@ -3911,16 +4196,20 @@ function renderCatList() {
   document.getElementById('catList').innerHTML = CATS.map((c, i) => {
     const subs = SUBCATS[c] || [];
     const open = catSubExpanded.has(c);
-    const em = catIconValue(c);
+    const em = EMOJIS[c] || catIconValue(c);
     return `<div class="cat-edit-item" data-i="${i}">
       <div class="cr">
         <button type="button" class="cat-drag-handle" draggable="true" title="拖动排序" aria-label="拖动排序"><i class="ti ti-grip-vertical"></i></button>
         <button type="button" class="cat-sub-toggle${open ? ' open' : ''}" title="子分类${subs.length ? `（${subs.length}）` : ''}" onclick="toggleCatSub(${i})"><i class="ti ti-chevron-right"></i></button>
-        <button type="button" class="cat-emoji-btn" data-i="${i}" data-emoji="${em}" title="设置图标" onclick="pickCatEmoji(event,${i})">${catIconHtml(c, { size: 22 })}</button>
+        <button type="button" class="cat-emoji-btn" data-i="${i}" data-emoji="${em}" title="设置图标" onclick="pickCatEmoji(event,${i})">${catIconHtml(c, { size: 22, value: em })}</button>
         <input class="ni2" value="${c}" data-i="${i}">
         <label class="cat-stats-exclude" title="不计入首页总收支、图表等统计">
           <input type="checkbox" class="cat-stats-exclude-cb" data-i="${i}"${CAT_STATS_EXCLUDE.has(c) ? ' checked' : ''}>
           <span>不计入统计</span>
+        </label>
+        <label class="cat-income-type" title="勾选后出现在首页收入分类卡片、收入数据页可选监视">
+          <input type="checkbox" class="cat-income-cb" data-i="${i}"${INCOME_CATS_SET.has(c) ? ' checked' : ''}>
+          <span>收入类</span>
         </label>
         <label class="cat-offset-type" title="统计时该分类收支相抵，只计净收入/净支出">
           <input type="checkbox" class="cat-offset-cb" data-i="${i}"${OFFSET_CATS_SET.has(c) ? ' checked' : ''}>
@@ -3944,6 +4233,7 @@ function delCat(i) {
   delete SUBCATS[c];
   CAT_STATS_EXCLUDE.delete(c);
   OFFSET_CATS_SET.delete(c);
+  INCOME_CATS_SET.delete(c);
   INCOME_DATA_CATS_LIST = INCOME_DATA_CATS_LIST.filter(x => x !== c);
   catSubExpanded.delete(c);
   renderCatList();
@@ -3952,7 +4242,7 @@ function addCat() {
   const n = document.getElementById('nn').value.trim();
   if (!n || CATS.includes(n)) { alert(n ? '已存在' : '请输入名称'); return; }
   const emBtn = document.getElementById('nnEmoji');
-  const em = emBtn?.dataset.emoji || iconRef('1F4CC');
+  const em = normalizeIconRef(readCatEmojiFromBtn(emBtn)) || readCatEmojiFromBtn(emBtn) || iconRef('1F4CC');
   CATS.push(n);
   EMOJIS[n] = em;
   SUBCATS[n] = [];
@@ -4014,7 +4304,7 @@ function saveCat() {
   for (const row of rows) {
     if (row.name === row.oldName) continue;
     renameCategoryInTransactions(row.oldName, row.name);
-    EMOJIS[row.name] = EMOJIS[row.oldName] || row.emoji;
+    EMOJIS[row.name] = normalizeIconRef(row.emoji) || row.emoji || EMOJIS[row.oldName] || iconRef('1F4CC');
     delete EMOJIS[row.oldName];
     if (SUBCATS[row.oldName]) {
       SUBCATS[row.name] = SUBCATS[row.oldName];
@@ -4032,29 +4322,38 @@ function saveCat() {
       OFFSET_CATS_SET.delete(row.oldName);
       OFFSET_CATS_SET.add(row.name);
     }
+    if (INCOME_CATS_SET.has(row.oldName)) {
+      INCOME_CATS_SET.delete(row.oldName);
+      INCOME_CATS_SET.add(row.name);
+    }
     const incIdx = INCOME_DATA_CATS_LIST.indexOf(row.oldName);
     if (incIdx >= 0) INCOME_DATA_CATS_LIST[incIdx] = row.name;
   }
 
   const nextCats = [];
   const nextExclude = new Set();
+  const nextIncome = new Set();
   const nextOffset = new Set();
 
   for (const row of rows) {
     nextCats.push(row.name);
-    EMOJIS[row.name] = row.emoji || EMOJIS[row.name] || iconRef('1F4CC');
+    const icon = normalizeIconRef(row.emoji) || row.emoji || EMOJIS[row.name] || iconRef('1F4CC');
+    EMOJIS[row.name] = icon;
     const subs = row.subsRaw.split(/[,，]/).map(s => s.trim()).filter(Boolean);
     if (subs.length) SUBCATS[row.name] = subs;
     else delete SUBCATS[row.name];
     allData.filter(r => r['分类'] === row.name && r['子分类'] && !subs.includes(r['子分类']))
       .forEach(r => r['子分类'] = '');
     if (row.statsExclude) nextExclude.add(row.name);
+    if (row.income) nextIncome.add(row.name);
     if (row.offset) nextOffset.add(row.name);
   }
 
   CATS = nextCats;
   CAT_STATS_EXCLUDE = nextExclude;
+  INCOME_CATS_SET = nextIncome;
   OFFSET_CATS_SET = nextOffset;
+  INCOME_DATA_CATS_LIST = INCOME_DATA_CATS_LIST.filter(c => INCOME_CATS_SET.has(c));
   pruneCategoryMeta();
 
   persistNow().then(ok => {
@@ -4075,6 +4374,7 @@ function saveCat() {
 
 // ── 批量选择 ─────────────────────────────────────────────────────────────────
 let selectedIds = new Set();
+let pendingTxnLinkKeys = null;
 
 function computeSelectedStats() {
   const rows = [...selectedIds].map(id => allData.find(r => r.id === id)).filter(Boolean);
@@ -4148,6 +4448,18 @@ function updateBulkBar() {
       subSel.title = sameCat ? '该分类暂无子分类' : '选中项需属于同一分类';
       subSel.innerHTML = `<option value="">${sameCat ? '该分类无子分类' : '需同一分类'}</option>`;
     }
+
+    const linkBtn = document.getElementById('bulkLinkBtn');
+    const unlinkBtn = document.getElementById('bulkUnlinkBtn');
+    if (linkBtn) linkBtn.disabled = selectedIds.size < 2;
+    if (unlinkBtn) {
+      const linkIds = new Set();
+      [...selectedIds].forEach(id => {
+        const link = findLinkForKey(String(id));
+        if (link) linkIds.add(link.id);
+      });
+      unlinkBtn.disabled = linkIds.size !== 1;
+    }
   } else {
     bar.classList.remove('show');
     const statsEl = document.getElementById('bulkStats');
@@ -4199,6 +4511,233 @@ function bulkToggleRefund(markAsRefund) {
   renderRfView();
   clearSelection();
   applyF();
+}
+
+function linkLedgerGroup() {
+  const keys = [...selectedIds].map(id => String(id));
+  if (keys.length < 2) {
+    alert('请至少选择 2 笔账目进行关联');
+    return;
+  }
+  const rows = keys.map(id => allData.find(r => r.id === Number(id))).filter(Boolean);
+  const err = validateTxnLink(keys, rows);
+  if (err) {
+    alert(err);
+    return;
+  }
+  pendingTxnLinkKeys = keys;
+  const inp = document.getElementById('txnLinkNameInp');
+  const modal = document.getElementById('moTxnLink');
+  if (!inp || !modal) return;
+  inp.value = suggestTxnLinkName(rows);
+  modal.classList.remove('hide');
+  inp.focus();
+  inp.select();
+}
+
+function closeTxnLinkModal() {
+  pendingTxnLinkKeys = null;
+  document.getElementById('moTxnLink')?.classList.add('hide');
+}
+
+function confirmTxnLinkModal() {
+  const keys = pendingTxnLinkKeys;
+  if (!keys?.length) {
+    closeTxnLinkModal();
+    return;
+  }
+  const trimmed = document.getElementById('txnLinkNameInp')?.value?.trim() || '';
+  if (!trimmed) {
+    alert('关联名称不能为空');
+    document.getElementById('txnLinkNameInp')?.focus();
+    return;
+  }
+  try {
+    addTxnLink(trimmed, keys);
+  } catch (e) {
+    alert(e.message || '关联失败');
+    return;
+  }
+  closeTxnLinkModal();
+  persist();
+  clearSelection();
+  applyF();
+  renderTradesPage();
+}
+
+function unlinkLedgerGroup() {
+  const keys = [...selectedIds].map(id => String(id));
+  if (!keys.length) return;
+  const linkIds = new Set();
+  keys.forEach(k => {
+    const link = findLinkForKey(k);
+    if (link) linkIds.add(link.id);
+  });
+  if (linkIds.size !== 1) {
+    alert('请选择属于同一关联的账目，或选择单条已关联账目');
+    return;
+  }
+  const linkId = [...linkIds][0];
+  const link = findLinkById(linkId);
+  if (!confirm(`确定取消关联「${link?.name || ''}」？`)) return;
+  removeTxnLinkById(linkId);
+  if (activeTxnLinkId === linkId) activeTxnLinkId = null;
+  if (activeTradeLinkId === linkId) activeTradeLinkId = null;
+  persist();
+  clearSelection();
+  applyF();
+  renderTradesPage();
+}
+
+function tradeCatCellHtml(row) {
+  const cat = row['分类'] || '';
+  const sub = (row['子分类'] || '').trim();
+  const icon = catIconHtml(cat, { size: 18, wrapClass: 'cat-pick-emoji-wrap' });
+  const subPart = sub
+    ? `<span class="cat-cell-sep">·</span><span class="cs cs-sub trade-cat-sub">${escHtml(sub)}</span>`
+    : '';
+  return `<div class="trade-row-cat cat-cell">
+    <div class="cat-cell-inner">
+      <span class="trade-cat-icon" aria-hidden="true">${icon}</span>
+      <div class="cat-cell-text">
+        <span class="trade-cat-label"><span class="cat-pick-label">${escHtml(cat)}</span></span>${subPart}
+      </div>
+    </div>
+  </div>`;
+}
+
+function tradeRowHtml(row) {
+  const isInc = row['收支'] === '收入';
+  const peer = (row['交易对方'] || row['产品名称'] || '—').trim();
+  return `<div class="trade-row">
+    <div class="trade-row-dt">${formatDateLabel(row['日期'])}<span>${formatTimeShort(row['时间'])}</span></div>
+    <div class="trade-row-peer">${escHtml(peer)}</div>
+    ${tradeCatCellHtml(row)}
+    <div class="trade-row-type">${typeBadge(row['收支'], row['退款状态'], row['分类'])}</div>
+    <div class="trade-row-amt ${isInc ? 'inc' : 'exp'}">${isInc ? '+' : '-'}${fmtMoney(row['金额'])}</div>
+  </div>`;
+}
+
+function tradeLinkSortKey(link) {
+  const rows = rowsForLinkKeys(link.keys, allData);
+  if (!rows.length) return '';
+  return rows.map(r => r['日期'] + r['时间']).sort().pop();
+}
+
+function renderTradeLinkSummary(link, stats) {
+  const meta = linkBalanceMeta(stats);
+  return `<span class="trade-card-name"><i class="ti ti-link"></i> ${escHtml(link.name)}</span>
+    <span class="trade-card-stats">
+      支出 ${fmtMoney(stats.exp)} · 收入 ${fmtMoney(stats.inc)} · 净额 ${fmtMoneySigned(stats.net)}
+      <span class="txn-link-balance ${meta.cls}">${meta.label}</span>
+    </span>`;
+}
+
+function renderTradesPage() {
+  const el = document.getElementById('tradesList');
+  if (!el) return;
+  const links = getTxnPairs().slice().sort((a, b) => tradeLinkSortKey(b).localeCompare(tradeLinkSortKey(a)));
+  if (!links.length) {
+    el.innerHTML = `<div class="trades-empty">
+      <i class="ti ti-link-off"></i>
+      <p>暂无关联交易</p>
+      <span>在明细列表勾选多笔账目后，点击「关联」即可创建</span>
+    </div>`;
+    return;
+  }
+  el.innerHTML = links.map(link => {
+    const rows = rowsForLinkKeys(link.keys, allData);
+    const stats = computeLinkStats(rows);
+    const expanded = activeTradeLinkId === link.id;
+    const rowHtml = rows
+      .sort((a, b) => (a['日期'] + a['时间']).localeCompare(b['日期'] + b['时间']))
+      .map(tradeRowHtml)
+      .join('');
+    return `<article class="trade-card${expanded ? ' is-open' : ''}" data-link-id="${escHtml(link.id)}">
+      <div class="trade-card-head">
+        <button type="button" class="trade-card-toggle" onclick="toggleTradeCard('${escHtml(link.id)}')">
+          <span class="trade-card-summary">${renderTradeLinkSummary(link, stats)}</span>
+          <i class="ti ti-chevron-down trade-card-chevron"></i>
+        </button>
+        <span class="trade-card-actions">
+          <button type="button" class="btn btn-sm" onclick="viewTradeInLedger('${escHtml(link.id)}')" title="在明细中查看"><i class="ti ti-list-details"></i></button>
+          <button type="button" class="btn btn-sm btn-a" onclick="unlinkTradeGroup('${escHtml(link.id)}')" title="取消关联"><i class="ti ti-unlink"></i></button>
+        </span>
+      </div>
+      <div class="trade-card-body">${rowHtml}</div>
+    </article>`;
+  }).join('');
+}
+
+function toggleTradeCard(id) {
+  activeTradeLinkId = activeTradeLinkId === id ? null : id;
+  renderTradesPage();
+}
+
+function openTradeLink(id) {
+  if (!findLinkById(id)) return;
+  activeTradeLinkId = id;
+  const nav = document.querySelector('.ni[title="关联交易"]');
+  if (nav) sw('trades', nav);
+  else renderTradesPage();
+}
+
+function viewTradeInLedger(id) {
+  if (!findLinkById(id)) return;
+  activeTxnLinkId = id;
+  const nav = document.querySelector('.ni[title="明细列表"]');
+  if (nav) sw('ledger', nav);
+  applyF();
+}
+
+function unlinkTradeGroup(id) {
+  const link = findLinkById(id);
+  if (!link) return;
+  if (!confirm(`确定取消关联「${link.name}」？`)) return;
+  removeTxnLinkById(id);
+  if (activeTxnLinkId === id) activeTxnLinkId = null;
+  if (activeTradeLinkId === id) activeTradeLinkId = null;
+  persist();
+  renderTradesPage();
+  applyF();
+}
+
+function filterTxnLink(id) {
+  openTradeLink(id);
+}
+
+function clearTxnLinkFilter() {
+  activeTxnLinkId = null;
+  applyF();
+}
+
+function updateTxnLinkFilterBar() {
+  const bar = document.getElementById('txnLinkFilterBar');
+  if (!bar) return;
+  if (!activeTxnLinkId) {
+    bar.classList.add('hide');
+    bar.innerHTML = '';
+    return;
+  }
+  const link = findLinkById(activeTxnLinkId);
+  if (!link) {
+    activeTxnLinkId = null;
+    bar.classList.add('hide');
+    bar.innerHTML = '';
+    return;
+  }
+  const rows = rowsForLinkKeys(link.keys, allData);
+  const stats = computeLinkStats(rows);
+  const meta = linkBalanceMeta(stats);
+  bar.classList.remove('hide');
+  bar.innerHTML = `
+    <span class="txn-link-filter-name"><i class="ti ti-link"></i> ${escHtml(link.name)}</span>
+    <span class="txn-link-filter-stats">
+      支出 ${fmtMoney(stats.exp)} · 收入 ${fmtMoney(stats.inc)} · 净额 ${fmtMoneySigned(stats.net)}
+      <span class="txn-link-balance ${meta.cls}">${meta.label}</span>
+    </span>
+    <button type="button" class="btn btn-sm txn-link-filter-close" onclick="openTradeLink('${escHtml(link.id)}')" title="在交易页查看"><i class="ti ti-arrows-exchange"></i></button>
+    <button type="button" class="btn btn-sm txn-link-filter-close" onclick="clearTxnLinkFilter()" title="退出筛选"><i class="ti ti-x"></i></button>`;
 }
 
 // ── 明细弹窗批量选择 ─────────────────────────────────────────────────────────
@@ -4398,6 +4937,7 @@ async function initAppInner() {
     },
     onFilterSelect: cat => {
       syncCatFilterBtn(cat);
+      syncSubFilterOptions(cat, true);
       applyF();
     },
   });
@@ -4411,7 +4951,9 @@ async function initAppInner() {
     formatDateLabel,
     formatTimeShort,
     srcBadge: srcBadgeBrowse,
-    onReorderCats: reorderCats
+    onReorderCats: reorderCats,
+    isOffsetCat: cat => OFFSET_CATS_SET.has(cat),
+    isIncomeCategory,
   });
   initRenqing({
     getExpandedRows: renqingExpanded,
@@ -4430,7 +4972,17 @@ async function initAppInner() {
     persistNow: persistNow
   });
   setupAccountsEvents();
-  initGear({ getAllData: () => allData, onPersist: persist });
+  initGear({
+    getAllData: () => allData,
+    onPersist: persist,
+    getCats: () => CATS,
+    getSubcatsFor: cat => SUBCATS[cat] || [],
+    ensureSubcat: (cat, sub) => {
+      if (!cat || !sub) return;
+      if (!SUBCATS[cat]) SUBCATS[cat] = [];
+      if (!SUBCATS[cat].includes(sub)) SUBCATS[cat] = [...SUBCATS[cat], sub];
+    }
+  });
   initSplits({
     getCats: () => CATS,
     getSubcatsFor: subcatsFor,
@@ -4439,6 +4991,7 @@ async function initAppInner() {
   });
   setupGearUpload();
   setupCompanyCost();
+  setupFamilyEvents();
   setupDropZone();
   setupImportHistoryActions();
   setupLedgerHeadScrollSync();
@@ -4452,25 +5005,36 @@ Object.assign(window, {
   applyCatBrowseBulkCat, applyCatBrowseBulkSub, linkCatBrowsePair, unlinkCatBrowsePair,
   openAdd, closeAdd, saveAdd, openEditRow, openSrc, closeSrc, addSrc, saveSrc,
   openCat, closeCat, addCat, saveCat, delCat, toggleCatSub, pickCatEmoji, pickNewCatEmoji,
-  setQuick, resetF, applyF, changePgSize, filterSrc, setTypeFilter, toggleSortCol,
+  setQuick, resetF, applyF, changePgSize, filterSrc, setTypeFilter, onSubFilterChange, toggleSortCol, toggleDateSort,
   toggleSelect, toggleSelectAll, clearSelection, applyBulkCat, applyBulkSubCat, bulkToggleRefund,
-  resetImportPreview, confirmImport, onImportSrcChange, toggleDupImport, toggleAllDupImport, resetAllLedger,
+  linkLedgerGroup, unlinkLedgerGroup, closeTxnLinkModal, confirmTxnLinkModal,
+  filterTxnLink, clearTxnLinkFilter, toggleTradeCard, openTradeLink, viewTradeInLedger, unlinkTradeGroup,
+  resetImportPreview, confirmImport, onImportSrcChange, toggleDupImport, toggleAllDupImport,
+  toggleImportRecordType, updateImportRecordAmount, resetAllLedger,
   openBatchSrc, closeBatchSrc, saveBatchSrc, onCatReportChange, onCatReportYearChange, selectRenqingPerson, triggerRenqingAvatarUpload,
   updRenqingSubCat, updRenqingSplitSub,
   openAccountsMgr, closeAccountsMgr, resetAccountsMgrForm, saveAccountsMgr,
   editAccountsMgr, startAccountMerge, cancelAccountMerge, confirmAccountMerge,
-  addCreditCardRow, deleteCreditCard, toggleCreditCardEditMode,
+  addCreditCardRow, deleteCreditCard, toggleCreditCardEditMode, toggleCreditCancelled,
   toggleCashAccountEditMode, addCashAccountRow, deleteCashAccount,
   toggleBudgetEditMode, addBudgetRow, deleteBudget,
+  toggleLifeAccountEditMode, addLifeAccountRow, deleteLifeAccount,
+  toggleLongReminderEditMode, addLongReminderRow, deleteLongReminder, addLongReminderToCalendar,
+  toggleWebAccountEditMode, addWebAccountRow, addWebAccountColumn, deleteWebAccountRow, deleteWebAccountColumn,
   bindSelectedCreditCards, unbindCreditCardFromPool, dissolveCreditPoolById,
   goP, toggleRf, toggleExclude, updCat, updSubCat, updCatDet, showAllDetail, showDetail, showIncomeDetail, showCatReportDetail, closeDetModal, toggleDetSort, toggleDetUnsetSubFilter,
   openHomeExpCatSettings, closeHomeExpCatSettings, saveHomeExpCatSettings, toggleHomeExpCatSetting,
   openHomeIncCatSettings, closeHomeIncCatSettings, saveHomeIncCatSettings, toggleHomeIncCatSetting,
+  onHomeMonthChange,
   toggleDetSelect, toggleDetSelectAll, clearDetSelection, applyDetBulkCat, applyDetBulkSubCat, detBulkToggleRefund,
   openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload, submitGearImageUrl,
+  selectGearTab, markGearSold, markGearUnsold, markGearSoldFromModal,
+  onGearCatChange, openGearSectionAdd, closeGearSectionAdd, confirmGearSectionAdd,
+  onGearSectionCatChange, onGearSectionSubChange, removeGearSection,
   addIncomeMonitorCat, addIncomeMonitorCatFromSel, removeIncomeMonitorCat,
   openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload, triggerManualInvoiceUpload,
-  toggleInvoicePrinted, downloadInvoiceFile, printInvoiceFile,
+  toggleInvoicePrinted, downloadInvoiceFile, printInvoiceFile, openAppConfig,
+  openFamilyCreate, openFamilyEdit, closeFamilyEdit, saveFamilyEdit, removeFamilyEvent, triggerFamilyUpload,
   openSplitEditor, closeSplitEditor, addSplitLine, saveSplitEdit: handleSaveSplit,
   clearSplit: handleClearSplit, clearSplitFromModal, toggleSplitExpand: handleToggleSplitExpand,
   updSplitCat: handleUpdSplitCat, updSplitSub: handleUpdSplitSub,

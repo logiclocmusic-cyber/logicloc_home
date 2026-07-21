@@ -1,3 +1,7 @@
+import { ensurePdfJsUint8Polyfills } from './pdfjs-polyfill.js';
+
+ensurePdfJsUint8Polyfills();
+
 import './style.css';
 import { Parsers } from './parsers.js';
 import { Categorizer } from './categorizer.js';

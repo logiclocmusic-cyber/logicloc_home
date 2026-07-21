@@ -24,7 +24,7 @@ db.exec(`
   );
 `);
 
-const META_KEYS = ['refunded', 'excluded', 'categories', 'sources', 'rules', 'importHistory', 'nextId', 'gearLibrary', 'nextGearId', 'renqingAvatars', 'accountCardFaces', 'accountLogos', 'accountRegistry', 'txnPairs', 'stateVersion'];
+const META_KEYS = ['refunded', 'excluded', 'categories', 'sources', 'rules', 'importHistory', 'nextId', 'gearLibrary', 'nextGearId', 'gearSections', 'renqingAvatars', 'accountCardFaces', 'accountLogos', 'accountRegistry', 'txnPairs', 'dayNotes', 'stateVersion'];
 
 function txnRowKey(row) {
   const oid = String(row['交易单号'] || '').trim();
@@ -57,11 +57,13 @@ export function readState() {
     nextId: meta.nextId || 1,
     gearLibrary: meta.gearLibrary || [],
     nextGearId: meta.nextGearId || 1,
+    gearSections: meta.gearSections || [],
     renqingAvatars: meta.renqingAvatars || {},
     accountCardFaces: meta.accountCardFaces || {},
     accountLogos: meta.accountLogos || {},
     accountRegistry: meta.accountRegistry || { overrides: {}, hidden: [], manual: [], merges: {}, creditHidden: [], creditPools: [], creditGroups: {} },
     txnPairs: meta.txnPairs || [],
+    dayNotes: meta.dayNotes || {},
     stateVersion: meta.stateVersion || 0
   };
 }
@@ -98,11 +100,13 @@ export function writeState(state, opts = {}) {
       nextId: resolveNextId(state.transactions || [], state.nextId),
       gearLibrary: state.gearLibrary || [],
       nextGearId: state.nextGearId || 1,
+      gearSections: state.gearSections || [],
       renqingAvatars: state.renqingAvatars || {},
       accountCardFaces: state.accountCardFaces || {},
       accountLogos: state.accountLogos || {},
       accountRegistry: state.accountRegistry || { overrides: {}, hidden: [], manual: [], merges: {}, creditHidden: [] },
       txnPairs: state.txnPairs || [],
+      dayNotes: state.dayNotes || {},
       stateVersion: curVer + 1
     };
     for (const key of META_KEYS) {

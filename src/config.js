@@ -71,6 +71,7 @@ export const DEFAULT_SUBCATS = {
   '水电煤气': ['电费', '水费', '燃气', '物业'],
   '通讯费用': ['话费', '宽带'],
   '母婴亲子': ['奶粉', '纸尿裤', '母婴装备', '其他'],
+  '数码电器': ['手机', '电脑', '数码设备', '配件', '其他'],
   '医疗健康': ['药品', '体检', '其他'],
   '文化休闲': ['电影', '运动', '其他'],
   '工资收入': ['工资', '奖金', '其他'],
@@ -88,6 +89,10 @@ export const MONITOR_CATS = ['餐饮美食','水电煤气','通讯费用','交�
 
 /** 收入数据页默认监视的分类 */
 export const DEFAULT_INCOME_DATA_CATS = ['闲置转让', '乐极客收入', '红包奖励', '工资收入'];
+/** 首页「收入分类」卡片默认显示的主分类（可在「编辑分类」中调整） */
+export const DEFAULT_INCOME_CATS = [
+  '红包奖励', '闲置转让', '乐极客收入', '直播收入', '工资收入', '其他收入'
+];
 /** @deprecated 使用 DEFAULT_INCOME_DATA_CATS */
 export const INCOME_DATA_CATS = DEFAULT_INCOME_DATA_CATS;
 export const EXCLUDE_CATS = new Set(['转账']);

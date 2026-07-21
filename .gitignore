@@ -5,7 +5,14 @@ data/*.db-wal
 data/*.db-shm
 data/last-cloud-pull.json
 data/invoices/
+data/family-events/
+data/gear-images/
 data/tesseract-cache/
+data/cloud-snapshot-*.json
+electron/seed/
+release/
+build/icon.iconset/
+dist-electron/
 *.traineddata
 .DS_Store
 .env

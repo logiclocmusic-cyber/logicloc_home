@@ -184,3 +184,84 @@ export async function deleteInvoice(id) {
   }
   return res.json();
 }
+
+export async function fetchFamilyEvents() {
+  const res = await fetch(`${API}/family-events`, { headers: authHeaders() });
+  if (res.status === 401) throw new Error('请先登录');
+  if (!res.ok) throw new Error(`加载失败 (${res.status})`);
+  return res.json();
+}
+
+export async function createFamilyEvent(payload) {
+  const res = await fetch(`${API}/family-events`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload)
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `创建失败 (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function updateFamilyEvent(id, payload) {
+  const res = await fetch(`${API}/family-events/${id}`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload)
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `更新失败 (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function deleteFamilyEvent(id) {
+  const res = await fetch(`${API}/family-events/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders()
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `删除失败 (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function uploadFamilyEventImage(id, file) {
+  const data = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('读取文件失败'));
+    reader.readAsDataURL(file);
+  });
+  const res = await fetch(`${API}/family-events/${id}/images`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ data, mime: file.type, fileName: file.name })
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `上传失败 (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function deleteFamilyEventImage(id, imageName) {
+  const res = await fetch(`${API}/family-events/${id}/images/${encodeURIComponent(imageName)}`, {
+    method: 'DELETE',
+    headers: authHeaders()
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `删除图片失败 (${res.status})`);
+  }
+  return res.json();
+}

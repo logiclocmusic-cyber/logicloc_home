@@ -4,7 +4,8 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TESS_CACHE = join(__dirname, '..', 'data', 'tesseract-cache');
+const TESS_CACHE = process.env.TESSERACT_CACHE
+  || join(__dirname, '..', 'data', 'tesseract-cache');
 mkdirSync(TESS_CACHE, { recursive: true });
 
 let workerReady = null;

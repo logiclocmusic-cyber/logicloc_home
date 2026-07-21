@@ -1,5 +1,7 @@
 /** 未分类子分类展示 */
 
+import { hasSplits } from './splits.js';
+
 export const SUBCAT_UNSET_LABEL = '未分类';
 
 export function subCatSelectHtml({ subs, sub, onchange, extraClass = '' }) {
@@ -27,4 +29,28 @@ export function rowHasUnsetSub(row, getSubcatsFor) {
     return row.splits.some(sp => !(sp.subcategory || '').trim());
   }
   return !(row['子分类'] || '').trim();
+}
+
+export function rowSubLabel(row, cat = '') {
+  if (hasSplits(row)) {
+    const parts = row.splits
+      .filter(sp => !cat || sp.category === cat)
+      .map(sp => (sp.subcategory || '').trim() || SUBCAT_UNSET_LABEL);
+    return parts[0] || SUBCAT_UNSET_LABEL;
+  }
+  return (row['子分类'] || '').trim() || SUBCAT_UNSET_LABEL;
+}
+
+export function rowMatchesSubCat(row, sub, getSubcatsFor, cat = '') {
+  if (!sub) return true;
+  if (sub === SUBCAT_UNSET_LABEL) return rowHasUnsetSub(row, getSubcatsFor);
+  if (hasSplits(row)) {
+    return row.splits.some(sp => {
+      if (cat && sp.category !== cat) return false;
+      const label = (sp.subcategory || '').trim() || SUBCAT_UNSET_LABEL;
+      return label === sub;
+    });
+  }
+  if (cat && row['分类'] !== cat) return false;
+  return rowSubLabel(row, cat) === sub;
 }

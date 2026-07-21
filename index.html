@@ -13,13 +13,31 @@
     <div class="login-logo">
       <div class="logo-mark"><span class="c1"></span><span class="c2"></span><span class="c3"></span></div>
       <h1>Loc's Home</h1>
-      <p>登录后管理家庭账本</p>
+      <p>本地账本 · 输入密码进入</p>
     </div>
     <form id="loginForm" class="login-form">
-      <label>邮箱<input id="loginEmail" type="email" autocomplete="username" placeholder="logicloc@qq.com" required></label>
-      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" placeholder="请输入密码" required></label>
+      <p class="login-pin-label">输入 4 位密码（可用键盘或下方按键）</p>
+      <div class="pin-dots" id="pinDots" aria-hidden="true">
+        <span></span><span></span><span></span><span></span>
+      </div>
+      <input id="loginPin" class="pin-hidden-input" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" aria-label="4位密码">
+      <div class="pin-pad" id="pinPad">
+        <button type="button" class="pin-key" data-key="1">1</button>
+        <button type="button" class="pin-key" data-key="2">2</button>
+        <button type="button" class="pin-key" data-key="3">3</button>
+        <button type="button" class="pin-key" data-key="4">4</button>
+        <button type="button" class="pin-key" data-key="5">5</button>
+        <button type="button" class="pin-key" data-key="6">6</button>
+        <button type="button" class="pin-key" data-key="7">7</button>
+        <button type="button" class="pin-key" data-key="8">8</button>
+        <button type="button" class="pin-key" data-key="9">9</button>
+        <button type="button" class="pin-key pin-key-muted" data-key="clear">清除</button>
+        <button type="button" class="pin-key" data-key="0">0</button>
+        <button type="button" class="pin-key pin-key-muted" data-key="back"><i class="ti ti-backspace"></i></button>
+      </div>
       <p id="loginError" class="login-error"></p>
-      <button type="submit" class="btn-cta login-btn" id="loginBtn"><i class="ti ti-login"></i> 登录</button>
+      <p id="loginMobileHint" class="login-mobile-hint"></p>
+      <button type="submit" class="btn-cta login-btn" id="loginBtn"><i class="ti ti-login"></i> 进入账本</button>
     </form>
   </div>
 </div>
@@ -33,8 +51,10 @@
   <nav class="nav">
     <button class="ni on" onclick="sw('home',this)" title="首页"><span class="ni-icon"><i class="ti ti-home"></i></span><span class="ni-label">首页</span></button>
     <button class="ni" onclick="sw('ledger',this)" title="明细列表"><span class="ni-icon"><i class="ti ti-list-details"></i></span><span class="ni-label">明细</span></button>
+    <button class="ni" onclick="sw('trades',this)" title="关联交易"><span class="ni-icon"><i class="ti ti-arrows-exchange"></i></span><span class="ni-label">交易</span></button>
     <button class="ni" onclick="sw('catbrowse',this)" title="分类检索"><span class="ni-icon"><i class="ti ti-category"></i></span><span class="ni-label">检索</span></button>
     <button class="ni" onclick="sw('gear',this)" title="装备库"><span class="ni-icon"><i class="ti ti-baby-carriage"></i></span><span class="ni-label">装备</span></button>
+    <button class="ni" onclick="sw('family',this)" title="家庭事件"><span class="ni-icon"><i class="ti ti-home-heart"></i></span><span class="ni-label">家庭</span></button>
     <button class="ni" onclick="sw('catreport',this)" title="分类报表"><span class="ni-icon"><i class="ti ti-chart-bar"></i></span><span class="ni-label">报表</span></button>
     <button class="ni" onclick="sw('renqing',this)" title="人情往来"><span class="ni-icon"><i class="ti ti-heart-handshake"></i></span><span class="ni-label">人情</span></button>
     <button class="ni" onclick="sw('accounts',this)" title="信用账户"><span class="ni-icon"><i class="ti ti-credit-card"></i></span><span class="ni-label">账户</span></button>
@@ -74,9 +94,12 @@
   </div>
 
   <div class="page view on" id="view-home">
+    <div id="homeReminderSection" class="home-reminder-section" hidden></div>
     <div class="home-head">
-      <h2 class="home-title" id="homeMonthTitle">—</h2>
-      <p class="home-sub">上月收支概览 · 按分类统计</p>
+      <div class="home-head-row">
+        <select id="homeMonthSel" class="home-month-sel" onchange="onHomeMonthChange(this.value)" aria-label="选择月份"></select>
+      </div>
+      <p class="home-sub">收支概览 · 按分类统计</p>
     </div>
     <div class="home-summary" id="homeSummary"></div>
     <div class="home-cat-section">
@@ -132,6 +155,9 @@
       <select id="bulkSubCatSel" class="btn bulk-sub-sel" style="height:34px;min-width:120px" disabled title="选中项需属于同一分类"></select>
       <button class="btn btn-p" id="bulkSubCatBtn" onclick="applyBulkSubCat()" style="height:34px" disabled><i class="ti ti-check"></i> 应用</button>
       <div class="bulk-sep"></div>
+      <button class="btn btn-a" id="bulkLinkBtn" onclick="linkLedgerGroup()" style="height:34px" disabled title="将多笔借还/付款账目关联并命名"><i class="ti ti-link"></i> 关联</button>
+      <button class="btn" id="bulkUnlinkBtn" onclick="unlinkLedgerGroup()" style="height:34px" disabled title="取消已有关联"><i class="ti ti-unlink"></i> 取消关联</button>
+      <div class="bulk-sep"></div>
       <button class="btn btn-a" onclick="bulkToggleRefund(true)" style="height:34px">标记退款</button>
       <button class="btn" onclick="bulkToggleRefund(false)" style="height:34px">撤销退款</button>
       <button class="btn" onclick="clearSelection()" style="height:34px;margin-left:auto">✕ 取消</button>
@@ -157,6 +183,9 @@
           <span class="cat-filter-icon"><i class="ti ti-category"></i></span>
           <span class="cat-filter-label">全部分类</span>
         </button>
+        <select id="subf" class="fb-sub-filter" onchange="onSubFilterChange(this.value)" disabled title="子分类筛选" aria-label="子分类筛选">
+          <option value="">全部子分类</option>
+        </select>
         <div class="fb-seg" id="tfSeg" role="group" aria-label="收支">
           <input type="hidden" id="tf" value="">
           <button type="button" class="fb-seg-btn" data-val="支出" onclick="setTypeFilter('支出')">支</button>
@@ -172,10 +201,12 @@
       <div class="fb-sep" aria-hidden="true"></div>
       <div class="fb-group fb-sort">
         <input type="hidden" id="sf" value="d-">
+        <button type="button" class="btn btn-sm fb-date-sort on" id="dateSortBtn" onclick="toggleDateSort()" title="当前：日期从新到旧，点击改为从旧到新"><i class="ti ti-sort-descending"></i> 日期</button>
         <button type="button" class="btn btn-sm" onclick="resetF()"><i class="ti ti-refresh"></i> 重置</button>
       </div>
     </div>
     <div class="chips chips-src" id="srcChips"></div>
+    <div class="txn-link-filter-bar hide" id="txnLinkFilterBar"></div>
     <div class="tw ledger-day-view">
       <div class="ledger-table-wrap">
         <div class="pager pager-top ledger-day-pager">
@@ -206,6 +237,14 @@
     </div>
   </div>
 
+  <div class="page view" id="view-trades">
+    <div class="trades-head">
+      <h2 class="trades-title">关联交易</h2>
+      <p class="trades-sub">借还、买卖等组合账目 · 自动核对收支盈亏</p>
+    </div>
+    <div class="trades-list" id="tradesList"></div>
+  </div>
+
   <div class="page view" id="view-charts">
     <div class="kpi5" id="kpi2"></div>
     <div class="cg" style="margin-bottom:18px">
@@ -229,33 +268,46 @@
       <div class="catbrowse-tabs" id="catBrowseTabs"></div>
     </div>
     <div class="catbrowse-summary" id="catBrowseSummary"></div>
+    <div class="catbrowse-subchart hide" id="catBrowseSubChart"></div>
     <div class="catbrowse-filters">
       <button type="button" class="fb-unset-filter" id="catBrowseUnsetSubFilterBtn" onclick="toggleCatBrowseUnsetSubFilter(this)" title="仅显示未设置子分类的记录">未分类</button>
     </div>
     <div class="bulk-bar catbrowse-bulk-bar" id="catBrowseBulkBar">
       <span class="bulk-cnt" id="catBrowseBulkCnt">0 项已选</span>
       <div class="bulk-sep"></div>
-      <span style="font-size:12.5px;color:var(--txt2)">批量移动到：</span>
-      <select id="catBrowseBulkCatSel" class="btn" style="height:34px;min-width:140px"></select>
-      <button class="btn btn-p" onclick="applyCatBrowseBulkCat()" style="height:34px"><i class="ti ti-check"></i> 应用</button>
+      <span class="bulk-lbl">批量移动</span>
+      <select id="catBrowseBulkCatSel" class="btn catbrowse-bulk-cat"></select>
+      <button class="btn btn-p catbrowse-bulk-apply" onclick="applyCatBrowseBulkCat()"><i class="ti ti-check"></i>应用</button>
       <div class="bulk-sep"></div>
-      <span style="font-size:12.5px;color:var(--txt2)">子分类：</span>
-      <select id="catBrowseBulkSubSel" class="btn bulk-sub-sel" style="height:34px;min-width:120px" disabled title="选中项需属于同一分类"></select>
-      <button class="btn btn-p" id="catBrowseBulkSubBtn" onclick="applyCatBrowseBulkSub()" style="height:34px" disabled><i class="ti ti-check"></i> 应用</button>
+      <span class="bulk-lbl">子分类</span>
+      <select id="catBrowseBulkSubSel" class="btn bulk-sub-sel catbrowse-bulk-sub" disabled title="选中项需属于同一分类"></select>
+      <button class="btn btn-p catbrowse-bulk-apply" id="catBrowseBulkSubBtn" onclick="applyCatBrowseBulkSub()" disabled><i class="ti ti-check"></i>应用</button>
       <div class="bulk-sep"></div>
-      <button class="btn btn-a" id="catBrowseLinkBtn" onclick="linkCatBrowsePair()" style="height:34px" disabled title="将付款与返款配对"><i class="ti ti-link"></i> 关联配对</button>
-      <button class="btn" id="catBrowseUnlinkBtn" onclick="unlinkCatBrowsePair()" style="height:34px" disabled title="取消配对"><i class="ti ti-unlink"></i> 取消关联</button>
-      <button class="btn" onclick="clearCatBrowseSelection()" style="height:34px;margin-left:auto">✕ 取消</button>
+      <button class="btn btn-a catbrowse-bulk-action" id="catBrowseLinkBtn" onclick="linkCatBrowsePair()" disabled title="将付款与返款配对"><i class="ti ti-link"></i>配对</button>
+      <button class="btn catbrowse-bulk-action" id="catBrowseUnlinkBtn" onclick="unlinkCatBrowsePair()" disabled title="取消配对"><i class="ti ti-unlink"></i>解绑</button>
+      <button class="btn catbrowse-bulk-cancel" onclick="clearCatBrowseSelection()">✕</button>
     </div>
     <div class="catbrowse-body" id="catBrowseBody"></div>
   </div>
 
   <div class="page view" id="view-gear">
     <div class="gear-head">
-      <p class="gear-intro">「母婴亲子 · 母婴装备」子分类下的支出会自动收录为装备，可上传产品图并修改产品名称。</p>
+      <p class="gear-intro">支出会按分类/子分类自动收录为装备。可添加子分类标签，点开明细可改名称、分类与子分类，并上传产品图、标记卖出。</p>
       <span class="gear-count" id="gearCount"></span>
     </div>
+    <div class="gear-tabs" id="gearTabs"></div>
     <div class="gear-gallery" id="gearGallery"></div>
+  </div>
+
+  <div class="page view" id="view-family">
+    <div class="family-head">
+      <div>
+        <p class="family-intro">记录家里的重要日子与瞬间，可写备注并上传照片。</p>
+        <span class="family-count" id="familyCount"></span>
+      </div>
+      <button type="button" class="btn btn-p" onclick="openFamilyCreate()"><i class="ti ti-plus"></i> 新增事件</button>
+    </div>
+    <div class="family-list" id="familyList"></div>
   </div>
 
   <div class="page view" id="view-renqing">
@@ -277,13 +329,16 @@
 
   <div class="page view" id="view-accounts">
     <div class="accounts-page-head">
-      <p class="report-intro">管理信用卡额度、账单日与还款日，查看免息期时间轴；登记现金账户余额与未来支出预算。可绑定同银行共享额度。</p>
+      <p class="report-intro">管理信用卡额度、账单日与还款日，查看免息期时间轴；登记现金账户余额、生活缴费户号、支出预算、长期提醒事项与网站账号。可绑定同银行共享额度。</p>
       <button type="button" class="accounts-settings-btn" onclick="openAccountsMgr()" title="账户管理" aria-label="账户管理"><i class="ti ti-settings"></i></button>
     </div>
     <div id="accountsStatusSection"></div>
     <div id="accountsCreditSection"></div>
     <div id="accountsCashSection"></div>
+    <div id="accountsLifeSection"></div>
     <div id="accountsBudgetSection"></div>
+    <div id="accountsReminderSection"></div>
+    <div id="accountsWebSection"></div>
   </div>
 
   <div class="page view" id="view-catreport">
@@ -484,7 +539,7 @@
       </div>
 
       <div class="import-panel" id="importRecordPreview" style="display:none">
-        <h4><i class="ti ti-list"></i> 记录预览（前 20 条）</h4>
+        <h4><i class="ti ti-list"></i> 记录预览 <span class="panel-sub">可点击收支切换、修改金额</span></h4>
         <div class="import-preview-table">
           <div class="tw-scroll" id="importRecordTable"></div>
         </div>
@@ -543,7 +598,7 @@
   <div class="mbox wide">
     <div class="mh"><h3>编辑分类</h3><button class="mclose" onclick="closeCat()"><i class="ti ti-x"></i></button></div>
     <div class="mb">
-      <p class="cat-edit-hint">左侧 ⋮⋮ 可拖动调整顺序；点击圆形图标可自定义 emoji，左侧箭头展开子分类。修改名称并保存后，该分类下全部账目会同步到新名称。顺序在点「保存」后生效，并同步到分类选择器与检索页。</p>
+      <p class="cat-edit-hint">左侧 ⋮⋮ 可拖动调整顺序；点击圆形图标可自定义 emoji，左侧箭头展开子分类。勾选「收入类」的分类会出现在首页收入卡片；「对冲」分类收支相抵只计净额，可与收入类组合使用（如探店置换、代拍代购）。修改名称并保存后，该分类下全部账目会同步到新名称。</p>
       <div class="cl" id="catList"></div>
       <div class="arow cat-add-row">
         <button type="button" class="cat-emoji-btn" id="nnEmoji" data-emoji="icon:1F4CC" title="新分类图标" onclick="pickNewCatEmoji(event)"></button>
@@ -614,9 +669,26 @@
   </div>
 </div>
 
+<div class="mo hide" id="moTxnLink">
+  <div class="mbox">
+    <div class="mh"><h3><i class="ti ti-link" style="color:var(--primary);margin-right:6px"></i>关联账目</h3><button class="mclose" onclick="closeTxnLinkModal()"><i class="ti ti-x"></i></button></div>
+    <div class="mb">
+      <p class="cat-edit-hint">为选中的账目设置关联名称，便于借还核对。</p>
+      <div class="fg">
+        <label for="txnLinkNameInp">关联名称</label>
+        <input type="text" id="txnLinkNameInp" maxlength="80" placeholder="如：2025.5.12黄燕借款" onkeydown="if(event.key==='Enter'){event.preventDefault();confirmTxnLinkModal();}">
+      </div>
+    </div>
+    <div class="mf">
+      <button class="btn" onclick="closeTxnLinkModal()">取消</button>
+      <button class="btn btn-p" onclick="confirmTxnLinkModal()">确定</button>
+    </div>
+  </div>
+</div>
+
 <div class="mo hide" id="moGear">
   <div class="mbox wide">
-    <div class="mh"><h3><i class="ti ti-baby-carriage" style="color:var(--primary);margin-right:6px"></i>编辑装备</h3><button class="mclose" onclick="closeGearEdit()"><i class="ti ti-x"></i></button></div>
+    <div class="mh"><h3><i class="ti ti-package" style="color:var(--primary);margin-right:6px"></i>编辑装备</h3><button class="mclose" onclick="closeGearEdit()"><i class="ti ti-x"></i></button></div>
     <div class="mb gear-modal-body">
       <div class="gear-modal-layout">
         <div class="gear-img-preview" id="gearImgPreview" title="点击上传产品图">
@@ -624,6 +696,14 @@
         </div>
         <div class="gear-form">
           <div class="fg"><label>产品名称</label><input type="text" id="gearNameInp" placeholder="如：婴儿推车"></div>
+          <div class="form-grid gear-cat-grid">
+            <div class="fg"><label>分类</label>
+              <select id="gearCatSel" onchange="onGearCatChange()"></select>
+            </div>
+            <div class="fg"><label>子分类</label>
+              <select id="gearSubSel"></select>
+            </div>
+          </div>
           <div class="fg gear-url-field">
             <label>图片链接</label>
             <div class="gear-url-row">
@@ -636,9 +716,32 @@
       </div>
     </div>
     <div class="mf">
+      <button type="button" class="btn btn-a" id="gearSellBtn" onclick="markGearSoldFromModal()">卖出</button>
       <button class="btn" onclick="triggerGearUpload()"><i class="ti ti-upload"></i> 上传图片</button>
       <button class="btn" onclick="closeGearEdit()">取消</button>
       <button class="btn btn-p" onclick="saveGearEdit()">保存</button>
+    </div>
+  </div>
+</div>
+<div class="mo hide" id="moGearSection">
+  <div class="mbox">
+    <div class="mh"><h3><i class="ti ti-plus" style="color:var(--primary);margin-right:6px"></i>添加子分类</h3><button class="mclose" onclick="closeGearSectionAdd()"><i class="ti ti-x"></i></button></div>
+    <div class="mb">
+      <p class="gear-section-hint">为装备页新增一个标签：选择分类，并指定已有子分类，或新建子分类。符合条件的支出会自动收录。</p>
+      <div class="fg"><label>分类</label>
+        <select id="gearSectionCatSel" onchange="onGearSectionCatChange()"></select>
+      </div>
+      <div class="fg"><label>子分类</label>
+        <select id="gearSectionSubSel" onchange="onGearSectionSubChange()"></select>
+      </div>
+      <div class="fg" id="gearSectionNewSubWrap" hidden>
+        <label>新子分类名称</label>
+        <input type="text" id="gearSectionNewSubInp" maxlength="40" placeholder="如：相机、洗衣机">
+      </div>
+    </div>
+    <div class="mf">
+      <button class="btn" onclick="closeGearSectionAdd()">取消</button>
+      <button class="btn btn-p" onclick="confirmGearSectionAdd()">添加</button>
     </div>
   </div>
 </div>
@@ -733,6 +836,32 @@
   </div>
 </div>
 <input type="file" id="invFileInp" accept="image/*,.pdf" style="display:none">
+
+<div class="mo hide" id="moFamily">
+  <div class="mbox wide">
+    <div class="mh"><h3><i class="ti ti-home-heart" style="color:var(--primary);margin-right:6px"></i>新增家庭事件</h3><button class="mclose" onclick="closeFamilyEdit()"><i class="ti ti-x"></i></button></div>
+    <div class="mb family-modal-body">
+      <div class="fg"><label>事件标题</label><input type="text" id="familyTitleInp" placeholder="如：宝宝满月、搬家、旅行" maxlength="80"></div>
+      <div class="fg"><label>日期</label><input type="date" id="familyDateInp"></div>
+      <div class="fg"><label>备注</label><textarea id="familyNotesInp" rows="3" placeholder="可选，记录当时的细节…"></textarea></div>
+      <div class="fg">
+        <label>图片</label>
+        <div class="family-img-actions">
+          <button type="button" class="btn btn-sm" onclick="triggerFamilyUpload()"><i class="ti ti-photo-plus"></i> 上传图片</button>
+          <span class="family-img-hint">最多 12 张，单张不超过 8MB</span>
+        </div>
+        <div class="family-img-grid" id="familySavedImgs" hidden></div>
+        <div class="family-img-grid" id="familyPendingImgs" hidden></div>
+      </div>
+    </div>
+    <div class="mf">
+      <button type="button" class="btn btn-a" id="familyDeleteBtn" hidden onclick="removeFamilyEvent()">删除</button>
+      <button type="button" class="btn" onclick="closeFamilyEdit()">取消</button>
+      <button type="button" class="btn btn-p" onclick="saveFamilyEdit()"><i class="ti ti-check"></i> 保存</button>
+    </div>
+  </div>
+</div>
+<input type="file" id="familyFileInp" accept="image/*,.heic,.heif" multiple style="display:none">
 
 <script type="module" src="/src/main.js"></script>
 </body>

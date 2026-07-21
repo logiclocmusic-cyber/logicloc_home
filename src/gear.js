@@ -2,30 +2,64 @@
 import { fmtMoney, fmtCount } from './format.js';
 import { uploadGearImageFromUrl } from './api.js';
 
+/** @deprecated use DEFAULT_GEAR_SECTIONS */
 export const GEAR_CATEGORY = '母婴亲子';
+/** @deprecated use DEFAULT_GEAR_SECTIONS */
 export const GEAR_SUBCAT = '母婴装备';
+
+export const DEFAULT_GEAR_SECTIONS = [
+  { id: 'baby', label: '母婴装备', icon: 'ti-baby-carriage', cat: '母婴亲子', sub: '母婴装备' },
+  { id: 'digital', label: '数码设备', icon: 'ti-device-laptop', cat: '数码电器', sub: null },
+];
+
+/** @deprecated alias */
+export const GEAR_SECTIONS = DEFAULT_GEAR_SECTIONS;
 
 let gearLibrary = [];
 let nextGearId = 1;
+let customGearSections = [];
+let activeGearSection = DEFAULT_GEAR_SECTIONS[0].id;
 let getAllData = () => [];
 let onPersist = () => {};
+let getCats = () => [];
+let getSubcatsFor = () => [];
+let ensureSubcat = () => {};
 
 export function initGear(deps) {
   getAllData = deps.getAllData;
   onPersist = deps.onPersist;
+  getCats = deps.getCats || (() => []);
+  getSubcatsFor = deps.getSubcatsFor || (() => []);
+  ensureSubcat = deps.ensureSubcat || (() => {});
 }
 
 export function loadGearState(state) {
   gearLibrary = state.gearLibrary || [];
   nextGearId = state.nextGearId || 1;
+  customGearSections = Array.isArray(state.gearSections)
+    ? state.gearSections
+      .filter(s => s && s.id && s.cat)
+      .map(s => ({
+        id: String(s.id),
+        label: String(s.label || s.sub || s.cat),
+        icon: String(s.icon || 'ti-package'),
+        cat: String(s.cat),
+        sub: s.sub ? String(s.sub) : null,
+        custom: true,
+      }))
+    : [];
 }
 
 export function getGearState() {
-  return { gearLibrary, nextGearId };
+  return { gearLibrary, nextGearId, gearSections: customGearSections };
 }
 
 export function getGearLibrary() {
   return gearLibrary;
+}
+
+function getAllGearSections() {
+  return [...DEFAULT_GEAR_SECTIONS, ...customGearSections];
 }
 
 function txnById(id) {
@@ -40,53 +74,134 @@ function defaultGearName(row) {
   return '未命名装备';
 }
 
-function isGearRow(row) {
-  return row['分类'] === GEAR_CATEGORY
-    && row['子分类'] === GEAR_SUBCAT
-    && row['收支'] === '支出'
-    && row['退款状态'] !== 'refunded';
+function isExpenseRow(row) {
+  return !!row && row['收支'] === '支出' && row['退款状态'] !== 'refunded';
 }
 
-function gearItems() {
+/** 优先匹配带具体子分类的装备分区，再匹配整类分区 */
+function sectionForRow(row) {
+  if (!isExpenseRow(row)) return null;
+  const cat = row['分类'];
+  const sub = (row['子分类'] || '').trim();
+  const sections = getAllGearSections();
+  const exact = sections.find(s => s.cat === cat && s.sub && s.sub === sub);
+  if (exact) return exact;
+  return sections.find(s => s.cat === cat && !s.sub) || null;
+}
+
+function isGearRowForSection(row, section) {
+  if (!section) return false;
+  return sectionForRow(row)?.id === section.id;
+}
+
+function gearSectionId(gear) {
+  const sections = getAllGearSections();
+  if (gear.sectionId && sections.some(s => s.id === gear.sectionId)) {
+    const row = txnById(gear.txnId);
+    const live = sectionForRow(row);
+    if (live) return live.id;
+    return gear.sectionId;
+  }
+  const row = txnById(gear.txnId);
+  return sectionForRow(row)?.id || DEFAULT_GEAR_SECTIONS[0].id;
+}
+
+function gearItemsForSection(sectionId) {
+  const section = getAllGearSections().find(s => s.id === sectionId);
+  if (!section) return [];
   return gearLibrary.filter(g => {
     const row = txnById(g.txnId);
-    return row && isGearRow(row);
+    return row && isGearRowForSection(row, section);
   });
 }
 
-/** 将「母婴亲子 · 母婴装备」子分类下的支出同步进装备库 */
-export function syncBabyGear() {
+/** 将各装备分类下的支出同步进装备库 */
+export function syncGear() {
+  let changed = 0;
+  const sections = getAllGearSections();
+
   const beforeLen = gearLibrary.length;
   gearLibrary = gearLibrary.filter(g => {
     const row = txnById(g.txnId);
-    return row && isGearRow(row);
+    return row && !!sectionForRow(row);
   });
-  const removed = beforeLen - gearLibrary.length;
+  changed += beforeLen - gearLibrary.length;
+
+  gearLibrary.forEach(g => {
+    const row = txnById(g.txnId);
+    const section = sectionForRow(row);
+    if (section && g.sectionId !== section.id) {
+      g.sectionId = section.id;
+      g.category = section.cat;
+      changed++;
+    }
+    if (g.sold == null) g.sold = false;
+  });
 
   const linked = new Set(gearLibrary.map(g => g.txnId));
-  let added = 0;
   getAllData().forEach(row => {
-    if (!isGearRow(row)) return;
+    const section = sectionForRow(row);
+    if (!section) return;
     if (linked.has(row.id)) return;
     const name = row['产品名称'] || defaultGearName(row);
     if (!row['产品名称']) row['产品名称'] = name;
     gearLibrary.push({
       id: nextGearId++,
       txnId: row.id,
-      category: GEAR_CATEGORY,
+      sectionId: section.id,
+      category: section.cat,
       name,
-      image: null
+      image: null,
+      sold: false,
     });
     linked.add(row.id);
-    added++;
+    changed++;
   });
+
   gearLibrary.sort((a, b) => {
     const ta = txnById(a.txnId);
     const tb = txnById(b.txnId);
     if (!ta || !tb) return 0;
     return (tb['日期'] + tb['时间']).localeCompare(ta['日期'] + ta['时间']);
   });
-  return added + removed;
+
+  if (!sections.some(s => s.id === activeGearSection)) {
+    activeGearSection = sections[0]?.id || DEFAULT_GEAR_SECTIONS[0].id;
+  }
+  return changed;
+}
+
+/** @deprecated */
+export const syncBabyGear = syncGear;
+
+export function selectGearTab(sectionId) {
+  if (!getAllGearSections().some(s => s.id === sectionId)) return;
+  activeGearSection = sectionId;
+  renderGearGallery();
+}
+
+function setGearSoldState(gearId, sold) {
+  const gear = gearLibrary.find(g => g.id === gearId);
+  if (!gear || !!gear.sold === sold) return;
+  gear.sold = sold;
+  onPersist();
+  renderGearGallery();
+  if (openGearId === gearId) refreshGearModal(gearId);
+}
+
+export function markGearSold(gearId) {
+  setGearSoldState(gearId, true);
+}
+
+export function markGearUnsold(gearId) {
+  setGearSoldState(gearId, false);
+}
+
+export function markGearSoldFromModal() {
+  if (!openGearId) return;
+  const gear = gearLibrary.find(g => g.id === openGearId);
+  if (!gear) return;
+  setGearSoldState(openGearId, !gear.sold);
 }
 
 export function updateGearName(gearId, name) {
@@ -180,34 +295,103 @@ export async function handleGearImageUpload(gearId, file) {
 
 let openGearId = null;
 
-function gearCardHtml(gear) {
-  const row = txnById(gear.txnId);
+function gearMediaHtml(gear, { modal = false } = {}) {
   const img = gear.image
     ? `<img class="gear-card-img" src="${gear.image}" alt="${gear.name}">`
     : `<div class="gear-card-ph"><i class="ti ti-photo-plus"></i><span>上传图片</span></div>`;
-  const sub = row ? `${row['日期']} · ${fmtMoney(row['金额'])}` : '';
-  const subcat = row?.['子分类'] ? `<span class="gear-card-subcat">${row['子分类']}</span>` : '';
-  return `<article class="gear-card" onclick="openGearEdit(${gear.id})">
-    <div class="gear-card-media">${img}</div>
+  const sold = gear.sold
+    ? `<div class="gear-sold-badge${modal ? ' gear-sold-badge--modal' : ''}">已卖出</div>`
+    : '';
+  return `${img}${sold}`;
+}
+
+function gearCardHtml(gear) {
+  const row = txnById(gear.txnId);
+  const subLabel = row?.['子分类'] ? ` · ${row['子分类']}` : '';
+  const sub = row ? `${row['日期']} · ${fmtMoney(row['金额'])}${subLabel}` : '';
+  const sellBtn = gear.sold
+    ? `<button type="button" class="gear-card-sell gear-card-unsell" onclick="event.stopPropagation();markGearUnsold(${gear.id})">撤回</button>`
+    : `<button type="button" class="gear-card-sell" onclick="event.stopPropagation();markGearSold(${gear.id})">卖出</button>`;
+  return `<article class="gear-card${gear.sold ? ' is-sold' : ''}" onclick="openGearEdit(${gear.id})">
+    <div class="gear-card-media">${gearMediaHtml(gear)}</div>
     <div class="gear-card-body">
       <div class="gear-card-name" title="${gear.name}">${gear.name}</div>
-      ${subcat}
       <div class="gear-card-meta">${sub || ''}</div>
+      <div class="gear-card-actions">${sellBtn}</div>
     </div>
   </article>`;
+}
+
+function renderGearTabs() {
+  const tabsEl = document.getElementById('gearTabs');
+  if (!tabsEl) return;
+  const sections = getAllGearSections();
+  tabsEl.innerHTML = sections.map(section => {
+    const count = gearItemsForSection(section.id).length;
+    const on = section.id === activeGearSection ? ' on' : '';
+    const remove = section.custom
+      ? `<button type="button" class="gear-tab-remove" title="移除该子分类标签" onclick="event.stopPropagation();removeGearSection('${section.id}')"><i class="ti ti-x"></i></button>`
+      : '';
+    return `<button type="button" class="gear-tab${on}" data-section="${section.id}" onclick="selectGearTab('${section.id}')">
+      <i class="ti ${section.icon}"></i>
+      <span class="gear-tab-label">${section.label}</span>
+      <span class="gear-tab-count">${fmtCount(count)}</span>
+      ${remove}
+    </button>`;
+  }).join('') + `<button type="button" class="gear-tab gear-tab-add" onclick="openGearSectionAdd()" title="添加子分类">
+      <i class="ti ti-plus"></i>
+      <span class="gear-tab-label">添加子分类</span>
+    </button>`;
+}
+
+function sectionEmptyHtml(section) {
+  const hint = section.sub
+    ? `「${section.cat} · ${section.sub}」子分类下的支出会自动收录至此`
+    : `「${section.cat}」分类下、未单独建标签的支出会自动收录至此`;
+  return `<div class="gear-empty"><i class="ti ${section.icon}"></i><p>暂无${section.label}</p><span>${hint}</span></div>`;
 }
 
 export function renderGearGallery() {
   const el = document.getElementById('gearGallery');
   const cnt = document.getElementById('gearCount');
-  if (!el) return;
-  const items = gearItems();
+  const sections = getAllGearSections();
+  const section = sections.find(s => s.id === activeGearSection) || sections[0];
+  const items = gearItemsForSection(section.id);
+  renderGearTabs();
   if (cnt) cnt.textContent = items.length ? `共 ${fmtCount(items.length)} 件` : '';
+  if (!el) return;
   if (!items.length) {
-    el.innerHTML = `<div class="gear-empty"><i class="ti ti-baby-carriage"></i><p>暂无母婴装备</p><span>「母婴亲子 · 母婴装备」子分类下的支出会自动收录至此</span></div>`;
+    el.innerHTML = sectionEmptyHtml(section);
     return;
   }
   el.innerHTML = items.map(gearCardHtml).join('');
+}
+
+function fillGearCatOptions(selectedCat) {
+  const catSel = document.getElementById('gearCatSel');
+  if (!catSel) return;
+  const cats = getCats();
+  const cur = selectedCat && cats.includes(selectedCat) ? selectedCat : (cats[0] || '');
+  catSel.innerHTML = cats.map(c =>
+    `<option value="${c}"${c === cur ? ' selected' : ''}>${c}</option>`
+  ).join('');
+  fillGearSubOptions(cur, '');
+}
+
+function fillGearSubOptions(cat, selectedSub) {
+  const subSel = document.getElementById('gearSubSel');
+  if (!subSel) return;
+  const subs = getSubcatsFor(cat);
+  const cur = selectedSub || '';
+  subSel.innerHTML = [
+    '<option value="">未分类</option>',
+    ...subs.map(s => `<option value="${s}"${s === cur ? ' selected' : ''}>${s}</option>`),
+  ].join('');
+}
+
+export function onGearCatChange() {
+  const cat = document.getElementById('gearCatSel')?.value || '';
+  fillGearSubOptions(cat, '');
 }
 
 function refreshGearModal(gearId) {
@@ -217,13 +401,23 @@ function refreshGearModal(gearId) {
   const preview = document.getElementById('gearImgPreview');
   const nameInp = document.getElementById('gearNameInp');
   const meta = document.getElementById('gearMeta');
+  const sellBtn = document.getElementById('gearSellBtn');
   if (nameInp) nameInp.value = gear.name;
   if (preview) {
-    preview.innerHTML = gear.image
-      ? `<img src="${gear.image}" alt="">`
-      : `<div class="gear-modal-ph"><i class="ti ti-photo-plus"></i><span>点击上传产品图</span></div>`;
+    preview.innerHTML = gearMediaHtml(gear, { modal: true });
     preview.onclick = () => triggerGearUpload();
   }
+  if (sellBtn) {
+    sellBtn.disabled = false;
+    sellBtn.textContent = gear.sold ? '撤回卖出' : '卖出';
+    sellBtn.classList.toggle('is-sold', !!gear.sold);
+  }
+
+  const cat = row?.['分类'] || '';
+  const sub = row?.['子分类'] || '';
+  fillGearCatOptions(cat);
+  fillGearSubOptions(document.getElementById('gearCatSel')?.value || cat, sub);
+
   if (meta && row) {
     meta.innerHTML = `
       <div><span>日期</span>${row['日期']} ${row['时间'] || ''}</div>
@@ -249,8 +443,39 @@ export function closeGearEdit() {
 
 export function saveGearEdit() {
   if (!openGearId) return;
+  const gear = gearLibrary.find(g => g.id === openGearId);
+  if (!gear) return;
+
   const name = document.getElementById('gearNameInp')?.value || '';
-  updateGearName(openGearId, name);
+  const trimmed = name.trim();
+  if (trimmed) {
+    gear.name = trimmed;
+    const row = txnById(gear.txnId);
+    if (row) row['产品名称'] = trimmed;
+  }
+
+  const row = txnById(gear.txnId);
+  if (row) {
+    const cat = document.getElementById('gearCatSel')?.value || '';
+    const sub = document.getElementById('gearSubSel')?.value || '';
+    if (cat) {
+      row['分类'] = cat;
+      row['子分类'] = sub;
+      const section = sectionForRow(row);
+      if (section) {
+        gear.sectionId = section.id;
+        gear.category = section.cat;
+        activeGearSection = section.id;
+      } else {
+        // 不再属于任何装备分区：从库中移除
+        gearLibrary = gearLibrary.filter(g => g.id !== gear.id);
+      }
+    }
+  }
+
+  syncGear();
+  onPersist();
+  renderGearGallery();
   closeGearEdit();
 }
 
@@ -263,6 +488,114 @@ export function submitGearImageUrl() {
 export function triggerGearUpload() {
   if (!openGearId) return;
   document.getElementById('gearFileInp')?.click();
+}
+
+function fillSectionAddCatOptions() {
+  const catSel = document.getElementById('gearSectionCatSel');
+  if (!catSel) return;
+  const cats = getCats();
+  catSel.innerHTML = cats.map(c => `<option value="${c}">${c}</option>`).join('');
+  const preferred = cats.includes('数码电器')
+    ? '数码电器'
+    : cats.includes('母婴亲子')
+      ? '母婴亲子'
+      : cats[0] || '';
+  if (preferred) catSel.value = preferred;
+  onGearSectionCatChange();
+}
+
+export function onGearSectionCatChange() {
+  const cat = document.getElementById('gearSectionCatSel')?.value || '';
+  const subSel = document.getElementById('gearSectionSubSel');
+  if (!subSel) return;
+  const subs = getSubcatsFor(cat);
+  subSel.innerHTML = [
+    '<option value="">（整类收录，不限子分类）</option>',
+    ...subs.map(s => `<option value="${s}">${s}</option>`),
+    '<option value="__new__">＋ 新建子分类…</option>',
+  ].join('');
+  const newWrap = document.getElementById('gearSectionNewSubWrap');
+  if (newWrap) newWrap.hidden = true;
+  const newInp = document.getElementById('gearSectionNewSubInp');
+  if (newInp) newInp.value = '';
+}
+
+export function onGearSectionSubChange() {
+  const val = document.getElementById('gearSectionSubSel')?.value || '';
+  const newWrap = document.getElementById('gearSectionNewSubWrap');
+  if (newWrap) newWrap.hidden = val !== '__new__';
+  if (val === '__new__') {
+    document.getElementById('gearSectionNewSubInp')?.focus();
+  }
+}
+
+export function openGearSectionAdd() {
+  fillSectionAddCatOptions();
+  document.getElementById('moGearSection')?.classList.remove('hide');
+}
+
+export function closeGearSectionAdd() {
+  document.getElementById('moGearSection')?.classList.add('hide');
+}
+
+export function confirmGearSectionAdd() {
+  const cat = document.getElementById('gearSectionCatSel')?.value || '';
+  if (!cat) {
+    alert('请选择分类');
+    return;
+  }
+  let subSel = document.getElementById('gearSectionSubSel')?.value || '';
+  let sub = null;
+  if (subSel === '__new__') {
+    const name = document.getElementById('gearSectionNewSubInp')?.value?.trim() || '';
+    if (!name) {
+      alert('请填写新的子分类名称');
+      return;
+    }
+    ensureSubcat(cat, name);
+    sub = name;
+  } else if (subSel) {
+    sub = subSel;
+  }
+
+  const sections = getAllGearSections();
+  const dup = sections.find(s => s.cat === cat && (s.sub || null) === (sub || null));
+  if (dup) {
+    alert('该分类/子分类标签已存在');
+    activeGearSection = dup.id;
+    closeGearSectionAdd();
+    renderGearGallery();
+    return;
+  }
+
+  const id = `custom-${Date.now().toString(36)}`;
+  const label = sub || `${cat}（全部）`;
+  customGearSections.push({
+    id,
+    label,
+    icon: 'ti-package',
+    cat,
+    sub,
+    custom: true,
+  });
+  activeGearSection = id;
+  syncGear();
+  onPersist();
+  closeGearSectionAdd();
+  renderGearGallery();
+}
+
+export function removeGearSection(sectionId) {
+  const idx = customGearSections.findIndex(s => s.id === sectionId);
+  if (idx < 0) return;
+  if (!confirm('移除该子分类标签？装备仍保留在账本中，符合其它标签条件时会自动归入。')) return;
+  customGearSections.splice(idx, 1);
+  if (activeGearSection === sectionId) {
+    activeGearSection = DEFAULT_GEAR_SECTIONS[0].id;
+  }
+  syncGear();
+  onPersist();
+  renderGearGallery();
 }
 
 export function setupGearUpload() {
@@ -289,7 +622,11 @@ export function setupGearUpload() {
 }
 
 export function renderGearPage() {
-  const added = syncBabyGear();
+  const added = syncGear();
   if (added > 0) onPersist();
   renderGearGallery();
+  const intro = document.querySelector('.gear-intro');
+  if (intro) {
+    intro.textContent = '支出会按分类/子分类自动收录为装备。可添加子分类标签，点开明细可改名称、分类与子分类，并上传产品图、标记卖出。';
+  }
 }

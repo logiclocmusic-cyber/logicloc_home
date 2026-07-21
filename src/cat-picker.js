@@ -104,6 +104,9 @@ export function catCellInnerHtml(rowId, cat, subSelHtml = '', opts = {}) {
   const catAttr = cat ? ` data-current-cat="${cat}"` : '';
   const attrs = `data-row-id="${rowId}"${splitAttr}${catAttr} title="${cat || '选择分类'}"`;
   const btnCls = `cat-pick-btn cs cs-main${on}`;
+  const subPart = subSelHtml
+    ? `<span class="cat-cell-sep">·</span>${subSelHtml}`
+    : '';
   return `<div class="cat-cell-inner">
     <button type="button" class="${btnCls} cat-pick-btn--icon" ${attrs}>
       ${renderCatIcon(icon, { size: 18, wrapClass: 'cat-pick-emoji-wrap' })}
@@ -111,8 +114,7 @@ export function catCellInnerHtml(rowId, cat, subSelHtml = '', opts = {}) {
     <div class="cat-cell-text">
       <button type="button" class="${btnCls} cat-pick-btn--label" ${attrs}>
         <span class="cat-pick-label">${label}</span>
-      </button>
-      ${subSelHtml}
+      </button>${subPart}
     </div>
   </div>`;
 }

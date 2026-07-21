@@ -8,7 +8,7 @@ import { hashPassword } from '../server/auth.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env.DB_PATH || join(__dirname, '..', 'data', 'ledger.db');
 const EMAIL = (process.env.ADMIN_EMAIL || 'logicloc@qq.com').trim().toLowerCase();
-const PASSWORD = process.env.ADMIN_PASSWORD || 'huhan123';
+const PASSWORD = process.env.ADMIN_PASSWORD || '5281';
 
 const db = new DatabaseSync(DB_PATH);
 const user = db.prepare('SELECT id, email, username FROM users WHERE email = ?').get(EMAIL);

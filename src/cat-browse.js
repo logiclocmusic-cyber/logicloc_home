@@ -1,6 +1,6 @@
 /** 分类检索：顶部分类标签，下方按子分类分组展示账目 */
-import { fmtMoney, fmtCount } from './format.js';
-import { catPickBtnHtml } from './cat-picker.js';
+import { fmtMoney, fmtMoneySigned, fmtCount } from './format.js';
+import { catCellInnerHtml } from './cat-picker.js';
 import { subCatSelectHtml, subCatGroupTitleHtml, rowHasUnsetSub } from './subcat-ui.js';
 import { findPairForKey, validateTxnPair } from './txn-pairs.js';
 
@@ -13,6 +13,8 @@ let formatDateLabel = d => d;
 let formatTimeShort = t => t;
 let srcBadge = s => s;
 let onReorderCats = () => {};
+let isOffsetCat = () => false;
+let isIncomeCategory = () => false;
 
 let activeCat = '';
 let tabsBound = false;
@@ -22,6 +24,7 @@ let holdTimer = null;
 let holdTab = null;
 let suppressTabClick = false;
 const TAB_HOLD_MS = 320;
+const SUBCHART_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6', '#64748b', '#6366f1'];
 const collapsedGroups = new Set();
 const catBrowseSelected = new Set();
 let filterUnsetSubOnly = false;
@@ -36,6 +39,8 @@ export function initCatBrowse(deps) {
   formatTimeShort = deps.formatTimeShort || formatTimeShort;
   srcBadge = deps.srcBadge || srcBadge;
   onReorderCats = deps.onReorderCats || onReorderCats;
+  isOffsetCat = deps.isOffsetCat || isOffsetCat;
+  isIncomeCategory = deps.isIncomeCategory || isIncomeCategory;
 }
 
 export function getCatBrowseSelectedKeys() {
@@ -102,6 +107,119 @@ function subcatMeta(rows) {
   return meta;
 }
 
+function browseTabAmount(cat, rows) {
+  if (!rows.length) return { text: '暂无', cls: '' };
+  const exp = rows.filter(r => r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0);
+  const inc = rows.filter(r => r['收支'] === '收入').reduce((s, r) => s + r['金额'], 0);
+  if (isIncomeCategory(cat)) {
+    if (isOffsetCat(cat)) {
+      const net = inc - exp;
+      return { text: fmtMoneySigned(net), cls: net >= 0 ? 'inc' : 'exp' };
+    }
+    return { text: fmtMoneySigned(inc), cls: 'inc' };
+  }
+  if (isOffsetCat(cat)) {
+    const net = inc - exp;
+    return { text: fmtMoneySigned(net), cls: net >= 0 ? 'inc' : 'exp' };
+  }
+  return { text: fmtMoney(-exp), cls: 'exp' };
+}
+
+function subcatBarAmount(subRows, cat) {
+  const inc = subRows.filter(r => r['收支'] === '收入').reduce((s, r) => s + r['金额'], 0);
+  const exp = subRows.filter(r => r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0);
+  if (isIncomeCategory(cat) && !isOffsetCat(cat)) return inc;
+  if (isOffsetCat(cat)) return Math.abs(inc - exp);
+  return exp;
+}
+
+let subchartTipBound = false;
+
+function escAttr(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+function buildSubcatChartHtml(cat, rows, subcats) {
+  const items = subcats.map((sub, i) => {
+    const subRows = rows.filter(r => (r['子分类'] || '未分类') === sub);
+    const value = subcatBarAmount(subRows, cat);
+    return { sub, value, color: SUBCHART_COLORS[i % SUBCHART_COLORS.length] };
+  }).filter(x => x.value > 0.009);
+
+  const total = items.reduce((s, x) => s + x.value, 0);
+  if (!items.length || total <= 0) return '';
+
+  const segs = items.map((x, i) => {
+    const pct = x.value / total * 100;
+    const radius = i === 0 ? 'border-radius:7px 0 0 7px;' : i === items.length - 1 ? 'border-radius:0 7px 7px 0;' : '';
+    return `<div class="catbrowse-subchart-seg" data-sub="${escAttr(x.sub)}" data-value="${x.value}" data-pct="${pct.toFixed(1)}" style="width:${pct.toFixed(3)}%;background:${x.color};${radius}"></div>`;
+  }).join('');
+
+  const leg = items.map(x => {
+    const pct = (x.value / total * 100).toFixed(1);
+    return `<span class="catbrowse-subchart-leg-item" title="${escAttr(x.sub)} · ${fmtMoney(x.value)}"><span class="catbrowse-subchart-dot" style="background:${x.color}"></span><span>${x.sub}</span><span class="catbrowse-subchart-pct">${pct}%</span></span>`;
+  }).join('');
+
+  return `<div class="catbrowse-subchart-inner" role="img" aria-label="子分类占比">
+    <div class="catbrowse-subchart-tip hide" aria-hidden="true">
+      <span class="catbrowse-subchart-tip-name"></span>
+      <span class="catbrowse-subchart-tip-amt"></span>
+    </div>
+    <div class="catbrowse-subchart-bar">${segs}</div>
+    <div class="catbrowse-subchart-foot">
+      <div class="catbrowse-subchart-leg">${leg}</div>
+      <div class="catbrowse-subchart-total">${fmtMoney(total)}</div>
+    </div>
+  </div>`;
+}
+
+function positionSubchartTip(seg, bar, tip) {
+  const inner = bar.closest('.catbrowse-subchart-inner');
+  if (!inner) return;
+  const nameEl = tip.querySelector('.catbrowse-subchart-tip-name');
+  const amtEl = tip.querySelector('.catbrowse-subchart-tip-amt');
+  if (!nameEl || !amtEl) return;
+  nameEl.textContent = seg.dataset.sub || '';
+  const value = Number(seg.dataset.value);
+  amtEl.textContent = Number.isFinite(value) ? fmtMoney(value) : '';
+
+  const innerRect = inner.getBoundingClientRect();
+  const barRect = bar.getBoundingClientRect();
+  const segRect = seg.getBoundingClientRect();
+  let left = segRect.left - innerRect.left + segRect.width / 2;
+  const tipW = tip.offsetWidth || 0;
+  const pad = 6;
+  left = Math.max(pad + tipW / 2, Math.min(left, innerRect.width - pad - tipW / 2));
+  const top = barRect.top - innerRect.top;
+  tip.style.left = `${left}px`;
+  tip.style.top = `${top}px`;
+  tip.classList.remove('hide');
+}
+
+function hideSubchartTip(chartEl) {
+  chartEl?.querySelectorAll('.catbrowse-subchart-tip').forEach(el => el.classList.add('hide'));
+}
+
+function ensureSubchartTooltip() {
+  const chartEl = document.getElementById('catBrowseSubChart');
+  if (!chartEl || subchartTipBound) return;
+  subchartTipBound = true;
+
+  chartEl.addEventListener('mousemove', e => {
+    const seg = e.target.closest('.catbrowse-subchart-seg');
+    const bar = e.target.closest('.catbrowse-subchart-bar');
+    const inner = e.target.closest('.catbrowse-subchart-inner');
+    const tip = inner?.querySelector('.catbrowse-subchart-tip');
+    if (!seg || !bar || !tip) {
+      hideSubchartTip(chartEl);
+      return;
+    }
+    positionSubchartTip(seg, bar, tip);
+  });
+
+  chartEl.addEventListener('mouseleave', () => hideSubchartTip(chartEl));
+}
+
 function rowTitle(row) {
   return (row['产品名称'] || row['交易对方'] || '').trim() || '—';
 }
@@ -113,12 +231,11 @@ function browseCatCell(row) {
   const sub = row['子分类'] || '';
   const subs = getSubcatsFor(cat);
   const pickOpts = splitIdx != null ? { splitIdx } : {};
-  const mainBtn = catPickBtnHtml(parentId, cat, pickOpts);
   const subChange = splitIdx != null
     ? `updSplitSub(${parentId},${splitIdx},this.value)`
     : `updSubCat(${parentId},this.value)`;
-  const subSel = subCatSelectHtml({ subs, sub, onchange: subChange, extraClass: 'cs-compact' });
-  return `<div class="catbrowse-row-cat">${mainBtn}<span class="catbrowse-cat-sep">·</span>${subSel}</div>`;
+  const subSel = subCatSelectHtml({ subs, sub, onchange: subChange });
+  return `<div class="catbrowse-row-cat cat-cell">${catCellInnerHtml(parentId, cat, subSel, pickOpts)}</div>`;
 }
 
 function renderBrowseRow(row) {
@@ -129,8 +246,10 @@ function renderBrowseRow(row) {
   const showDesc = d && d !== '/' && d !== p;
   const isInc = row['收支'] === '收入';
   const splitTag = row._splitOf != null ? '<span class="catbrowse-split-tag">拆分</span>' : '';
-  const pairTag = findPairForKey(key)
-    ? '<span class="catbrowse-pair-tag" title="付款与返款已配对，探店已完成"><i class="ti ti-link"></i> 已完成</span>'
+  const link = findPairForKey(key);
+  const pairLabel = link?.name === '已完成配对' ? '已完成' : (link?.name || '已完成');
+  const pairTag = link
+    ? `<span class="catbrowse-pair-tag" title="关联账目"><i class="ti ti-link"></i> ${escAttr(pairLabel)}</span>`
     : '';
   return `<div class="catbrowse-row${isSel ? ' selected' : ''}${pairTag ? ' paired' : ''}" data-sel-key="${key}">
     <div class="catbrowse-row-check" onclick="event.stopPropagation()">
@@ -384,6 +503,7 @@ export function renderCatBrowse() {
   const tabsEl = document.getElementById('catBrowseTabs');
   const bodyEl = document.getElementById('catBrowseBody');
   const summaryEl = document.getElementById('catBrowseSummary');
+  const chartEl = document.getElementById('catBrowseSubChart');
   if (!tabsEl || !bodyEl) return;
 
   ensureTabsEvents();
@@ -397,13 +517,13 @@ export function renderCatBrowse() {
   tabsEl.innerHTML = cats.map((c, i) => {
     const rows = rowsForCat(c);
     const cnt = rows.length;
-    const exp = rows.filter(r => r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0);
+    const amt = browseTabAmount(c, rows);
     const on = c === activeCat ? ' on' : '';
     const empty = cnt === 0 ? ' empty' : '';
     return `<button type="button" class="catbrowse-tab${on}${empty}" data-cat="${c}" data-idx="${i}" title="点击切换；长按拖动排序">
       ${getEmoji(c)}
       <span class="catbrowse-tab-name">${c}</span>
-      <span class="catbrowse-tab-meta">${cnt ? fmtMoney(exp) : '暂无'}</span>
+      <span class="catbrowse-tab-meta${amt.cls ? ` ${amt.cls}` : ''}">${amt.text}</span>
     </button>`;
   }).join('');
 
@@ -417,18 +537,33 @@ export function renderCatBrowse() {
       : '';
     if (!rows.length) {
       summaryEl.innerHTML = `<span class="catbrowse-summary-name">${getEmoji(activeCat)} ${activeCat}</span><span class="catbrowse-summary-meta">暂无账目</span>`;
+      if (chartEl) {
+        chartEl.innerHTML = '';
+        chartEl.classList.add('hide');
+      }
     } else {
       summaryEl.innerHTML = `<span class="catbrowse-summary-name">${getEmoji(activeCat)} ${activeCat}</span><span class="catbrowse-summary-meta">${subcatMeta(rows)}</span>${selectAll}`;
     }
   }
 
   if (!rows.length) {
+    if (chartEl) {
+      chartEl.innerHTML = '';
+      chartEl.classList.add('hide');
+    }
     bodyEl.innerHTML = '<div class="catbrowse-empty"><i class="ti ti-inbox"></i>该分类暂无账目</div>';
     updateCatBrowseBulkBar();
     return;
   }
 
   const subcats = subcatsForBrowse(activeCat, rows);
+  if (chartEl) {
+    const chartHtml = buildSubcatChartHtml(activeCat, rows, subcats);
+    chartEl.innerHTML = chartHtml;
+    chartEl.classList.toggle('hide', !chartHtml);
+    ensureSubchartTooltip();
+  }
+
   bodyEl.innerHTML = subcats.map(sub => {
     const key = groupKey(activeCat, sub);
     const collapsed = collapsedGroups.has(key);

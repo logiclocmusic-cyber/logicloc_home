@@ -32,15 +32,15 @@ export function updateUserUI() {
   const name = currentUser?.username || '';
   const pill = document.getElementById('userDisplayName');
   const av = document.getElementById('userAvatar');
-  if (pill) pill.textContent = name || '未登录';
+  if (pill) pill.textContent = name || '本地账本';
   if (av) av.textContent = avatarLetter(name);
 }
 
 function networkLoginHint() {
   if (API_BASE) {
-    return `无法连接后端（${API_BASE}）。请检查 Railway 是否在线，以及 Vercel 的 VITE_API_BASE、FRONTEND_URL 是否配置正确。`;
+    return `无法连接后端（${API_BASE}）。请确认服务是否在线。`;
   }
-  return '无法连接后端。请确认已运行 npm run dev，并通过 http://localhost:5173 访问。';
+  return '无法连接后端。请确认应用已启动，或通过 npm run dev 在本地运行。';
 }
 
 export async function fetchMe() {
@@ -51,7 +51,6 @@ export async function fetchMe() {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!res.ok) {
-      // 仅当会话仍是发起请求时的 token 才清除，避免与登录表单的竞态互相覆盖
       if (res.status === 401 && getToken() === token) {
         setToken(null);
         currentUser = null;
@@ -67,19 +66,19 @@ export async function fetchMe() {
   }
 }
 
-export async function login(email, password) {
+export async function loginWithPin(pin) {
   let res;
   try {
-    res = await fetch(`${API}/auth/login`, {
+    res = await fetch(`${API}/auth/pin`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
+      body: JSON.stringify({ pin })
     });
   } catch {
     throw new Error(networkLoginHint());
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || '登录失败');
+  if (!res.ok) throw new Error(data.error || '密码错误');
   setToken(data.token);
   currentUser = data.user;
   updateUserUI();
@@ -102,6 +101,9 @@ export async function logout() {
 export function showLoginScreen() {
   document.getElementById('loginScreen')?.classList.remove('hide');
   document.querySelector('.app')?.classList.add('locked');
+  resetPinInput();
+  loadMobileAccessHint();
+  requestAnimationFrame(() => focusPinInput());
 }
 
 export function hideLoginScreen() {
@@ -111,26 +113,146 @@ export function hideLoginScreen() {
 
 let sessionBooted = false;
 
+function getPinInput() {
+  return document.getElementById('loginPin');
+}
+
+function updatePinDots(len) {
+  document.querySelectorAll('#pinDots span').forEach((dot, i) => {
+    dot.classList.toggle('filled', i < len);
+  });
+}
+
+function resetPinInput() {
+  const inp = getPinInput();
+  if (inp) inp.value = '';
+  updatePinDots(0);
+}
+
+function pinScreenVisible() {
+  return !document.getElementById('loginScreen')?.classList.contains('hide');
+}
+
+function focusPinInput() {
+  const inp = getPinInput();
+  if (inp && pinScreenVisible()) inp.focus({ preventScroll: true });
+}
+
+function handlePinKeydown(e) {
+  if (!pinScreenVisible()) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const errEl = document.getElementById('loginError');
+  if (/^\d$/.test(e.key)) {
+    e.preventDefault();
+    if (errEl) errEl.textContent = '';
+    appendPinDigit(e.key);
+    return;
+  }
+  if (e.key === 'Backspace') {
+    e.preventDefault();
+    if (errEl) errEl.textContent = '';
+    backspacePin();
+    return;
+  }
+  if (e.key === 'Delete' || e.key === 'Escape') {
+    e.preventDefault();
+    if (errEl) errEl.textContent = '';
+    resetPinInput();
+    return;
+  }
+  if (e.key === 'Enter') {
+    const pin = getPinInput()?.value || '';
+    if (pin.length === 4) {
+      e.preventDefault();
+      document.getElementById('loginForm')?.requestSubmit();
+    }
+  }
+}
+
+function appendPinDigit(digit) {
+  const inp = getPinInput();
+  if (!inp || inp.value.length >= 4) return;
+  inp.value += digit;
+  updatePinDots(inp.value.length);
+  if (inp.value.length === 4) {
+    document.getElementById('loginForm')?.requestSubmit();
+  }
+}
+
+function backspacePin() {
+  const inp = getPinInput();
+  if (!inp || !inp.value.length) return;
+  inp.value = inp.value.slice(0, -1);
+  updatePinDots(inp.value.length);
+}
+
+async function loadMobileAccessHint() {
+  const el = document.getElementById('loginMobileHint');
+  if (!el) return;
+  try {
+    const res = await fetch(`${API}/health`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const urls = (data.mobileUrls || []).filter(Boolean);
+    if (!urls.length) {
+      el.textContent = '';
+      return;
+    }
+    const primary = urls[0];
+    el.innerHTML = `手机访问（同一 WiFi）：<a href="${primary}" target="_blank" rel="noopener">${primary}</a>`;
+  } catch {
+    el.textContent = '';
+  }
+}
+
 export function setupLoginForm(onSuccess) {
   const form = document.getElementById('loginForm');
   const errEl = document.getElementById('loginError');
   const btn = document.getElementById('loginBtn');
+  const pad = document.getElementById('pinPad');
+
+  pad?.addEventListener('click', e => {
+    const keyBtn = e.target.closest('.pin-key');
+    if (!keyBtn) return;
+    e.preventDefault();
+    errEl.textContent = '';
+    const key = keyBtn.dataset.key;
+    if (key === 'clear') resetPinInput();
+    else if (key === 'back') backspacePin();
+    else if (/^\d$/.test(key)) appendPinDigit(key);
+    focusPinInput();
+  });
+
+  document.getElementById('pinDots')?.addEventListener('click', () => focusPinInput());
+  document.addEventListener('keydown', handlePinKeydown);
+
+  getPinInput()?.addEventListener('input', e => {
+    e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4);
+    updatePinDots(e.target.value.length);
+    errEl.textContent = '';
+    if (e.target.value.length === 4) {
+      document.getElementById('loginForm')?.requestSubmit();
+    }
+  });
 
   form?.addEventListener('submit', async e => {
     e.preventDefault();
     errEl.textContent = '';
+    const pin = getPinInput()?.value || '';
+    if (pin.length !== 4) {
+      errEl.textContent = '请输入 4 位密码';
+      return;
+    }
     btn.disabled = true;
     try {
-      await login(
-        document.getElementById('loginEmail').value,
-        document.getElementById('loginPassword').value
-      );
+      await loginWithPin(pin);
       hideLoginScreen();
       sessionBooted = true;
       await onSuccess();
     } catch (err) {
       showLoginScreen();
-      errEl.textContent = err.message || '登录失败，请重试';
+      errEl.textContent = err.message || '密码错误，请重试';
+      resetPinInput();
     } finally {
       btn.disabled = false;
     }
@@ -145,7 +267,6 @@ export function setupLoginForm(onSuccess) {
 export async function ensureAuth(onAuthed) {
   setupLoginForm(onAuthed);
   const user = await fetchMe();
-  // 用户已在等待 fetchMe 期间通过表单完成登录并引导进应用，避免重复 init 把页面打回登录页
   if (sessionBooted) return;
 
   const authed = user || currentUser || getToken();

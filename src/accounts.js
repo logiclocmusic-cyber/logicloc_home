@@ -1,6 +1,7 @@
 /** 信用账户：信用卡额度与免息期管理 */
 import { fmtMoney, fmtMoneySigned, fmtCount } from './format.js';
 import { isValidPayAccount, matchBankBrand, accountGroupKey, accountGroupName } from './bank-brands.js';
+import { downloadReminderIcs, calendarExportHint, CALENDAR_NAME } from './reminder-calendar.js';
 
 const MANUAL_PREFIX = '__manual:';
 const KIND_OPTIONS = ['借记卡', '信用卡', '支付账户'];
@@ -14,16 +15,27 @@ const DEFAULT_CASH_ACCOUNTS = [
   '建设银行1891', '民生银行0258', '中国银行0135', '微信-胡晗', '支付宝-胡晗'
 ];
 
+const DEFAULT_LIFE_ACCOUNTS = [
+  { name: '旌湖上境电费', accountNo: '5101152527201' }
+];
+
+const DEFAULT_LONG_REMINDERS = [
+  { name: 'W-8 表格', expiry: '2030-01-01' }
+];
+
 let getAllRows = () => [];
 let onPersist = () => {};
 let persistNowFn = null;
 let registryNeedsPersist = false;
 
 let accountCardFaces = {};
-let accountRegistry = { overrides: {}, hidden: [], manual: [], merges: {}, creditHidden: [], creditPools: [], creditGroups: {}, cashAccounts: [], expenseBudgets: [] };
+let accountRegistry = { overrides: {}, hidden: [], manual: [], merges: {}, creditHidden: [], creditPools: [], creditGroups: {}, cashAccounts: [], expenseBudgets: [], webAccounts: { columns: [], rows: [] }, lifeAccounts: [], longReminders: [] };
 let creditCardEditMode = false;
 let cashAccountEditMode = false;
 let budgetEditMode = false;
+let webAccountEditMode = false;
+let lifeAccountEditMode = false;
+let longReminderEditMode = false;
 
 const CORP_MARKS = {
   WECHAT: { bg: '#07c160', icon: 'ti-brand-wechat' },
@@ -78,6 +90,21 @@ function migrateRegistry(raw) {
       }).filter(b => b.id)
       : []
   };
+  r.webAccounts = normalizeWebAccounts(raw?.webAccounts);
+  r.lifeAccounts = Array.isArray(raw?.lifeAccounts)
+    ? raw.lifeAccounts.map(a => ({
+      id: String(a?.id || ''),
+      name: String(a?.name || ''),
+      accountNo: String(a?.accountNo || a?.account || '')
+    })).filter(a => a.id)
+    : [];
+  r.longReminders = Array.isArray(raw?.longReminders)
+    ? raw.longReminders.map(item => ({
+      id: String(item?.id || ''),
+      name: String(item?.name || ''),
+      expiry: normalizeBudgetDateIso(item?.expiry || item?.date || '')
+    })).filter(item => item.id)
+    : [];
   let migrated = false;
 
   const newOverrides = {};
@@ -133,6 +160,95 @@ function nextCashAccountId() {
   return `cash-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+function normalizeWebAccounts(raw) {
+  const columns = Array.isArray(raw?.columns)
+    ? raw.columns.map(c => ({
+      id: String(c?.id || ''),
+      title: String(c?.title || '')
+    })).filter(c => c.id)
+    : [];
+  const rows = Array.isArray(raw?.rows)
+    ? raw.rows.map(r => ({
+      id: String(r?.id || ''),
+      phone: String(r?.phone || ''),
+      cells: r?.cells && typeof r.cells === 'object' ? { ...r.cells } : {}
+    })).filter(r => r.id)
+    : [];
+  return { columns, rows };
+}
+
+function ensureWebAccounts() {
+  if (!accountRegistry.webAccounts || typeof accountRegistry.webAccounts !== 'object') {
+    accountRegistry.webAccounts = { columns: [], rows: [] };
+  }
+  accountRegistry.webAccounts = normalizeWebAccounts(accountRegistry.webAccounts);
+}
+
+function nextWebColId() {
+  return `webcol-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function nextWebRowId() {
+  return `webrow-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function webCellValue(row, colId) {
+  return String(row?.cells?.[colId] || '');
+}
+
+function setWebCellValue(row, colId, value) {
+  if (!row.cells || typeof row.cells !== 'object') row.cells = {};
+  const v = String(value || '').trim();
+  if (v) row.cells[colId] = v;
+  else delete row.cells[colId];
+}
+
+function nextLifeAccountId() {
+  return `life-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function lifeAccountsList() {
+  return Array.isArray(accountRegistry.lifeAccounts) ? accountRegistry.lifeAccounts : [];
+}
+
+function ensureLifeAccounts() {
+  if (!Array.isArray(accountRegistry.lifeAccounts)) accountRegistry.lifeAccounts = [];
+}
+
+function ensureDefaultLifeAccounts() {
+  ensureLifeAccounts();
+  if (accountRegistry.lifeAccounts.length) return false;
+  accountRegistry.lifeAccounts = DEFAULT_LIFE_ACCOUNTS.map(item => ({
+    id: nextLifeAccountId(),
+    name: item.name,
+    accountNo: item.accountNo
+  }));
+  return true;
+}
+
+function nextLongReminderId() {
+  return `reminder-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function longRemindersList() {
+  return Array.isArray(accountRegistry.longReminders) ? accountRegistry.longReminders : [];
+}
+
+function ensureLongReminders() {
+  if (!Array.isArray(accountRegistry.longReminders)) accountRegistry.longReminders = [];
+}
+
+function ensureDefaultLongReminders() {
+  ensureLongReminders();
+  if (accountRegistry.longReminders.length) return false;
+  accountRegistry.longReminders = DEFAULT_LONG_REMINDERS.map(item => ({
+    id: nextLongReminderId(),
+    name: item.name,
+    expiry: item.expiry
+  }));
+  return true;
+}
+
 function ensureDefaultCashAccounts() {
   if (!Array.isArray(accountRegistry.cashAccounts)) accountRegistry.cashAccounts = [];
   if (accountRegistry.cashAccounts.length) return false;
@@ -164,7 +280,10 @@ export function loadAccountsState(state) {
   accountCardFaces = state?.accountCardFaces || {};
   let { registry, migrated } = migrateRegistry(state?.accountRegistry);
   accountRegistry = registry;
+  ensureWebAccounts();
   if (ensureDefaultCashAccounts()) migrated = true;
+  if (ensureDefaultLifeAccounts()) migrated = true;
+  if (ensureDefaultLongReminders()) migrated = true;
   if (migrated) registryNeedsPersist = true;
 }
 
@@ -208,6 +327,33 @@ function getOverride(payKey) {
     if (registryStorageKey(k) === canon) return v;
   }
   return null;
+}
+
+function isCreditCancelled(payKey) {
+  const manual = getManualEntry(payKey);
+  if (manual) return !!manual.cancelled;
+  return !!getOverride(payKey)?.cancelled;
+}
+
+function setCreditCancelled(payKey, cancelled) {
+  const manual = getManualEntry(payKey);
+  if (manual) {
+    if (cancelled) manual.cancelled = true;
+    else delete manual.cancelled;
+    return;
+  }
+  const key = registryStorageKey(canonicalAccountKey(payKey));
+  const prev = getOverride(payKey) || accountRegistry.overrides[key] || {};
+  accountRegistry.overrides[key] = { ...prev };
+  if (cancelled) accountRegistry.overrides[key].cancelled = true;
+  else delete accountRegistry.overrides[key].cancelled;
+}
+
+export function toggleCreditCancelled(payKey) {
+  if (!payKey) return;
+  setCreditCancelled(payKey, !isCreditCancelled(payKey));
+  flushAccountPersist();
+  renderAccountsPage();
 }
 
 function canonicalAccountKey(payKey) {
@@ -745,7 +891,8 @@ function creditCardAccounts() {
         displayName: creditCardDisplayName(acc),
         credit: getEffectiveCreditInfo(r.key) || {},
         poolId: pool?.id || null,
-        count: r.count
+        count: r.count,
+        cancelled: isCreditCancelled(r.key)
       };
     });
 }
@@ -912,6 +1059,7 @@ function renderCreditTimelineMarks(marks, rangeStart, rangeEnd, span) {
 
 function creditCardPriorityList(cards) {
   return cards
+    .filter(acc => !acc.cancelled)
     .map(acc => {
       const { billDay, dueDay } = acc.credit || {};
       const span = creditInterestFreeSpan(billDay, dueDay);
@@ -1033,18 +1181,30 @@ function creditNameCell(payKey, labelVal = '', { isNew = false, tagVal = '' } = 
   return `<div class="accounts-credit-name-cell accounts-credit-name-cell--edit">${logo}<input type="text" class="accounts-credit-label" ${labelAttr}><input type="text" class="accounts-credit-tag" value="${esc(tagVal)}" placeholder="标签，如 VISA双币"></div>`;
 }
 
+function creditBrandMarkHtml(payKey, size = 24, { cancelled = false } = {}) {
+  const mark = accountBrandMarkHtml(payKey, size);
+  if (!cancelled) return mark;
+  return `<span class="accounts-credit-logo-wrap is-cancelled">${mark}<span class="accounts-credit-cancelled-badge">销</span></span>`;
+}
+
+function creditCancelActionHtml(payKey, cancelled) {
+  return cancelled
+    ? `<button type="button" class="btn btn-sm accounts-credit-icon-btn accounts-credit-uncancel-btn" data-uncancel-credit="${esc(payKey)}" title="撤回注销"><i class="ti ti-arrow-back-up"></i></button>`
+    : `<button type="button" class="btn btn-sm accounts-credit-icon-btn accounts-credit-cancel-btn" data-cancel-credit="${esc(payKey)}" title="标记已注销"><i class="ti ti-ban"></i></button>`;
+}
+
 function creditNameDisplayCell(acc) {
   const displayName = acc.displayName || creditCardDisplayName(acc);
   const tag = (acc.tag || '').trim();
   const tagHtml = tag ? `<span class="accounts-credit-tag-badge">${esc(tag)}</span>` : '';
-  return `<div class="accounts-credit-name-cell">${accountBrandMarkHtml(acc.pay, 24)}<span class="accounts-credit-val accounts-credit-val--name">${esc(displayName)}</span>${tagHtml}</div>`;
+  return `<div class="accounts-credit-name-cell">${creditBrandMarkHtml(acc.pay, 24, { cancelled: !!acc.cancelled })}<span class="accounts-credit-val accounts-credit-val--name">${esc(displayName)}</span>${tagHtml}</div>`;
 }
 
 function creditNameEditCell(acc) {
   const displayName = acc.displayName || creditCardDisplayName(acc);
   const tagVal = acc.tag || '';
   return `<div class="accounts-credit-name-cell accounts-credit-name-cell--edit">
-    ${accountBrandMarkHtml(acc.pay, 24)}
+    ${creditBrandMarkHtml(acc.pay, 24, { cancelled: !!acc.cancelled })}
     <span class="accounts-credit-val accounts-credit-val--name">${esc(displayName)}</span>
     <input type="text" class="accounts-credit-tag" value="${esc(tagVal)}" placeholder="标签，如 VISA双币">
   </div>`;
@@ -1066,6 +1226,7 @@ function renderCreditCardRow(acc, { isNew = false, editing = false, pooled = fal
     : editing ? '<td class="accounts-credit-bind-td"></td>' : '';
 
   if (!editing && !isNew) {
+    const cancelled = !!acc.cancelled;
     const limitCell = pooled
       ? '<span class="accounts-credit-pool-shared">共享</span>'
       : formatCreditBrowseAmount(c.limit);
@@ -1075,7 +1236,11 @@ function renderCreditCardRow(acc, { isNew = false, editing = false, pooled = fal
     const debtCell = pooled
       ? '<span class="accounts-credit-pool-shared">共享</span>'
       : formatCreditBrowseAmount(c.debt);
-    return `<tr data-credit-key="${esc(acc.pay)}"${pooled ? ' class="accounts-credit-pool-card"' : ''}>
+    const rowCls = [
+      pooled ? 'accounts-credit-pool-card' : '',
+      cancelled ? 'is-cancelled' : ''
+    ].filter(Boolean).join(' ');
+    return `<tr data-credit-key="${esc(acc.pay)}"${rowCls ? ` class="${rowCls}"` : ''}>
       <td>${creditNameDisplayCell(acc)}</td>
       <td><span class="accounts-credit-val">${esc(last4 || '—')}</span></td>
       <td><span class="accounts-credit-val">${limitCell}</span></td>
@@ -1091,36 +1256,42 @@ function renderCreditCardRow(acc, { isNew = false, editing = false, pooled = fal
   if (isNew) {
     return `<tr data-credit-new="1">
       ${bindTd}
-      <td>${creditNameCell('', '', { isNew: true })}</td>
-      <td>${creditDigitsInput(null, { isNew: true })}</td>
-      <td>${fields.limit}</td>
-      <td>${fields.available}</td>
-      <td>${fields.debt}</td>
-      <td>${fields.billDay}</td>
-      <td>${fields.dueDay}</td>
-      <td class="accounts-credit-actions">
+      <td class="accounts-credit-td-account">${creditNameCell('', '', { isNew: true })}</td>
+      <td class="accounts-credit-td-cardno">${creditDigitsInput(null, { isNew: true })}</td>
+      <td class="accounts-credit-td-amt">${fields.limit}</td>
+      <td class="accounts-credit-td-amt">${fields.available}</td>
+      <td class="accounts-credit-td-amt">${fields.debt}</td>
+      <td class="accounts-credit-td-day">${fields.billDay}</td>
+      <td class="accounts-credit-td-day">${fields.dueDay}</td>
+      <td class="accounts-credit-td-actions"><div class="accounts-credit-actions">
         <button type="button" class="btn btn-sm" data-cancel-credit-new title="取消"><i class="ti ti-x"></i></button>
         <button type="button" class="btn btn-sm btn-p" data-save-credit-new title="保存"><i class="ti ti-check"></i></button>
-      </td>
+      </div></td>
     </tr>`;
   }
 
   const unbindBtn = pooled
-    ? `<button type="button" class="btn btn-sm" data-unbind-credit="${esc(acc.pay)}" title="移出共享额度"><i class="ti ti-unlink"></i></button>`
+    ? `<button type="button" class="btn btn-sm accounts-credit-icon-btn" data-unbind-credit="${esc(acc.pay)}" title="移出共享额度"><i class="ti ti-unlink"></i></button>`
     : '';
-  return `<tr data-credit-key="${esc(acc.pay)}"${pooled ? ' class="accounts-credit-pool-card"' : ''}>
+  const cancelBtn = creditCancelActionHtml(acc.pay, !!acc.cancelled);
+  const rowCls = [
+    pooled ? 'accounts-credit-pool-card' : '',
+    acc.cancelled ? 'is-cancelled' : ''
+  ].filter(Boolean).join(' ');
+  return `<tr data-credit-key="${esc(acc.pay)}"${rowCls ? ` class="${rowCls}"` : ''}>
     ${bindTd}
-    <td>${creditNameEditCell(acc)}</td>
-    <td>${creditDigitsInput(acc)}</td>
-    <td>${fields.limit}</td>
-    <td>${fields.available}</td>
-    <td>${fields.debt}</td>
-    <td>${fields.billDay}</td>
-    <td>${fields.dueDay}</td>
-    <td class="accounts-credit-actions">
+    <td class="accounts-credit-td-account">${creditNameEditCell(acc)}</td>
+    <td class="accounts-credit-td-cardno">${creditDigitsInput(acc)}</td>
+    <td class="accounts-credit-td-amt">${fields.limit}</td>
+    <td class="accounts-credit-td-amt">${fields.available}</td>
+    <td class="accounts-credit-td-amt">${fields.debt}</td>
+    <td class="accounts-credit-td-day">${fields.billDay}</td>
+    <td class="accounts-credit-td-day">${fields.dueDay}</td>
+    <td class="accounts-credit-td-actions"><div class="accounts-credit-actions">
+      ${cancelBtn}
       ${unbindBtn}
-      <button type="button" class="btn btn-sm btn-a" data-delete-credit="${esc(acc.pay)}" title="删除"><i class="ti ti-trash"></i></button>
-    </td>
+      <button type="button" class="btn btn-sm btn-a accounts-credit-icon-btn" data-delete-credit="${esc(acc.pay)}" title="删除"><i class="ti ti-trash"></i></button>
+    </div></td>
   </tr>`;
 }
 
@@ -1174,15 +1345,14 @@ function sumCreditGroupTotals(cards) {
 function renderCreditGroupSummaryRow(group, editing) {
   const totals = sumCreditGroupTotals(group.cards);
   const bindTd = editing ? '<td class="accounts-credit-bind-td"></td>' : '';
-  const actionTd = editing ? '<td></td>' : '';
-  const tailCols = editing ? '<td colspan="2"></td>' : '<td colspan="3"></td>';
+  const actionTd = editing ? '<td class="accounts-credit-td-actions"></td>' : '';
   return `<tr class="accounts-credit-sum-row">
     ${bindTd}
     <td colspan="2"><span class="accounts-credit-sum-label">合计</span></td>
-    <td><span class="accounts-credit-val accounts-credit-val--sum">${formatCreditBrowseAmount(totals.limit)}</span></td>
-    <td><span class="accounts-credit-val accounts-credit-val--sum">${formatCreditBrowseAmount(totals.available)}</span></td>
-    <td><span class="accounts-credit-val accounts-credit-val--sum">${formatCreditBrowseAmount(totals.debt)}</span></td>
-    ${tailCols}
+    <td class="accounts-credit-td-amt"><span class="accounts-credit-val accounts-credit-val--sum">${formatCreditBrowseAmount(totals.limit)}</span></td>
+    <td class="accounts-credit-td-amt"><span class="accounts-credit-val accounts-credit-val--sum">${formatCreditBrowseAmount(totals.available)}</span></td>
+    <td class="accounts-credit-td-amt"><span class="accounts-credit-val accounts-credit-val--sum">${formatCreditBrowseAmount(totals.debt)}</span></td>
+    ${editing ? '<td colspan="2"></td>' : '<td colspan="3"></td>'}
     ${actionTd}
   </tr>`;
 }
@@ -1191,9 +1361,9 @@ function renderCreditPoolAmountCells(pool, rowSpan, editing) {
   const c = { limit: pool.limit, available: pool.available, debt: pool.debt };
   if (editing) {
     const fields = creditFieldInputs(c);
-    return `<td rowspan="${rowSpan}" class="accounts-credit-pool-amt">${fields.limit}</td>
-      <td rowspan="${rowSpan}" class="accounts-credit-pool-amt">${fields.available}</td>
-      <td rowspan="${rowSpan}" class="accounts-credit-pool-amt">${fields.debt}</td>`;
+    return `<td rowspan="${rowSpan}" class="accounts-credit-pool-amt accounts-credit-td-amt">${fields.limit}</td>
+      <td rowspan="${rowSpan}" class="accounts-credit-pool-amt accounts-credit-td-amt">${fields.available}</td>
+      <td rowspan="${rowSpan}" class="accounts-credit-pool-amt accounts-credit-td-amt">${fields.debt}</td>`;
   }
   return `<td rowspan="${rowSpan}" class="accounts-credit-pool-amt"><span class="accounts-credit-val accounts-credit-val--pool">${formatCreditBrowseAmount(c.limit)}</span></td>
     <td rowspan="${rowSpan}" class="accounts-credit-pool-amt"><span class="accounts-credit-val accounts-credit-val--pool">${formatCreditBrowseAmount(c.available)}</span></td>
@@ -1206,7 +1376,7 @@ function renderCreditPoolAccountTd(acc, pool, editing, isFirst) {
     ? `<input type="hidden" class="accounts-credit-pool-name" value="${esc(pool.name)}">`
     : '';
   const nameCell = editing ? creditNameEditCell(acc) : creditNameDisplayCell(acc);
-  return `<td><div class="accounts-credit-pool-name-wrap">${nameCell}${sharedIc}${poolNameInp}</div></td>`;
+  return `<td class="accounts-credit-td-account"><div class="accounts-credit-pool-name-wrap">${nameCell}${sharedIc}${poolNameInp}</div></td>`;
 }
 
 function renderCreditPoolViewRows(pool, cards) {
@@ -1215,7 +1385,12 @@ function renderCreditPoolViewRows(pool, cards) {
     const c = acc.credit || {};
     const last4 = acc.last4 ? String(acc.last4).padStart(4, '0') : '';
     const amtCells = i === 0 ? renderCreditPoolAmountCells(pool, n, false) : '';
-    const rowCls = `accounts-credit-pool-card${i === 0 ? ' accounts-credit-pool-card--first' : ''}`;
+    const cancelled = !!acc.cancelled;
+    const rowCls = [
+      'accounts-credit-pool-card',
+      i === 0 ? 'accounts-credit-pool-card--first' : '',
+      cancelled ? 'is-cancelled' : ''
+    ].filter(Boolean).join(' ');
     return `<tr data-credit-key="${esc(acc.pay)}" class="${rowCls}" data-credit-pool="${esc(pool.id)}">
       ${renderCreditPoolAccountTd(acc, pool, false, i === 0)}
       <td><span class="accounts-credit-val">${esc(last4 || '—')}</span></td>
@@ -1235,22 +1410,28 @@ function renderCreditPoolEditRows(pool, cards) {
     const amtCells = i === 0 ? renderCreditPoolAmountCells(pool, n, true) : '';
     const isLast = i === n - 1;
     const dissolveBtn = isLast
-      ? `<button type="button" class="btn btn-sm" data-dissolve-pool="${esc(pool.id)}" title="解散额度池"><i class="ti ti-unlink"></i></button>`
+      ? `<button type="button" class="btn btn-sm accounts-credit-icon-btn" data-dissolve-pool="${esc(pool.id)}" title="解散额度池"><i class="ti ti-unlink"></i></button>`
       : '';
-    const unbindBtn = `<button type="button" class="btn btn-sm" data-unbind-credit="${esc(acc.pay)}" title="移出共享额度"><i class="ti ti-unlink"></i></button>`;
-    const rowCls = `accounts-credit-pool-card${i === 0 ? ' accounts-credit-pool-card--first' : ''}`;
+    const unbindBtn = `<button type="button" class="btn btn-sm accounts-credit-icon-btn" data-unbind-credit="${esc(acc.pay)}" title="移出共享额度"><i class="ti ti-unlink"></i></button>`;
+    const cancelBtn = creditCancelActionHtml(acc.pay, !!acc.cancelled);
+    const rowCls = [
+      'accounts-credit-pool-card',
+      i === 0 ? 'accounts-credit-pool-card--first' : '',
+      acc.cancelled ? 'is-cancelled' : ''
+    ].filter(Boolean).join(' ');
     return `<tr data-credit-key="${esc(acc.pay)}" class="${rowCls}" data-credit-pool="${esc(pool.id)}">
       ${bindTd}
       ${renderCreditPoolAccountTd(acc, pool, true, i === 0)}
-      <td>${creditDigitsInput(acc)}</td>
+      <td class="accounts-credit-td-cardno">${creditDigitsInput(acc)}</td>
       ${amtCells}
-      <td>${fields.billDay}</td>
-      <td>${fields.dueDay}</td>
-      <td class="accounts-credit-actions">
+      <td class="accounts-credit-td-day">${fields.billDay}</td>
+      <td class="accounts-credit-td-day">${fields.dueDay}</td>
+      <td class="accounts-credit-td-actions"><div class="accounts-credit-actions">
+        ${cancelBtn}
         ${unbindBtn}
         ${dissolveBtn}
-        <button type="button" class="btn btn-sm btn-a" data-delete-credit="${esc(acc.pay)}" title="删除"><i class="ti ti-trash"></i></button>
-      </td>
+        <button type="button" class="btn btn-sm btn-a accounts-credit-icon-btn" data-delete-credit="${esc(acc.pay)}" title="删除"><i class="ti ti-trash"></i></button>
+      </div></td>
     </tr>`;
   }).join('');
 }
@@ -1278,7 +1459,7 @@ function renderCreditCardGroupTableBody(group, editing) {
 
 function renderCreditCardGroupTable(group, editing) {
   const bindTh = editing ? '<th class="accounts-credit-bind-th" title="选择绑定"></th>' : '';
-  const actionTh = editing ? '<th>操作</th>' : '';
+  const actionTh = editing ? '<th class="accounts-credit-th-actions">操作</th>' : '';
   const addBtn = editing
     ? `<button type="button" class="btn btn-sm btn-p" onclick="addCreditCardRow('${group.id}')"><i class="ti ti-plus"></i> 新增</button>`
     : '';
@@ -1314,7 +1495,7 @@ function renderCreditCardGroupTable(group, editing) {
         const colSpan = editing ? 10 : 8;
         return `<tr><td colspan="${colSpan}" class="accounts-credit-group-empty">暂无卡片</td></tr>`;
       })();
-  const digitTh = editing ? '<th>卡号</th>' : '<th>尾号</th>';
+  const digitTh = editing ? '<th class="accounts-credit-th-cardno">卡号</th>' : '<th class="accounts-credit-th-tail">尾号</th>';
   return `<section class="accounts-credit-group" data-credit-group="${group.id}">
     <div class="accounts-credit-group-head">
       <h4 class="accounts-credit-group-title">${esc(group.name)} <span class="accounts-credit-group-cnt">${group.cards.length} 张</span></h4>
@@ -1324,7 +1505,7 @@ function renderCreditCardGroupTable(group, editing) {
       <table class="report-table accounts-credit-table${editing ? ' is-editing' : ' is-viewing'}">
         ${colgroup}
         <thead><tr>
-          ${bindTh}<th>账户</th>${digitTh}<th>额度</th><th>可用</th><th>欠款</th><th>账单日</th><th>还款日</th>${tlTh}${actionTh}
+          ${bindTh}<th class="accounts-credit-th-account">账户</th>${digitTh}<th class="accounts-credit-th-amt">额度</th><th class="accounts-credit-th-amt">可用</th><th class="accounts-credit-th-amt">欠款</th><th class="accounts-credit-th-day">账单日</th><th class="accounts-credit-th-day">还款日</th>${tlTh}${actionTh}
         </tr></thead>
         <tbody id="accountsCreditTbody-${group.id}">${body}</tbody>
       </table>
@@ -1579,6 +1760,52 @@ function formatBudgetDateLabel(iso) {
   return `${y}年${mo}月${d}日`;
 }
 
+function reminderRemainingInfo(expiryIso) {
+  const iso = normalizeBudgetDateIso(expiryIso);
+  if (!iso) return { label: '—', status: 'unknown' };
+  const [y, m, d] = iso.split('-').map(Number);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const exp = new Date(y, m - 1, d);
+  const totalDays = Math.round((exp - today) / 86400000);
+
+  if (totalDays < 0) {
+    return { label: `已过期 ${Math.abs(totalDays)} 天`, status: 'expired' };
+  }
+  if (totalDays === 0) return { label: '今天到期', status: 'urgent' };
+  if (totalDays === 1) return { label: '明天到期', status: 'urgent' };
+  if (totalDays <= 30) return { label: `还剩 ${totalDays} 天`, status: 'urgent' };
+  if (totalDays <= 90) return { label: `还剩 ${totalDays} 天`, status: 'soon' };
+
+  let years = exp.getFullYear() - today.getFullYear();
+  let months = exp.getMonth() - today.getMonth();
+  let days = exp.getDate() - today.getDate();
+  if (days < 0) {
+    months--;
+    days += new Date(exp.getFullYear(), exp.getMonth(), 0).getDate();
+  }
+  if (months < 0) {
+    years--;
+    months += 12;
+  }
+
+  const parts = [];
+  if (years > 0) parts.push(`${years} 年`);
+  if (months > 0) parts.push(`${months} 个月`);
+  if (!parts.length) parts.push(`${totalDays} 天`);
+  else if (years === 0 && days > 0) parts.push(`${days} 天`);
+
+  return { label: `还剩 ${parts.join('')}`, status: 'ok' };
+}
+
+function sortedLongReminders() {
+  return [...longRemindersList()].sort((a, b) => {
+    const da = normalizeBudgetDateIso(a.expiry) || '9999-99-99';
+    const db = normalizeBudgetDateIso(b.expiry) || '9999-99-99';
+    return da.localeCompare(db) || a.name.localeCompare(b.name, 'zh-CN');
+  });
+}
+
 function todayIsoDate() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -1713,6 +1940,463 @@ export function deleteBudget(id) {
   if (!item) return;
   if (!confirm(`确定删除预算「${item.name || '未命名'}」？`)) return;
   accountRegistry.expenseBudgets = accountRegistry.expenseBudgets.filter(b => b.id !== id);
+  flushAccountPersist();
+  renderAccountsPage();
+}
+
+function lifeAccountIconHtml(name) {
+  const label = String(name || '').trim();
+  const icon = /电/.test(label) ? 'ti-bolt'
+    : /水|燃气|气/.test(label) ? 'ti-droplet'
+    : /物业|房租|租/.test(label) ? 'ti-building'
+    : /网|宽带/.test(label) ? 'ti-wifi'
+    : 'ti-home-2';
+  return `<span class="accounts-life-icon"><i class="ti ${icon}"></i></span>`;
+}
+
+function renderLifeAccountRow(item, editing) {
+  if (editing) {
+    return `<tr data-life-id="${esc(item.id)}">
+      <td><div class="accounts-life-name-cell">${lifeAccountIconHtml(item.name)}<input type="text" class="accounts-life-inp accounts-life-name" value="${esc(item.name)}" placeholder="如：旌湖上境电费"></div></td>
+      <td><input type="text" class="accounts-life-inp accounts-life-account" value="${esc(item.accountNo)}" placeholder="账号 / 户号" inputmode="numeric" autocomplete="off"></td>
+      <td class="accounts-life-actions">
+        <button type="button" class="btn btn-sm btn-a" data-delete-life="${esc(item.id)}" title="删除"><i class="ti ti-trash"></i></button>
+      </td>
+    </tr>`;
+  }
+  return `<tr data-life-id="${esc(item.id)}">
+    <td><div class="accounts-life-name-cell">${lifeAccountIconHtml(item.name)}<span class="accounts-life-val accounts-life-val--name">${esc(item.name)}</span></div></td>
+    <td><span class="accounts-life-val accounts-life-val--account">${item.accountNo ? esc(item.accountNo) : '—'}</span></td>
+  </tr>`;
+}
+
+function renderLifeAccountsSection() {
+  const el = document.getElementById('accountsLifeSection');
+  if (!el) return;
+  ensureLifeAccounts();
+  const items = lifeAccountsList();
+  const editing = lifeAccountEditMode;
+  const editTitle = editing ? '退出编辑' : '编辑';
+  const actionCol = editing
+    ? `<col class="accounts-life-col-actions">`
+    : '';
+  const actionTh = editing ? '<th class="accounts-life-col-actions"></th>' : '';
+  const body = items.map(item => renderLifeAccountRow(item, editing)).join('');
+  const addRow = editing
+    ? `<div class="accounts-life-foot"><button type="button" class="btn btn-sm" onclick="addLifeAccountRow()"><i class="ti ti-plus"></i> 新增生活账户</button></div>`
+    : '';
+  el.innerHTML = `<div class="cc full accounts-life-card${editing ? ' is-editing' : ' is-viewing'}">
+    <div class="accounts-life-head">
+      <div class="accounts-life-head-top">
+        <div class="ct"><i class="ti ti-home-2"></i> 生活账户 <span class="accounts-credit-cnt">${items.length} 项</span></div>
+        <button type="button" class="btn btn-sm accounts-credit-edit-btn${editing ? ' on' : ''}" onclick="toggleLifeAccountEditMode()" title="${editTitle}" aria-label="${editTitle}"><i class="ti ${editing ? 'ti-pencil-off' : 'ti-pencil'}"></i></button>
+      </div>
+    </div>
+    <div class="accounts-life-table-wrap">
+      <table class="report-table accounts-life-table${editing ? ' is-editing' : ' is-viewing'}">
+        <colgroup>
+          <col class="accounts-life-col-name">
+          <col class="accounts-life-col-account">
+          ${actionCol}
+        </colgroup>
+        <thead><tr><th>名称</th><th>账号</th>${actionTh}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+    ${items.length ? '' : `<div class="accounts-credit-empty">暂无生活账户${editing ? '，可点击下方新增（如电费、水费户号）' : ''}。</div>`}
+    ${addRow}
+  </div>`;
+}
+
+export function toggleLifeAccountEditMode() {
+  lifeAccountEditMode = !lifeAccountEditMode;
+  renderAccountsPage();
+}
+
+function saveLifeAccountRow(row) {
+  const id = row?.dataset?.lifeId;
+  if (!id) return;
+  ensureLifeAccounts();
+  const item = accountRegistry.lifeAccounts.find(a => a.id === id);
+  if (!item) return;
+  const name = row.querySelector('.accounts-life-name')?.value?.trim();
+  const accountNo = row.querySelector('.accounts-life-account')?.value?.trim() || '';
+  if (!name) {
+    alert('请填写名称');
+    row.querySelector('.accounts-life-name')?.focus();
+    return;
+  }
+  item.name = name;
+  item.accountNo = accountNo;
+  flushAccountPersist();
+  renderLifeAccountsSection();
+}
+
+export function addLifeAccountRow() {
+  if (!lifeAccountEditMode) lifeAccountEditMode = true;
+  ensureLifeAccounts();
+  accountRegistry.lifeAccounts.push({
+    id: nextLifeAccountId(),
+    name: '',
+    accountNo: ''
+  });
+  renderLifeAccountsSection();
+  const rows = document.querySelectorAll('#accountsLifeSection tr[data-life-id]');
+  rows[rows.length - 1]?.querySelector('.accounts-life-name')?.focus();
+}
+
+export function deleteLifeAccount(id) {
+  if (!id) return;
+  ensureLifeAccounts();
+  const item = accountRegistry.lifeAccounts.find(a => a.id === id);
+  if (!item) return;
+  if (!confirm(`确定删除生活账户「${item.name || '未命名'}」？`)) return;
+  accountRegistry.lifeAccounts = accountRegistry.lifeAccounts.filter(a => a.id !== id);
+  flushAccountPersist();
+  renderAccountsPage();
+}
+
+function reminderCalendarBtnHtml(id, compact = false) {
+  const cls = compact ? 'btn btn-sm home-reminder-cal-btn' : 'btn btn-sm accounts-reminder-cal-btn';
+  const title = calendarExportHint();
+  return `<button type="button" class="${cls}" onclick="addLongReminderToCalendar('${esc(id)}')" title="${esc(title)}" aria-label="加入日历"><i class="ti ti-calendar-plus"></i></button>`;
+}
+
+function renderLongReminderRow(item, editing) {
+  const remaining = reminderRemainingInfo(item.expiry);
+  if (editing) {
+    return `<tr data-reminder-id="${esc(item.id)}">
+      <td><input type="text" class="accounts-reminder-inp accounts-reminder-name" value="${esc(item.name)}" placeholder="如：W-8 表格"></td>
+      <td><input type="date" class="accounts-reminder-inp accounts-reminder-expiry" value="${esc(item.expiry || '')}"></td>
+      <td class="accounts-reminder-actions">
+        <button type="button" class="btn btn-sm btn-a" data-delete-reminder="${esc(item.id)}" title="删除"><i class="ti ti-trash"></i></button>
+      </td>
+    </tr>`;
+  }
+  return `<tr data-reminder-id="${esc(item.id)}">
+    <td><span class="accounts-reminder-val accounts-reminder-val--name">${esc(item.name)}</span></td>
+    <td><span class="accounts-reminder-val accounts-reminder-val--expiry">${formatBudgetDateLabel(item.expiry)}</span></td>
+    <td><span class="accounts-reminder-val accounts-reminder-val--remaining is-${remaining.status}">${esc(remaining.label)}</span></td>
+    <td class="accounts-reminder-cal-cell">${reminderCalendarBtnHtml(item.id)}</td>
+  </tr>`;
+}
+
+function renderLongRemindersSection() {
+  const el = document.getElementById('accountsReminderSection');
+  if (!el) return;
+  ensureLongReminders();
+  const items = sortedLongReminders();
+  const editing = longReminderEditMode;
+  const editTitle = editing ? '退出编辑' : '编辑';
+  const actionCol = editing ? '<col class="accounts-reminder-col-actions">' : '';
+  const actionTh = editing ? '<th class="accounts-reminder-col-actions"></th>' : '';
+  const remainTh = editing ? '' : '<th>剩余时间</th>';
+  const calCol = editing ? '' : '<col class="accounts-reminder-col-cal">';
+  const calTh = editing ? '' : '<th class="accounts-reminder-col-cal"></th>';
+  const body = items.map(item => renderLongReminderRow(item, editing)).join('');
+  const addRow = editing
+    ? `<div class="accounts-reminder-foot"><button type="button" class="btn btn-sm" onclick="addLongReminderRow()"><i class="ti ti-plus"></i> 新增长期提醒</button></div>`
+    : '';
+  el.innerHTML = `<div class="cc full accounts-reminder-card${editing ? ' is-editing' : ' is-viewing'}">
+    <div class="accounts-reminder-head">
+      <div class="accounts-reminder-head-top">
+        <div class="ct"><i class="ti ti-bell-ringing"></i> 长期提醒 <span class="accounts-credit-cnt">${items.length} 项</span></div>
+        <button type="button" class="btn btn-sm accounts-credit-edit-btn${editing ? ' on' : ''}" onclick="toggleLongReminderEditMode()" title="${editTitle}" aria-label="${editTitle}"><i class="ti ${editing ? 'ti-pencil-off' : 'ti-pencil'}"></i></button>
+      </div>
+    </div>
+    <div class="accounts-reminder-table-wrap">
+      <table class="report-table accounts-reminder-table${editing ? ' is-editing' : ' is-viewing'}">
+        <colgroup>
+          <col class="accounts-reminder-col-name">
+          <col class="accounts-reminder-col-expiry">
+          ${editing ? actionCol : '<col class="accounts-reminder-col-remaining">'}
+          ${calCol}
+        </colgroup>
+        <thead><tr><th>事项</th><th>有效期</th>${remainTh}${calTh}${actionTh}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+    ${items.length ? '' : `<div class="accounts-credit-empty">暂无长期提醒${editing ? '，可点击下方新增（如证件、表格续期）' : ''}。</div>`}
+    ${addRow}
+  </div>`;
+  renderHomeLongRemindersSection();
+}
+
+export function renderHomeLongRemindersSection() {
+  const el = document.getElementById('homeReminderSection');
+  if (!el) return;
+  ensureLongReminders();
+  const items = sortedLongReminders();
+  if (!items.length) {
+    el.innerHTML = '';
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  const rows = items.map(item => {
+    const remaining = reminderRemainingInfo(item.expiry);
+    return `<div class="home-reminder-item">
+      <span class="home-reminder-name">${esc(item.name)}</span>
+      <span class="home-reminder-expiry">${formatBudgetDateLabel(item.expiry)}</span>
+      <span class="home-reminder-tail">
+        <span class="home-reminder-remain is-${remaining.status}">${esc(remaining.label)}</span>
+        ${reminderCalendarBtnHtml(item.id, true)}
+      </span>
+    </div>`;
+  }).join('');
+  el.innerHTML = `<div class="home-reminder-card">
+    <div class="home-reminder-head">
+      <h3 class="home-reminder-title"><i class="ti ti-bell-ringing"></i> 长期提醒</h3>
+      <button type="button" class="btn btn-sm home-reminder-link" onclick="sw('accounts', document.querySelector('.ni[title=\\'信用账户\\']'))" title="在账户页管理"><i class="ti ti-arrow-right"></i></button>
+    </div>
+    <div class="home-reminder-list">${rows}</div>
+  </div>`;
+}
+
+export function toggleLongReminderEditMode() {
+  longReminderEditMode = !longReminderEditMode;
+  renderAccountsPage();
+}
+
+function saveLongReminderRow(row) {
+  const id = row?.dataset?.reminderId;
+  if (!id) return;
+  ensureLongReminders();
+  const item = accountRegistry.longReminders.find(a => a.id === id);
+  if (!item) return;
+  const name = row.querySelector('.accounts-reminder-name')?.value?.trim();
+  const expiry = normalizeBudgetDateIso(row.querySelector('.accounts-reminder-expiry')?.value);
+  if (!name) {
+    alert('请填写事项名称');
+    row.querySelector('.accounts-reminder-name')?.focus();
+    return;
+  }
+  if (!expiry) {
+    alert('请填写有效期');
+    row.querySelector('.accounts-reminder-expiry')?.focus();
+    return;
+  }
+  item.name = name;
+  item.expiry = expiry;
+  flushAccountPersist();
+  renderLongRemindersSection();
+}
+
+export function addLongReminderRow() {
+  if (!longReminderEditMode) longReminderEditMode = true;
+  ensureLongReminders();
+  accountRegistry.longReminders.push({
+    id: nextLongReminderId(),
+    name: '',
+    expiry: ''
+  });
+  renderLongRemindersSection();
+  const rows = document.querySelectorAll('#accountsReminderSection tr[data-reminder-id]');
+  rows[rows.length - 1]?.querySelector('.accounts-reminder-name')?.focus();
+}
+
+export function deleteLongReminder(id) {
+  if (!id) return;
+  ensureLongReminders();
+  const item = accountRegistry.longReminders.find(a => a.id === id);
+  if (!item) return;
+  if (!confirm(`确定删除长期提醒「${item.name || '未命名'}」？`)) return;
+  accountRegistry.longReminders = accountRegistry.longReminders.filter(a => a.id !== id);
+  flushAccountPersist();
+  renderAccountsPage();
+}
+
+export async function addLongReminderToCalendar(id) {
+  ensureLongReminders();
+  const item = accountRegistry.longReminders.find(a => a.id === id);
+  if (!item) return;
+  const expiry = normalizeBudgetDateIso(item.expiry);
+  if (!expiry) {
+    alert('请先填写有效期');
+    return;
+  }
+  const payload = { id: item.id, name: item.name, expiry };
+  if (window.electronAPI?.addReminderToCalendar) {
+    try {
+      const result = await window.electronAPI.addReminderToCalendar(payload);
+      if (result?.mode === 'ics') {
+        alert(`无法直接写入日历，已打开日历文件。\n请在日历中确认添加「${item.name}」（含到期前 90/30/7/1 天提醒）。`);
+      } else {
+        alert(`已加入 Mac 日历「${CALENDAR_NAME}」：${item.name}\n已设置到期前 30/7/1 天提醒。`);
+      }
+      return;
+    } catch (err) {
+      alert(`加入日历失败：${err.message || err}`);
+      return;
+    }
+  }
+  if (!downloadReminderIcs(payload)) {
+    alert('生成日历文件失败');
+    return;
+  }
+  alert(`已下载「${item.name}.ics」\n双击文件即可加入 Mac 日历（含到期前 90/30/7/1 天提醒）。`);
+}
+
+function renderWebAccountHeaderCells(editing) {
+  ensureWebAccounts();
+  const { columns } = accountRegistry.webAccounts;
+  if (!columns.length && !editing) return '';
+  return columns.map(col => {
+    if (editing) {
+      return `<th class="accounts-web-col-th">
+        <div class="accounts-web-col-head">
+          <input type="text" class="accounts-web-inp accounts-web-col-title" data-web-col-id="${esc(col.id)}" value="${esc(col.title)}" placeholder="平台名称">
+          <button type="button" class="btn btn-sm accounts-web-col-del" data-delete-web-col="${esc(col.id)}" title="删除列"><i class="ti ti-x"></i></button>
+        </div>
+      </th>`;
+    }
+    return `<th class="accounts-web-col-th"><span class="accounts-web-col-label">${esc(col.title || '—')}</span></th>`;
+  }).join('');
+}
+
+function renderWebAccountRow(row, columns, editing) {
+  const cells = columns.map(col => {
+    const val = webCellValue(row, col.id);
+    if (editing) {
+      return `<td><input type="text" class="accounts-web-inp accounts-web-cell" data-web-col-id="${esc(col.id)}" value="${esc(val)}" placeholder="账号 / 备注"></td>`;
+    }
+    return `<td><span class="accounts-web-val">${val ? esc(val) : '—'}</span></td>`;
+  }).join('');
+  const actionTd = editing
+    ? `<td class="accounts-web-actions"><button type="button" class="btn btn-sm btn-a" data-delete-web-row="${esc(row.id)}" title="删除行"><i class="ti ti-trash"></i></button></td>`
+    : '';
+  if (editing) {
+    return `<tr data-web-row-id="${esc(row.id)}">
+      <td class="accounts-web-phone-td"><input type="text" class="accounts-web-inp accounts-web-phone" value="${esc(row.phone)}" placeholder="手机号" inputmode="tel" autocomplete="off"></td>
+      ${cells}
+      ${actionTd}
+    </tr>`;
+  }
+  return `<tr data-web-row-id="${esc(row.id)}">
+    <td class="accounts-web-phone-td"><span class="accounts-web-val accounts-web-val--phone">${row.phone ? esc(row.phone) : '—'}</span></td>
+    ${cells}
+  </tr>`;
+}
+
+function renderWebAccountsSection() {
+  const el = document.getElementById('accountsWebSection');
+  if (!el) return;
+  ensureWebAccounts();
+  const { columns, rows } = accountRegistry.webAccounts;
+  const editing = webAccountEditMode;
+  const editTitle = editing ? '退出编辑' : '编辑';
+  const colHeaders = renderWebAccountHeaderCells(editing);
+  const actionTh = editing
+    ? `<th class="accounts-web-col-actions"><button type="button" class="btn btn-sm accounts-web-add-col-btn" onclick="addWebAccountColumn()" title="新增平台列"><i class="ti ti-plus"></i></button></th>`
+    : '';
+  const body = rows.map(row => renderWebAccountRow(row, columns, editing)).join('');
+  const addRow = editing
+    ? `<div class="accounts-web-foot"><button type="button" class="btn btn-sm" onclick="addWebAccountRow()"><i class="ti ti-plus"></i> 新增手机号</button></div>`
+    : '';
+  const emptyHint = !columns.length
+    ? `<div class="accounts-credit-empty">暂无平台列${editing ? '，请先点击表头右侧 + 添加（如小红书、微信）' : '，进入编辑后可添加'}。</div>`
+    : (!rows.length ? `<div class="accounts-credit-empty">暂无登记${editing ? '，可点击下方新增手机号' : ''}。</div>` : '');
+  el.innerHTML = `<div class="cc full accounts-web-card${editing ? ' is-editing' : ' is-viewing'}">
+    <div class="accounts-web-head">
+      <div class="accounts-web-head-top">
+        <div class="ct"><i class="ti ti-world"></i> 网站账号登记 <span class="accounts-credit-cnt">${rows.length} 个手机号 · ${columns.length} 个平台</span></div>
+        <button type="button" class="btn btn-sm accounts-credit-edit-btn${editing ? ' on' : ''}" onclick="toggleWebAccountEditMode()" title="${editTitle}" aria-label="${editTitle}"><i class="ti ${editing ? 'ti-pencil-off' : 'ti-pencil'}"></i></button>
+      </div>
+    </div>
+    <div class="accounts-web-table-wrap">
+      <table class="report-table accounts-web-table${editing ? ' is-editing' : ' is-viewing'}">
+        <thead><tr>
+          <th class="accounts-web-phone-th">手机号</th>
+          ${colHeaders}
+          ${actionTh}
+        </tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+    ${emptyHint}
+    ${addRow}
+  </div>`;
+}
+
+export function toggleWebAccountEditMode() {
+  webAccountEditMode = !webAccountEditMode;
+  renderAccountsPage();
+}
+
+function saveWebAccountRowEl(row) {
+  const id = row?.dataset?.webRowId;
+  if (!id) return;
+  ensureWebAccounts();
+  const item = accountRegistry.webAccounts.rows.find(r => r.id === id);
+  if (!item) return;
+  const phone = row.querySelector('.accounts-web-phone')?.value?.trim() || '';
+  if (!phone) return;
+  item.phone = phone;
+  row.querySelectorAll('.accounts-web-cell').forEach(inp => {
+    const colId = inp.dataset.webColId;
+    if (colId) setWebCellValue(item, colId, inp.value || '');
+  });
+  flushAccountPersist();
+  renderWebAccountsSection();
+}
+
+function saveWebAccountColumnEl(inp) {
+  const colId = inp?.dataset?.webColId;
+  if (!colId) return;
+  ensureWebAccounts();
+  const col = accountRegistry.webAccounts.columns.find(c => c.id === colId);
+  if (!col) return;
+  const title = inp.value?.trim() || '';
+  if (!title) return;
+  if (col.title === title) return;
+  col.title = title;
+  flushAccountPersist();
+  renderWebAccountsSection();
+}
+
+export function addWebAccountColumn() {
+  if (!webAccountEditMode) webAccountEditMode = true;
+  ensureWebAccounts();
+  accountRegistry.webAccounts.columns.push({ id: nextWebColId(), title: '' });
+  renderWebAccountsSection();
+  const inputs = document.querySelectorAll('#accountsWebSection .accounts-web-col-title');
+  inputs[inputs.length - 1]?.focus();
+}
+
+export function addWebAccountRow() {
+  if (!webAccountEditMode) webAccountEditMode = true;
+  ensureWebAccounts();
+  if (!accountRegistry.webAccounts.columns.length) {
+    alert('请先添加平台列（如小红书、微信）');
+    return;
+  }
+  accountRegistry.webAccounts.rows.push({ id: nextWebRowId(), phone: '', cells: {} });
+  renderWebAccountsSection();
+  const rows = document.querySelectorAll('#accountsWebSection tr[data-web-row-id]');
+  rows[rows.length - 1]?.querySelector('.accounts-web-phone')?.focus();
+}
+
+export function deleteWebAccountColumn(colId) {
+  if (!colId) return;
+  ensureWebAccounts();
+  const col = accountRegistry.webAccounts.columns.find(c => c.id === colId);
+  if (!col) return;
+  if (!confirm(`确定删除平台列「${col.title || '未命名'}」？`)) return;
+  accountRegistry.webAccounts.columns = accountRegistry.webAccounts.columns.filter(c => c.id !== colId);
+  accountRegistry.webAccounts.rows.forEach(row => {
+    if (row.cells) delete row.cells[colId];
+  });
+  flushAccountPersist();
+  renderAccountsPage();
+}
+
+export function deleteWebAccountRow(rowId) {
+  if (!rowId) return;
+  ensureWebAccounts();
+  const row = accountRegistry.webAccounts.rows.find(r => r.id === rowId);
+  if (!row) return;
+  if (!confirm(`确定删除手机号「${row.phone || '未填写'}」的登记？`)) return;
+  accountRegistry.webAccounts.rows = accountRegistry.webAccounts.rows.filter(r => r.id !== rowId);
   flushAccountPersist();
   renderAccountsPage();
 }
@@ -2254,6 +2938,16 @@ export function setupAccountsEvents() {
       }
     });
     creditSec.addEventListener('click', e => {
+      const cancelBtn = e.target.closest('[data-cancel-credit]');
+      if (cancelBtn?.dataset.cancelCredit) {
+        toggleCreditCancelled(cancelBtn.dataset.cancelCredit);
+        return;
+      }
+      const uncancelBtn = e.target.closest('[data-uncancel-credit]');
+      if (uncancelBtn?.dataset.uncancelCredit) {
+        toggleCreditCancelled(uncancelBtn.dataset.uncancelCredit);
+        return;
+      }
       if (!creditCardEditMode) return;
       const bindBtn = e.target.closest('[data-bind-credit-group]');
       if (bindBtn) {
@@ -2276,9 +2970,9 @@ export function setupAccountsEvents() {
         if (row) saveNewCreditCardRow(row);
         return;
       }
-      const cancelBtn = e.target.closest('[data-cancel-credit-new]');
-      if (cancelBtn) {
-        cancelNewCreditCardRow(cancelBtn.closest('tr[data-credit-new]'));
+      const cancelNewBtn = e.target.closest('[data-cancel-credit-new]');
+      if (cancelNewBtn) {
+        cancelNewCreditCardRow(cancelNewBtn.closest('tr[data-credit-new]'));
         return;
       }
       const delBtn = e.target.closest('[data-delete-credit]');
@@ -2347,11 +3041,118 @@ export function setupAccountsEvents() {
       if (delBtn?.dataset.deleteBudget) deleteBudget(delBtn.dataset.deleteBudget);
     });
   }
+
+  const webSec = document.getElementById('accountsWebSection');
+  if (webSec && !webSec._bound) {
+    webSec._bound = true;
+    webSec.addEventListener('focusout', e => {
+      if (!webAccountEditMode) return;
+      const colInp = e.target.closest('.accounts-web-col-title');
+      if (colInp) {
+        setTimeout(() => {
+          const active = document.activeElement;
+          if (active === colInp) return;
+          saveWebAccountColumnEl(colInp);
+        }, 0);
+        return;
+      }
+      const row = e.target.closest('tr[data-web-row-id]');
+      if (!row) return;
+      if (!e.target.matches('.accounts-web-inp')) return;
+      setTimeout(() => {
+        const active = document.activeElement;
+        const activeRow = active?.closest('tr[data-web-row-id]');
+        if (activeRow === row && active.matches('.accounts-web-inp')) return;
+        saveWebAccountRowEl(row);
+      }, 0);
+    });
+    webSec.addEventListener('keydown', e => {
+      if (!webAccountEditMode) return;
+      if (e.key === 'Enter' && e.target.matches('.accounts-web-inp')) {
+        e.preventDefault();
+        e.target.blur();
+      }
+    });
+    webSec.addEventListener('click', e => {
+      const delCol = e.target.closest('[data-delete-web-col]');
+      if (delCol?.dataset.deleteWebCol) {
+        deleteWebAccountColumn(delCol.dataset.deleteWebCol);
+        return;
+      }
+      const delRow = e.target.closest('[data-delete-web-row]');
+      if (delRow?.dataset.deleteWebRow) deleteWebAccountRow(delRow.dataset.deleteWebRow);
+    });
+  }
+
+  const lifeSec = document.getElementById('accountsLifeSection');
+  if (lifeSec && !lifeSec._bound) {
+    lifeSec._bound = true;
+    lifeSec.addEventListener('focusout', e => {
+      if (!lifeAccountEditMode) return;
+      const row = e.target.closest('tr[data-life-id]');
+      if (!row) return;
+      if (!e.target.matches('.accounts-life-inp')) return;
+      setTimeout(() => {
+        const active = document.activeElement;
+        const activeRow = active?.closest('tr[data-life-id]');
+        if (activeRow === row && active.matches('.accounts-life-inp')) return;
+        saveLifeAccountRow(row);
+      }, 0);
+    });
+    lifeSec.addEventListener('keydown', e => {
+      if (!lifeAccountEditMode) return;
+      if (e.key === 'Enter' && e.target.matches('.accounts-life-inp')) {
+        e.preventDefault();
+        e.target.blur();
+      }
+    });
+    lifeSec.addEventListener('click', e => {
+      const delBtn = e.target.closest('[data-delete-life]');
+      if (delBtn?.dataset.deleteLife) deleteLifeAccount(delBtn.dataset.deleteLife);
+    });
+  }
+
+  const reminderSec = document.getElementById('accountsReminderSection');
+  if (reminderSec && !reminderSec._bound) {
+    reminderSec._bound = true;
+    reminderSec.addEventListener('focusout', e => {
+      if (!longReminderEditMode) return;
+      const row = e.target.closest('tr[data-reminder-id]');
+      if (!row) return;
+      if (!e.target.matches('.accounts-reminder-inp')) return;
+      setTimeout(() => {
+        const active = document.activeElement;
+        const activeRow = active?.closest('tr[data-reminder-id]');
+        if (activeRow === row && active.matches('.accounts-reminder-inp')) return;
+        saveLongReminderRow(row);
+      }, 0);
+    });
+    reminderSec.addEventListener('keydown', e => {
+      if (!longReminderEditMode) return;
+      if (e.key === 'Enter' && e.target.matches('.accounts-reminder-inp')) {
+        e.preventDefault();
+        e.target.blur();
+      }
+    });
+    reminderSec.addEventListener('change', e => {
+      if (!longReminderEditMode) return;
+      if (!e.target.matches('.accounts-reminder-expiry')) return;
+      const row = e.target.closest('tr[data-reminder-id]');
+      if (row) saveLongReminderRow(row);
+    });
+    reminderSec.addEventListener('click', e => {
+      const delBtn = e.target.closest('[data-delete-reminder]');
+      if (delBtn?.dataset.deleteReminder) deleteLongReminder(delBtn.dataset.deleteReminder);
+    });
+  }
 }
 
 export function renderAccountsPage() {
   renderAccountsStatusSection();
   renderCreditCardSection();
   renderCashAccountsSection();
+  renderLifeAccountsSection();
   renderExpenseBudgetsSection();
+  renderLongRemindersSection();
+  renderWebAccountsSection();
 }

@@ -2,6 +2,9 @@ import { scryptSync, randomBytes, timingSafeEqual } from 'crypto';
 import { db } from './db.js';
 
 const SESSION_DAYS = 30;
+export const LOCAL_PIN = process.env.LOCAL_PIN || '5281';
+export const LOCAL_EMAIL = (process.env.LOCAL_EMAIL || 'logicloc@qq.com').trim().toLowerCase();
+export const LOCAL_USERNAME = process.env.LOCAL_USERNAME || 'Loc';
 
 export function hashPassword(password) {
   const salt = randomBytes(16);
@@ -41,9 +44,35 @@ export function initAuth() {
   if (count === 0) {
     db.prepare(
       'INSERT INTO users (email, username, password_hash, role) VALUES (?, ?, ?, ?)'
-    ).run('logicloc@qq.com', 'Logic Loc', hashPassword('huhan123'), 'admin');
-    console.log('已创建管理账户: Logic Loc (logicloc@qq.com)');
+    ).run(LOCAL_EMAIL, LOCAL_USERNAME, hashPassword(LOCAL_PIN), 'admin');
+    console.log(`已创建本地账户（PIN: ${LOCAL_PIN}）`);
   }
+}
+
+function getLocalUser() {
+  return db.prepare('SELECT * FROM users WHERE email = ?').get(LOCAL_EMAIL);
+}
+
+function createSession(user) {
+  const token = newToken();
+  const expires = new Date();
+  expires.setDate(expires.getDate() + SESSION_DAYS);
+  db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').run(
+    token, user.id, expires.toISOString()
+  );
+  return {
+    token,
+    user: { id: user.id, email: user.email, username: user.username, role: user.role }
+  };
+}
+
+export function loginWithPin(pin) {
+  const p = String(pin ?? '').trim();
+  if (!/^\d{4}$/.test(p)) return { error: '请输入 4 位数字密码' };
+  if (p !== LOCAL_PIN) return { error: '密码错误' };
+  const user = getLocalUser();
+  if (!user) return { error: '本地账户未初始化' };
+  return createSession(user);
 }
 
 function newToken() {
@@ -55,18 +84,7 @@ export function login(email, password) {
   if (!user || !verifyPassword(password, user.password_hash)) {
     return { error: '邮箱或密码错误' };
   }
-
-  const token = newToken();
-  const expires = new Date();
-  expires.setDate(expires.getDate() + SESSION_DAYS);
-  db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').run(
-    token, user.id, expires.toISOString()
-  );
-
-  return {
-    token,
-    user: { id: user.id, email: user.email, username: user.username, role: user.role }
-  };
+  return createSession(user);
 }
 
 export function logout(token) {

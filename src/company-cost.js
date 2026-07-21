@@ -335,15 +335,31 @@ async function loadInvoices() {
   renderAll();
 }
 
+export async function openAppConfig() {
+  if (window.electronAPI?.openAppConfig) {
+    const res = await window.electronAPI.openAppConfig();
+    if (res?.path) return;
+  }
+  alert('配置文件路径：\n~/Library/Application Support/Loc\'s Home/config.env\n\n在 Finder 中按 Cmd+Shift+G 粘贴上述路径即可打开。');
+}
+
 async function updateAiStatusBanner() {
   const intro = document.querySelector('.inv-intro');
   if (!intro) return;
   try {
     const st = await fetchInvoiceAiStatus();
+    const configBtn = window.electronAPI?.openAppConfig
+      ? ' <button type="button" class="btn btn-sm inv-config-btn" onclick="openAppConfig()"><i class="ti ti-folder-open"></i> 打开配置文件</button>'
+      : '';
     if (!st.configured) {
-      intro.innerHTML = '按公司分别查看、打印、下载发票。<span class="inv-ai-warn">AI 识别未启用：请在 Railway 配置 <code>DEEPSEEK_API_KEY</code>。</span>';
-    } else if (st.mode === 'vision') {
-      intro.textContent = '按公司分别查看、打印、下载发票。上传后由视觉 AI 自动识别，可手动校对保存。';
+      const hint = st.configHint
+        ? `<span class="inv-ai-warn">${esc(st.configHint)}</span>`
+        : '<span class="inv-ai-warn">AI 识别未启用：请在 config.env 中配置 <code>GEMINI_API_KEY</code>（行首不要加 #）。</span>';
+      intro.innerHTML = `按公司分别查看、打印、下载发票。${hint}${configBtn}`;
+    } else if (st.provider === 'gemini' || st.mode === 'gemini') {
+      intro.textContent = `按公司分别查看、打印、下载发票。上传后由 Gemini（${st.model || 'gemini'}）自动识别，可手动校对保存。`;
+    } else if (st.provider === 'siliconflow' || st.mode === 'vision') {
+      intro.textContent = `按公司分别查看、打印、下载发票。上传后由硅基流动视觉模型（${st.model || 'vision'}）自动识别，可手动校对保存。`;
     } else {
       intro.textContent = '按公司分别查看、打印、下载发票。上传后由 AI 自动识别，可手动校对保存。';
     }

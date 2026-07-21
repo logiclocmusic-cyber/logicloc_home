@@ -1,5 +1,7 @@
 import { imageToText } from './ocr.js';
 import { pdfToText, isInvoiceTextUsable, pdfPageImageForOcr, hasPoppler } from './pdfText.js';
+import { geminiEnabled, scanInvoiceWithGemini, scanInvoiceTextWithGemini } from './gemini-invoice.js';
+import { configEnvHint } from './loadEnv.js';
 
 const API_BASE = normalizeApiBase(process.env.DEEPSEEK_API_BASE || 'https://api.deepseek.com');
 const MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
@@ -8,6 +10,32 @@ const VISION_MODEL = process.env.DEEPSEEK_VISION_MODEL || '';
 
 function normalizeApiBase(url) {
   return String(url || '').trim().replace(/\/+$/, '').replace(/\/v1$/i, '');
+}
+
+function visionEnabled() {
+  return !!(VISION_BASE && VISION_MODEL && (
+    process.env.DEEPSEEK_VISION_API_KEY || process.env.DEEPSEEK_API_KEY
+  ));
+}
+
+/** 文本解析：可用官方 DeepSeek，或复用硅基流动等视觉端点 */
+function textAiConfig() {
+  const visionKey = String(process.env.DEEPSEEK_VISION_API_KEY || '').trim();
+  const deepseekKey = String(process.env.DEEPSEEK_API_KEY || '').trim();
+  if (deepseekKey && process.env.DEEPSEEK_API_BASE) {
+    return { apiKey: deepseekKey, base: API_BASE, model: MODEL };
+  }
+  if (visionKey && VISION_BASE && VISION_MODEL) {
+    return { apiKey: visionKey, base: VISION_BASE, model: VISION_MODEL };
+  }
+  if (deepseekKey) {
+    return { apiKey: deepseekKey, base: API_BASE, model: MODEL };
+  }
+  return null;
+}
+
+function deepseekOrVisionConfigured() {
+  return !!(textAiConfig() || visionEnabled());
 }
 
 const INVOICE_CATEGORIES = ['办公用品', '差旅', '餐饮', '设备', '服务', '租金', '其他'];
@@ -173,25 +201,25 @@ ${BUYER_HINT}
 无法识别的字段填 null。金额字段必须是数字或 null。`;
 
 async function chatCompletion(messages, { json = true } = {}) {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) throw new Error('未配置 DEEPSEEK_API_KEY，请在 Railway 环境变量中添加');
+  const cfg = textAiConfig();
+  if (!cfg) throw new Error('未配置 DEEPSEEK_API_KEY 或硅基流动视觉密钥');
 
-  const body = { model: MODEL, temperature: 0.1, messages };
-  let res = await fetch(`${API_BASE}/v1/chat/completions`, {
+  const body = { model: cfg.model, temperature: 0.1, messages };
+  let res = await fetch(`${cfg.base}/v1/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`
+      Authorization: `Bearer ${cfg.apiKey}`
     },
     body: JSON.stringify(json ? { ...body, response_format: { type: 'json_object' } } : body)
   });
 
   if (!res.ok && json) {
-    res = await fetch(`${API_BASE}/v1/chat/completions`, {
+    res = await fetch(`${cfg.base}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
+        Authorization: `Bearer ${cfg.apiKey}`
       },
       body: JSON.stringify(body)
     });
@@ -199,7 +227,7 @@ async function chatCompletion(messages, { json = true } = {}) {
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`DeepSeek API 错误 (${res.status}): ${err.slice(0, 300)}`);
+    throw new Error(`AI API 错误 (${res.status}): ${err.slice(0, 300)}`);
   }
 
   const jsonRes = await res.json();
@@ -211,10 +239,6 @@ async function chatCompletion(messages, { json = true } = {}) {
     if (match) return { parsed: JSON.parse(match[0]), raw: text };
     throw new Error('AI 返回格式无法解析');
   }
-}
-
-function visionEnabled() {
-  return !!(VISION_BASE && VISION_MODEL);
 }
 
 function mapChineseInvoiceFields(parsed = {}) {
@@ -366,34 +390,79 @@ async function scanWithText(sourceText, mode = 'ocr', fileName = '') {
   const label = mode === 'pdf' ? 'PDF 文字' : 'OCR 文字';
   const fromName = invoiceNoFromFilename(fileName);
   const nameHint = fromName ? `\n文件名中的发票号码参考：${fromName}` : '';
-  const prompt = `你是发票识别助手。以下是发票/收据的${label}，请提取结构化信息，只返回 JSON，不要 markdown 代码块。
+  const prompt = buildInvoiceTextPrompt(label, sourceText, nameHint);
+  if (geminiEnabled()) {
+    const result = await scanInvoiceTextWithGemini(prompt);
+    return { ...result, mode: `gemini+${mode}`, ocrText: sourceText };
+  }
+  const result = await chatCompletion([{ role: 'user', content: prompt }]);
+  return { ...result, mode, ocrText: sourceText };
+}
+
+function buildInvoiceVisionPrompt(fileName = '', ocrHint = '') {
+  const fromName = invoiceNoFromFilename(fileName);
+  const nameHint = fromName ? `\n文件名中的发票号码参考：${fromName}` : '';
+  const hint = ocrHint
+    ? `\n\n附带 OCR 参考（可能有误，请结合图片核对）：\n${ocrHint.slice(0, 2500)}`
+    : '';
+  return `你是发票识别助手。请从这张发票/收据图片中提取信息，只返回 JSON，不要 markdown 代码块。\n\n${FIELDS_HINT}${nameHint}${hint}`;
+}
+
+function buildInvoiceTextPrompt(label, sourceText, nameHint = '') {
+  return `你是发票识别助手。以下是发票/收据的${label}，请提取结构化信息，只返回 JSON，不要 markdown 代码块。
 
 ${FIELDS_HINT}${nameHint}
 
 ${label}：
 ${sourceText}`;
-  const result = await chatCompletion([{ role: 'user', content: prompt }]);
-  return { ...result, mode, ocrText: sourceText };
+}
+
+async function scanWithGeminiMedia(buf, mime, { fileName = '', ocrHint = '' } = {}) {
+  const prompt = buildInvoiceVisionPrompt(fileName, ocrHint);
+  return scanInvoiceWithGemini(buf, mime, { prompt, fileName });
 }
 
 export function getAiStatus() {
-  const configured = !!process.env.DEEPSEEK_API_KEY;
+  const gemini = geminiEnabled();
+  const vision = visionEnabled();
+  const textCfg = textAiConfig();
+  const configured = gemini || deepseekOrVisionConfigured();
   let mode = 'disabled';
-  if (configured) {
-    mode = visionEnabled() ? 'vision' : 'ocr+deepseek';
+  let provider = null;
+  let model = null;
+  if (gemini) {
+    provider = 'gemini';
+    mode = 'gemini';
+    model = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
+  } else if (vision) {
+    provider = /siliconflow/i.test(VISION_BASE) ? 'siliconflow' : 'vision';
+    mode = 'vision';
+    model = VISION_MODEL;
+  } else if (textCfg) {
+    provider = /siliconflow/i.test(textCfg.base) ? 'siliconflow' : 'deepseek';
+    mode = 'ocr+text';
+    model = textCfg.model;
   }
   return {
     configured,
+    provider,
     mode,
-    model: visionEnabled() ? VISION_MODEL : MODEL,
-    visionModel: visionEnabled() ? VISION_MODEL : null,
+    model,
+    gemini,
+    deepseek: !!textCfg,
+    configHint: configured ? null : configEnvHint(),
+    visionModel: vision ? VISION_MODEL : null,
     poppler: hasPoppler(),
   };
 }
 
 export async function scanInvoiceImage(base64, mime = 'image/jpeg', opts = {}) {
-  if (!process.env.DEEPSEEK_API_KEY) {
-    throw new Error('未配置 DEEPSEEK_API_KEY，请在 Railway 环境变量中添加');
+  const gemini = geminiEnabled();
+  const deepseek = deepseekOrVisionConfigured();
+  if (!gemini && !deepseek) {
+    throw new Error(
+      '未配置 AI 识别密钥。请在 config.env 设置硅基流动 DEEPSEEK_VISION_*，或 GEMINI_API_KEY / DEEPSEEK_API_KEY'
+    );
   }
 
   const fileName = opts.fileName || '';
@@ -413,6 +482,15 @@ export async function scanInvoiceImage(base64, mime = 'image/jpeg', opts = {}) {
   };
 
   if (isPdf) {
+    if (gemini) {
+      try {
+        const result = await scanWithGeminiMedia(buf, 'application/pdf', { fileName });
+        if (invoiceResultUsable(result.parsed, { fileName })) return finish(result);
+      } catch (err) {
+        console.warn('[invoice-scan] gemini pdf failed:', err.message);
+      }
+    }
+
     const pdfText = await pdfToText(buf);
     if (pdfText && isInvoiceTextUsable(pdfText)) {
       const r = await tryText(pdfText, 'pdf');
@@ -444,6 +522,15 @@ export async function scanInvoiceImage(base64, mime = 'image/jpeg', opts = {}) {
       }
     }
 
+    if (gemini) {
+      try {
+        const result = await scanWithGeminiMedia(pageImg, 'image/png', { fileName, ocrHint: ocrText });
+        if (invoiceResultUsable(result.parsed, { fileName, ocrText })) return finish(result, ocrText);
+      } catch (err) {
+        console.warn('[invoice-scan] gemini pdf-render failed:', err.message);
+      }
+    }
+
     if (ocrText && ocrText.replace(/\s/g, '').length >= 40) {
       const r = await tryText(ocrText, 'ocr');
       if (r) return r;
@@ -455,6 +542,15 @@ export async function scanInvoiceImage(base64, mime = 'image/jpeg', opts = {}) {
         ? '未能从 PDF 识别完整发票信息。该 PDF 可能是扫描件，请改用「手动录入」上传，或导出为 PNG/JPG 后再试 AI 识别'
         : '未能从 PDF 识别完整发票信息。请在 Railway 配置 RAILPACK_DEPLOY_APT_PACKAGES=poppler-utils 并重新部署，或改用「手动录入」'
     );
+  }
+
+  if (gemini) {
+    try {
+      const result = await scanWithGeminiMedia(buf, mime || 'image/jpeg', { fileName });
+      if (invoiceResultUsable(result.parsed, { fileName })) return finish(result);
+    } catch (err) {
+      console.warn('[invoice-scan] gemini image failed, fallback OCR:', err.message);
+    }
   }
 
   if (visionEnabled()) {

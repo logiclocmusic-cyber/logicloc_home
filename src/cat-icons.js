@@ -17,6 +17,11 @@ export function iconRef(hex) {
   return `icon:${h}`;
 }
 
+export function normalizeIconRef(value) {
+  if (!value || !isIconRef(value)) return value;
+  return iconRef(value.slice(5));
+}
+
 export function iconifyRef(collection, name) {
   return `iconify:${collection}:${name}`;
 }
@@ -48,7 +53,9 @@ export function legacyEmojiToIconRef(emoji, legacyMap, iconMap) {
 
 export function resolveCatIconValue(cat, stored, { iconMap, legacyMap, nameAliases } = {}) {
   const raw = stored ?? iconMap?.[cat];
-  if (raw && (isIconRef(raw) || isIconifyRef(raw))) return raw;
+  if (raw && (isIconRef(raw) || isIconifyRef(raw))) return normalizeIconRef(raw) || raw;
+  const legacy = legacyMap?.[cat];
+  if (raw && typeof raw === 'string' && legacy && raw !== legacy) return raw;
   const fromEmoji = legacyEmojiToIconRef(raw, legacyMap, iconMap);
   if (fromEmoji && (isIconRef(fromEmoji) || isIconifyRef(fromEmoji))) return fromEmoji;
   const alias = nameAliases?.[cat];
