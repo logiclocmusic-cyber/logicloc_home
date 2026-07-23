@@ -1,6 +1,15 @@
 // ── 装备库 ───────────────────────────────────────────────────────────────────
 import { fmtMoney, fmtCount } from './format.js';
 import { uploadGearImageFromUrl } from './api.js';
+import { assetUrl } from './apiBase.js';
+
+function escAttr(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+function gearImageSrc(image) {
+  return assetUrl(image);
+}
 
 /** @deprecated use DEFAULT_GEAR_SECTIONS */
 export const GEAR_CATEGORY = '母婴亲子';
@@ -297,7 +306,7 @@ let openGearId = null;
 
 function gearMediaHtml(gear, { modal = false } = {}) {
   const img = gear.image
-    ? `<img class="gear-card-img" src="${gear.image}" alt="${gear.name}">`
+    ? `<img class="gear-card-img" src="${escAttr(gearImageSrc(gear.image))}" alt="${escAttr(gear.name)}">`
     : `<div class="gear-card-ph"><i class="ti ti-photo-plus"></i><span>上传图片</span></div>`;
   const sold = gear.sold
     ? `<div class="gear-sold-badge${modal ? ' gear-sold-badge--modal' : ''}">已卖出</div>`

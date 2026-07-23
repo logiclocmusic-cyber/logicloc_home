@@ -391,6 +391,17 @@ function gearImageExt(buf, contentType = '') {
   return 'jpg';
 }
 
+function looksLikeImageBuffer(buf, contentType = '') {
+  const ct = contentType.toLowerCase();
+  if (ct.startsWith('image/')) return true;
+  if (!buf?.length) return false;
+  if (buf[0] === 0x89 && buf[1] === 0x50) return true;
+  if (buf[0] === 0xff && buf[1] === 0xd8) return true;
+  if (buf[0] === 0x47 && buf[1] === 0x49) return true;
+  if (buf.length >= 12 && buf.slice(0, 4).toString() === 'RIFF' && buf.slice(8, 12).toString() === 'WEBP') return true;
+  return false;
+}
+
 app.post('/api/gear/:id/image-from-url', requireAuth, async (req, res) => {
   try {
     const { url } = req.body || {};
@@ -410,7 +421,11 @@ app.post('/api/gear/:id/image-from-url', requireAuth, async (req, res) => {
     try {
       response = await fetch(url.trim(), {
         signal: controller.signal,
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; LocHome/1.0)', Accept: 'image/*,*/*;q=0.8' },
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+          Referer: `${parsed.origin}/`,
+        },
         redirect: 'follow'
       });
     } finally {
@@ -420,7 +435,11 @@ app.post('/api/gear/:id/image-from-url', requireAuth, async (req, res) => {
     const buf = Buffer.from(await response.arrayBuffer());
     if (!buf.length) return res.status(400).json({ error: '图片为空' });
     if (buf.length > 5 * 1024 * 1024) return res.status(400).json({ error: '图片不能超过 5MB' });
-    const ext = gearImageExt(buf, response.headers.get('content-type') || '');
+    const contentType = response.headers.get('content-type') || '';
+    if (!looksLikeImageBuffer(buf, contentType)) {
+      return res.status(400).json({ error: '链接不是有效图片，请右键商品图选择「复制图片地址」后粘贴' });
+    }
+    const ext = gearImageExt(buf, contentType);
     const filename = `${req.params.id}.${ext}`;
     writeFileSync(join(GEAR_IMG_DIR, filename), buf);
     res.json({ url: `/gear-images/${filename}` });
