@@ -36,17 +36,28 @@ export async function saveState(state) {
 }
 
 export async function uploadGearImageFromUrl(gearId, imageUrl) {
-  const res = await fetch(`${API}/gear/${gearId}/image-from-url`, {
-    method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ url: imageUrl })
-  });
-  if (res.status === 401) throw new Error('登录已过期，请重新登录');
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `获取失败 (${res.status})`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 28000);
+  try {
+    const res = await fetch(`${API}/gear/${gearId}/image-from-url`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ url: imageUrl }),
+      signal: controller.signal,
+    });
+    if (res.status === 401) throw new Error('登录已过期，请重新登录');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `获取失败 (${res.status})`);
+    }
+    return res.json();
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('请求超时，图片可能过大或网络较慢，请稍后重试');
+    if (err.message === 'Failed to fetch') throw new Error('网络连接失败，请检查网络后重试');
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  return res.json();
 }
 
 export async function uploadGearImage(gearId, file) {

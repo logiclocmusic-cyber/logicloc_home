@@ -1,6 +1,6 @@
 // ── 装备库 ───────────────────────────────────────────────────────────────────
 import { fmtMoney, fmtCount } from './format.js';
-import { uploadGearImageFromUrl } from './api.js';
+import { uploadGearImage, uploadGearImageFromUrl } from './api.js';
 import { assetUrl } from './apiBase.js';
 
 function escAttr(s) {
@@ -240,6 +240,61 @@ function isImageFile(file) {
   return /\.(jpe?g|png|gif|webp|bmp|heic|heif)$/i.test(file.name || '');
 }
 
+function isLikelyImageBlob(blob) {
+  if (!blob?.size) return false;
+  const type = String(blob.type || '').toLowerCase();
+  if (type.startsWith('image/')) return true;
+  return !type || type === 'application/octet-stream';
+}
+
+async function fetchImageBlobInBrowser(url, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      mode: 'cors',
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer',
+      headers: { Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    if (!isLikelyImageBlob(blob)) throw new Error('not-image');
+    if (blob.size > 5 * 1024 * 1024) throw new Error('too-large');
+    return blob;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function blobToUploadFile(blob, url) {
+  const ext = (() => {
+    try {
+      const p = new URL(url).pathname.toLowerCase();
+      const m = p.match(/\.(jpe?g|png|gif|webp|bmp|heif|heic)$/);
+      if (m) return m[1].replace('jpeg', 'jpg');
+    } catch { /* ignore */ }
+    const t = blob.type || '';
+    if (t.includes('png')) return 'png';
+    if (t.includes('webp')) return 'webp';
+    if (t.includes('gif')) return 'gif';
+    return 'jpg';
+  })();
+  const type = blob.type?.startsWith('image/') ? blob.type : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+  return new File([blob], `gear-url.${ext}`, { type });
+}
+
+async function resolveGearImageFromUrl(gearId, url) {
+  try {
+    const blob = await fetchImageBlobInBrowser(url);
+    const file = blobToUploadFile(blob, url);
+    return uploadGearImage(gearId, file);
+  } catch {
+    return uploadGearImageFromUrl(gearId, url);
+  }
+}
+
 export async function handleGearImageFromUrl(gearId, rawUrl) {
   const url = rawUrl?.trim();
   if (!url) {
@@ -262,7 +317,7 @@ export async function handleGearImageFromUrl(gearId, rawUrl) {
     btn.innerHTML = '<i class="ti ti-loader"></i> 获取中…';
   }
   try {
-    const { url: imageUrl } = await uploadGearImageFromUrl(gearId, url);
+    const { url: imageUrl } = await resolveGearImageFromUrl(gearId, url);
     gear.image = imageUrl;
     onPersist();
     renderGearGallery();
@@ -317,7 +372,10 @@ function gearMediaHtml(gear, { modal = false } = {}) {
 function gearCardHtml(gear) {
   const row = txnById(gear.txnId);
   const subLabel = row?.['子分类'] ? ` · ${row['子分类']}` : '';
-  const sub = row ? `${row['日期']} · ${fmtMoney(row['金额'])}${subLabel}` : '';
+  const sub = row ? `${row['日期']}${subLabel}` : '';
+  const amtHtml = row
+    ? `<span class="gear-card-amt">${fmtMoney(row['金额'])}</span>`
+    : '';
   const sellBtn = gear.sold
     ? `<button type="button" class="gear-card-sell gear-card-unsell" onclick="event.stopPropagation();markGearUnsold(${gear.id})">撤回</button>`
     : `<button type="button" class="gear-card-sell" onclick="event.stopPropagation();markGearSold(${gear.id})">卖出</button>`;
@@ -326,7 +384,7 @@ function gearCardHtml(gear) {
     <div class="gear-card-body">
       <div class="gear-card-name" title="${gear.name}">${gear.name}</div>
       <div class="gear-card-meta">${sub || ''}</div>
-      <div class="gear-card-actions">${sellBtn}</div>
+      <div class="gear-card-actions">${amtHtml}${sellBtn}</div>
     </div>
   </article>`;
 }

@@ -402,6 +402,65 @@ function looksLikeImageBuffer(buf, contentType = '') {
   return false;
 }
 
+function gearFetchReferers(parsed) {
+  const host = parsed.hostname.toLowerCase();
+  const refs = [`${parsed.origin}/`];
+  if (host.includes('alicdn') || host.includes('tbcdn') || host.includes('taobao')) {
+    refs.push('https://www.taobao.com/', 'https://item.taobao.com/');
+  }
+  if (host.includes('360buyimg') || host.includes('jd.com') || host.includes('jd.hk')) {
+    refs.push('https://www.jd.com/', 'https://item.jd.com/');
+  }
+  if (host.includes('pinduoduo') || host.includes('yangkeduo')) {
+    refs.push('https://mobile.yangkeduo.com/');
+  }
+  refs.push('');
+  return [...new Set(refs)];
+}
+
+async function fetchRemoteGearImageBuffer(rawUrl) {
+  const url = rawUrl.trim();
+  const parsed = new URL(url);
+  const referers = gearFetchReferers(parsed);
+  let lastErr = null;
+
+  for (const referer of referers) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    try {
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      };
+      if (referer) headers.Referer = referer;
+      const response = await fetch(url, { signal: controller.signal, headers, redirect: 'follow' });
+      if (!response.ok) {
+        lastErr = new Error(`获取图片失败 (${response.status})`);
+        continue;
+      }
+      const buf = Buffer.from(await response.arrayBuffer());
+      if (!buf.length) {
+        lastErr = new Error('图片为空');
+        continue;
+      }
+      if (buf.length > 5 * 1024 * 1024) throw new Error('图片不能超过 5MB');
+      const contentType = response.headers.get('content-type') || '';
+      if (!looksLikeImageBuffer(buf, contentType)) {
+        lastErr = new Error('链接不是有效图片，请右键商品图选择「复制图片地址」后粘贴');
+        continue;
+      }
+      return { buf, contentType };
+    } catch (err) {
+      if (err.message === '图片不能超过 5MB') throw err;
+      lastErr = err.name === 'AbortError' ? new Error('获取图片超时') : err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  throw lastErr || new Error('获取图片失败');
+}
+
 app.post('/api/gear/:id/image-from-url', requireAuth, async (req, res) => {
   try {
     const { url } = req.body || {};
@@ -415,37 +474,14 @@ app.post('/api/gear/:id/image-from-url', requireAuth, async (req, res) => {
     if (!['http:', 'https:'].includes(parsed.protocol)) {
       return res.status(400).json({ error: '仅支持 http/https 链接' });
     }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15000);
-    let response;
-    try {
-      response = await fetch(url.trim(), {
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-          Referer: `${parsed.origin}/`,
-        },
-        redirect: 'follow'
-      });
-    } finally {
-      clearTimeout(timer);
-    }
-    if (!response.ok) return res.status(400).json({ error: `获取图片失败 (${response.status})` });
-    const buf = Buffer.from(await response.arrayBuffer());
-    if (!buf.length) return res.status(400).json({ error: '图片为空' });
-    if (buf.length > 5 * 1024 * 1024) return res.status(400).json({ error: '图片不能超过 5MB' });
-    const contentType = response.headers.get('content-type') || '';
-    if (!looksLikeImageBuffer(buf, contentType)) {
-      return res.status(400).json({ error: '链接不是有效图片，请右键商品图选择「复制图片地址」后粘贴' });
-    }
+    const { buf, contentType } = await fetchRemoteGearImageBuffer(url);
     const ext = gearImageExt(buf, contentType);
     const filename = `${req.params.id}.${ext}`;
     writeFileSync(join(GEAR_IMG_DIR, filename), buf);
     res.json({ url: `/gear-images/${filename}` });
   } catch (err) {
-    if (err.name === 'AbortError') return res.status(408).json({ error: '获取图片超时' });
-    res.status(500).json({ error: err.message || '获取图片失败' });
+    if (err.message === '获取图片超时') return res.status(408).json({ error: err.message });
+    res.status(err.message?.includes('有效图片') ? 400 : 500).json({ error: err.message || '获取图片失败' });
   }
 });
 
