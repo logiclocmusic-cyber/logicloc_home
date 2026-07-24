@@ -225,15 +225,6 @@ export function updateGearName(gearId, name) {
   renderGearGallery();
 }
 
-function readImageAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error('读取文件失败'));
-    reader.readAsDataURL(file);
-  });
-}
-
 function isImageFile(file) {
   if (!file) return false;
   if (file.type?.startsWith('image/')) return true;
@@ -348,13 +339,40 @@ export async function handleGearImageUpload(gearId, file) {
   const gear = gearLibrary.find(g => g.id === gearId);
   if (!gear) return;
   try {
-    gear.image = await readImageAsDataUrl(file);
+    const { url: imageUrl } = await uploadGearImage(gearId, file);
+    gear.image = imageUrl;
     onPersist();
     renderGearGallery();
     if (openGearId === gearId) refreshGearModal(gearId);
   } catch (err) {
     alert('上传失败：' + err.message);
   }
+}
+
+let gearImageMigrationPromise = null;
+
+/** 将历史内嵌 base64 装备图迁移到服务端，避免整库同步体积过大 */
+export function migrateGearEmbeddedImages() {
+  if (gearImageMigrationPromise) return gearImageMigrationPromise;
+  gearImageMigrationPromise = (async () => {
+    let changed = false;
+    for (const gear of gearLibrary) {
+      const img = gear.image;
+      if (!img || typeof img !== 'string' || !img.startsWith('data:')) continue;
+      try {
+        const blob = await fetch(img).then(res => res.blob());
+        const ext = (blob.type || 'image/jpeg').split('/')[1] || 'jpg';
+        const file = new File([blob], `gear-${gear.id}.${ext}`, { type: blob.type || 'image/jpeg' });
+        const { url } = await uploadGearImage(gear.id, file);
+        gear.image = url;
+        changed = true;
+      } catch (err) {
+        console.warn('[gear] migrate embedded image failed', gear.id, err);
+      }
+    }
+    return changed;
+  })();
+  return gearImageMigrationPromise;
 }
 
 let openGearId = null;

@@ -7,6 +7,39 @@ function authHeaders(extra = {}) {
   return headers;
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isRetryableFetchError(err) {
+  if (!err) return false;
+  if (err.name === 'AbortError') return true;
+  const msg = String(err.message || '');
+  return msg === 'Failed to fetch' || msg.includes('NetworkError') || msg.includes('Load failed');
+}
+
+async function fetchWithRetry(url, options, { retries = 2, timeoutMs = 60000, retryDelayMs = 1500 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+      return res;
+    } catch (err) {
+      clearTimeout(timer);
+      lastErr = err;
+      if (attempt < retries && isRetryableFetchError(err)) {
+        await sleep(retryDelayMs * (attempt + 1));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
+}
+
 export async function fetchState() {
   const res = await fetch(`${API}/state`, { headers: authHeaders() });
   if (res.status === 401) throw new Error('请先登录');
@@ -15,24 +48,30 @@ export async function fetchState() {
 }
 
 export async function saveState(state) {
-  const res = await fetch(`${API}/state`, {
-    method: 'PUT',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(state)
-  });
-  if (res.status === 401) throw new Error('登录已过期，请重新登录');
-  if (res.status === 409) {
-    const body = await res.json().catch(() => ({}));
-    const err = new Error(body.error || '数据已被其他设备更新，请刷新后重试');
-    err.code = 'STATE_CONFLICT';
-    err.currentVersion = body.currentVersion;
+  try {
+    const res = await fetchWithRetry(`${API}/state`, {
+      method: 'PUT',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(state)
+    }, { retries: 2, timeoutMs: 90000, retryDelayMs: 2000 });
+    if (res.status === 401) throw new Error('登录已过期，请重新登录');
+    if (res.status === 409) {
+      const body = await res.json().catch(() => ({}));
+      const err = new Error(body.error || '数据已被其他设备更新，请刷新后重试');
+      err.code = 'STATE_CONFLICT';
+      err.currentVersion = body.currentVersion;
+      throw err;
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `保存失败 (${res.status})`);
+    }
+    return res.json();
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('保存超时，数据量较大或网络较慢，请稍后重试');
+    if (err.message === 'Failed to fetch') throw new Error('网络连接失败，请检查网络后重试');
     throw err;
   }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `保存失败 (${res.status})`);
-  }
-  return res.json();
 }
 
 export async function uploadGearImageFromUrl(gearId, imageUrl) {
@@ -67,17 +106,23 @@ export async function uploadGearImage(gearId, file) {
     reader.onerror = () => reject(new Error('读取文件失败'));
     reader.readAsDataURL(file);
   });
-  const res = await fetch(`${API}/gear/${gearId}/image`, {
-    method: 'POST',
-    headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ data, mime: file.type })
-  });
-  if (res.status === 401) throw new Error('登录已过期，请重新登录');
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `上传失败 (${res.status})`);
+  try {
+    const res = await fetchWithRetry(`${API}/gear/${gearId}/image`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ data, mime: file.type })
+    }, { retries: 1, timeoutMs: 60000 });
+    if (res.status === 401) throw new Error('登录已过期，请重新登录');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `上传失败 (${res.status})`);
+    }
+    return res.json();
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('上传超时，请稍后重试');
+    if (err.message === 'Failed to fetch') throw new Error('网络连接失败，请检查网络后重试');
+    throw err;
   }
-  return res.json();
 }
 
 export async function deleteImportBatchApi(batchId) {

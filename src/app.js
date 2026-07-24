@@ -15,7 +15,7 @@ import {
 import { API_BASE } from './apiBase.js';
 import { fmtMoney, fmtMoneySigned, fmtCount, fmtChartAxis, chartMoneyTooltip, CHART_THEME, chartDarkScalesY, chartDarkScalesXY } from './format.js';
 import {
-  initGear, loadGearState, getGearState, renderGearPage,
+  initGear, loadGearState, getGearState, renderGearPage, migrateGearEmbeddedImages,
   openGearEdit, closeGearEdit, saveGearEdit, triggerGearUpload, setupGearUpload, submitGearImageUrl,
   selectGearTab, markGearSold, markGearUnsold, markGearSoldFromModal,
   onGearCatChange, openGearSectionAdd, closeGearSectionAdd, confirmGearSectionAdd,
@@ -473,22 +473,38 @@ function buildState() {
 let persistTimer = null;
 let persistChain = Promise.resolve();
 const PERSIST_MAX_RETRIES = 5;
+const PERSIST_NETWORK_MAX_RETRIES = 3;
 
-async function persistNowInner(retryCount = 0) {
+function isPersistNetworkError(err) {
+  if (!err) return false;
+  if (err.name === 'AbortError') return true;
+  const msg = String(err.message || '');
+  return msg === 'Failed to fetch'
+    || msg.includes('网络连接失败')
+    || msg.includes('保存超时')
+    || msg.includes('NetworkError')
+    || msg.includes('Load failed');
+}
+
+async function persistNowInner(conflictRetry = 0, networkRetry = 0) {
   try {
     const res = await saveState(buildState());
     if (res?.stateVersion != null) stateVersion = res.stateVersion;
     return true;
   } catch (err) {
-    if (err.code === 'STATE_CONFLICT' && err.currentVersion != null && retryCount < PERSIST_MAX_RETRIES) {
+    if (err.code === 'STATE_CONFLICT' && err.currentVersion != null && conflictRetry < PERSIST_MAX_RETRIES) {
       stateVersion = err.currentVersion;
-      return persistNowInner(retryCount + 1);
+      return persistNowInner(conflictRetry + 1, networkRetry);
     }
     if (err.code === 'STATE_CONFLICT') {
       await loadData();
       if (!document.getElementById('moCat')?.classList.contains('hide')) renderCatList();
       alert('保存失败：云端数据已被其他设备更新，已同步最新数据');
       return false;
+    }
+    if (isPersistNetworkError(err) && networkRetry < PERSIST_NETWORK_MAX_RETRIES) {
+      await new Promise(r => setTimeout(r, 2000 * (networkRetry + 1)));
+      return persistNowInner(conflictRetry, networkRetry + 1);
     }
     alert('保存失败：' + err.message);
     return false;
@@ -579,6 +595,10 @@ async function loadData() {
     importHistory = state.importHistory || [];
     Categorizer.applyRules(state.rules);
     loadGearState(state);
+    try {
+      const migrated = await migrateGearEmbeddedImages();
+      if (migrated) await persistNow();
+    } catch { /* ignore migration errors */ }
     loadRenqingState(state);
     loadAccountsState(state);
     if (consumeRegistryMigrationPersist()) await persistNow();
