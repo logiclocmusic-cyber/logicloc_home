@@ -21,10 +21,42 @@ db.exec(`
     event_date TEXT NOT NULL,
     notes TEXT DEFAULT '',
     images TEXT DEFAULT '[]',
+    linked_txn_ids TEXT DEFAULT '[]',
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
   );
 `);
+
+try {
+  const cols = db.prepare('PRAGMA table_info(family_events)').all();
+  if (!cols.some(c => c.name === 'linked_txn_ids')) {
+    db.exec(`ALTER TABLE family_events ADD COLUMN linked_txn_ids TEXT NOT NULL DEFAULT '[]'`);
+  }
+} catch { /* ignore migration errors */ }
+
+function parseLinkedTxnIds(raw) {
+  try {
+    const list = JSON.parse(raw || '[]');
+    return Array.isArray(list)
+      ? list.map(n => Number(n)).filter(n => Number.isFinite(n) && n > 0)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeLinkedTxnIds(ids) {
+  if (!Array.isArray(ids)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const x of ids) {
+    const n = Number(x);
+    if (!Number.isFinite(n) || n <= 0 || seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+  }
+  return out.slice(0, 50);
+}
 
 function parseImages(raw) {
   try {
@@ -47,6 +79,7 @@ function rowToEvent(row) {
       name,
       url: `/family-event-files/${name}`,
     })),
+    linkedTxnIds: parseLinkedTxnIds(row.linked_txn_ids),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -125,10 +158,11 @@ export function createFamilyEvent(data = {}) {
     throw err;
   }
   const notes = String(data.notes || '').trim();
+  const linkedTxnIds = normalizeLinkedTxnIds(data.linkedTxnIds);
   const info = db.prepare(`
-    INSERT INTO family_events (title, event_date, notes, images)
-    VALUES (?, ?, ?, '[]')
-  `).run(title, eventDate, notes);
+    INSERT INTO family_events (title, event_date, notes, images, linked_txn_ids)
+    VALUES (?, ?, ?, '[]', ?)
+  `).run(title, eventDate, notes, JSON.stringify(linkedTxnIds));
   return getFamilyEvent(info.lastInsertRowid);
 }
 
@@ -156,11 +190,16 @@ export function updateFamilyEvent(id, data = {}) {
     imageNames = data.images.map(x => (typeof x === 'string' ? x : x?.name)).filter(Boolean);
   }
 
+  let linkedTxnIds = existing.linkedTxnIds;
+  if ('linkedTxnIds' in data) {
+    linkedTxnIds = normalizeLinkedTxnIds(data.linkedTxnIds);
+  }
+
   db.prepare(`
     UPDATE family_events
-    SET title = ?, event_date = ?, notes = ?, images = ?, updated_at = datetime('now')
+    SET title = ?, event_date = ?, notes = ?, images = ?, linked_txn_ids = ?, updated_at = datetime('now')
     WHERE id = ?
-  `).run(title, eventDate, notes, JSON.stringify(imageNames), id);
+  `).run(title, eventDate, notes, JSON.stringify(imageNames), JSON.stringify(linkedTxnIds), id);
 
   return getFamilyEvent(id);
 }

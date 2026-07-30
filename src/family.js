@@ -1,4 +1,5 @@
 import { assetUrl } from './apiBase.js';
+import { fmtMoney } from './format.js';
 import {
   fetchFamilyEvents,
   fetchFamilyEventStorage,
@@ -14,6 +15,140 @@ let editingId = null;
 let pendingFiles = [];
 let familySearchQuery = '';
 let storageStats = null;
+let linkedTxnIds = [];
+let familyTxnSearchQuery = '';
+
+let getAllData = () => [];
+let rowSearchHaystack = () => '';
+let rowDisplayTitle = row => (row['交易对方'] || row['产品名称'] || '—').trim();
+let formatTxnDateLabel = date => date || '—';
+let formatTxnTimeShort = time => time || '';
+
+export function initFamily(deps) {
+  getAllData = deps.getAllData || getAllData;
+  rowSearchHaystack = deps.rowSearchHaystack || rowSearchHaystack;
+  rowDisplayTitle = deps.rowDisplayTitle || rowDisplayTitle;
+  formatTxnDateLabel = deps.formatDateLabel || formatTxnDateLabel;
+  formatTxnTimeShort = deps.formatTimeShort || formatTxnTimeShort;
+}
+
+function txnById(id) {
+  return getAllData().find(r => r.id === id);
+}
+
+function linkedTxnRows(ids = linkedTxnIds) {
+  return (ids || []).map(id => txnById(id)).filter(Boolean);
+}
+
+function renderFamilyLinkedTxns() {
+  const wrap = document.getElementById('familyLinkedTxns');
+  if (!wrap) return;
+  const rows = linkedTxnRows();
+  if (!rows.length) {
+    wrap.innerHTML = '<p class="family-txn-empty">暂无关联交易，点击「添加」从账本中搜索。</p>';
+    return;
+  }
+  wrap.innerHTML = rows.map(row => {
+    const isInc = row['收支'] === '收入';
+    const sub = (row['子分类'] || '').trim();
+    const catTxt = sub ? `${row['分类']} · ${sub}` : (row['分类'] || '—');
+    return `<div class="family-txn-item">
+      <div class="family-txn-item-main">
+        <div class="family-txn-item-title">${esc(rowDisplayTitle(row))}</div>
+        <div class="family-txn-item-meta">${esc(formatTxnDateLabel(row['日期']))}${row['时间'] ? ` ${esc(formatTxnTimeShort(row['时间']))}` : ''} · ${esc(catTxt)}</div>
+      </div>
+      <div class="family-txn-item-amt ${isInc ? 'inc' : 'exp'}">${isInc ? '+' : '-'}${fmtMoney(row['金额'])}</div>
+      <button type="button" class="family-txn-item-remove" onclick="removeFamilyLinkedTxn(${row.id})" title="移除关联" aria-label="移除关联"><i class="ti ti-x"></i></button>
+    </div>`;
+  }).join('');
+}
+
+function renderFamilyLinkedTxnsSummary(ev) {
+  const rows = linkedTxnRows(ev.linkedTxnIds || []);
+  if (!rows.length) return '';
+  const chips = rows.slice(0, 2).map(row => {
+    const isInc = row['收支'] === '收入';
+    return `<span class="family-milestone-txn-chip ${isInc ? 'inc' : 'exp'}">${esc(rowDisplayTitle(row))} ${isInc ? '+' : '-'}${fmtMoney(row['金额'])}</span>`;
+  }).join('');
+  const more = rows.length > 2 ? `<span class="family-milestone-txn-more">+${rows.length - 2} 笔</span>` : '';
+  return `<div class="family-milestone-txns" onclick="event.stopPropagation()">${chips}${more}</div>`;
+}
+
+function familyTxnSearchResults(limit = 40) {
+  const needle = String(familyTxnSearchQuery || '').trim().toLowerCase();
+  const linked = new Set(linkedTxnIds);
+  const all = getAllData()
+    .filter(row => !linked.has(row.id))
+    .sort((a, b) => (b['日期'] + b['时间']).localeCompare(a['日期'] + a['时间']));
+  if (!needle) return all.slice(0, limit);
+  return all.filter(row => rowSearchHaystack(row).includes(needle)).slice(0, limit);
+}
+
+function renderFamilyTxnSearchResults() {
+  const wrap = document.getElementById('familyTxnSearchResults');
+  if (!wrap) return;
+  const rows = familyTxnSearchResults();
+  if (!rows.length) {
+    wrap.innerHTML = `<div class="family-txn-search-empty">${familyTxnSearchQuery.trim() ? '没有匹配的交易' : '输入关键词搜索账本交易'}</div>`;
+    return;
+  }
+  wrap.innerHTML = rows.map(row => {
+    const isInc = row['收支'] === '收入';
+    const sub = (row['子分类'] || '').trim();
+    const catTxt = sub ? `${row['分类']} · ${sub}` : (row['分类'] || '—');
+    return `<button type="button" class="family-txn-search-item" onclick="pickFamilyLinkedTxn(${row.id})">
+      <div class="family-txn-search-main">
+        <div class="family-txn-search-title">${esc(rowDisplayTitle(row))}</div>
+        <div class="family-txn-search-meta">${esc(formatTxnDateLabel(row['日期']))}${row['时间'] ? ` ${esc(formatTxnTimeShort(row['时间']))}` : ''} · ${esc(catTxt)} · ${esc(row['来源'] || '')}</div>
+      </div>
+      <div class="family-txn-search-amt ${isInc ? 'inc' : 'exp'}">${isInc ? '+' : '-'}${fmtMoney(row['金额'])}</div>
+    </button>`;
+  }).join('');
+}
+
+export function openFamilyTxnSearch() {
+  familyTxnSearchQuery = '';
+  const inp = document.getElementById('familyTxnSearchInp');
+  if (inp) inp.value = '';
+  renderFamilyTxnSearchResults();
+  document.getElementById('moFamilyTxnSearch')?.classList.remove('hide');
+  setTimeout(() => document.getElementById('familyTxnSearchInp')?.focus(), 60);
+}
+
+export function closeFamilyTxnSearch() {
+  document.getElementById('moFamilyTxnSearch')?.classList.add('hide');
+  familyTxnSearchQuery = '';
+}
+
+export function onFamilyTxnSearch(query) {
+  familyTxnSearchQuery = query;
+  renderFamilyTxnSearchResults();
+}
+
+export function pickFamilyLinkedTxn(id) {
+  const n = Number(id);
+  if (!Number.isFinite(n) || n <= 0 || linkedTxnIds.includes(n)) return;
+  if (linkedTxnIds.length >= 50) {
+    alert('每个事件最多关联 50 笔交易');
+    return;
+  }
+  if (!txnById(n)) {
+    alert('交易不存在');
+    return;
+  }
+  linkedTxnIds = [...linkedTxnIds, n];
+  renderFamilyLinkedTxns();
+  renderFamilyTxnSearchResults();
+}
+
+export function removeFamilyLinkedTxn(id) {
+  const n = Number(id);
+  linkedTxnIds = linkedTxnIds.filter(x => x !== n);
+  renderFamilyLinkedTxns();
+  if (!document.getElementById('moFamilyTxnSearch')?.classList.contains('hide')) {
+    renderFamilyTxnSearchResults();
+  }
+}
 
 function esc(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
@@ -55,12 +190,16 @@ function sortedFamilyEvents() {
 function familyMatchesSearch(ev, query) {
   const needle = String(query || '').trim().toLowerCase();
   if (!needle) return true;
+  const linkedHay = linkedTxnRows(ev.linkedTxnIds || [])
+    .map(row => rowSearchHaystack(row))
+    .join(' ');
   const hay = [
     ev.title,
     ev.notes,
     ev.eventDate,
     formatDateLabel(ev.eventDate),
     formatTimelineDate(ev.eventDate),
+    linkedHay,
   ].join(' ').toLowerCase();
   return hay.includes(needle);
 }
@@ -105,6 +244,7 @@ function renderFamilyMilestoneItem(ev, index, showYear, year) {
             <button type="button" class="family-milestone-edit" onclick="event.stopPropagation();openFamilyEdit(${ev.id})" title="编辑" aria-label="编辑"><i class="ti ti-pencil"></i></button>
           </div>
           ${ev.notes ? `<p class="family-milestone-notes">${esc(ev.notes)}</p>` : ''}
+          ${renderFamilyLinkedTxnsSummary(ev)}
           ${mediaHtml}
         </div>`;
   const bodyHtml = side === 'is-left' ? `${dateHtml}${mainHtml}` : `${mainHtml}${dateHtml}`;
@@ -235,9 +375,11 @@ function fillForm(ev) {
   document.getElementById('familyTitleInp').value = ev?.title || '';
   document.getElementById('familyDateInp').value = ev?.eventDate || todayYmd();
   document.getElementById('familyNotesInp').value = ev?.notes || '';
+  linkedTxnIds = [...(ev?.linkedTxnIds || [])];
   pendingFiles = [];
   renderPendingPreviews();
   renderSavedImages(ev);
+  renderFamilyLinkedTxns();
   const delBtn = document.getElementById('familyDeleteBtn');
   if (delBtn) delBtn.hidden = !ev?.id;
   const title = document.querySelector('#moFamily .mh h3');
@@ -319,8 +461,10 @@ export function openFamilyEdit(id) {
 
 export function closeFamilyEdit() {
   document.getElementById('moFamily')?.classList.add('hide');
+  closeFamilyTxnSearch();
   editingId = null;
   pendingFiles = [];
+  linkedTxnIds = [];
 }
 
 export function triggerFamilyUpload() {
@@ -354,10 +498,11 @@ export async function saveFamilyEdit() {
 
   try {
     let ev;
+    const payload = { title, eventDate, notes, linkedTxnIds: [...linkedTxnIds] };
     if (editingId) {
-      ev = await updateFamilyEvent(editingId, { title, eventDate, notes });
+      ev = await updateFamilyEvent(editingId, payload);
     } else {
-      ev = await createFamilyEvent({ title, eventDate, notes });
+      ev = await createFamilyEvent(payload);
     }
 
     for (const file of pendingFiles) {

@@ -890,6 +890,14 @@
         <div class="family-img-grid" id="familySavedImgs" hidden></div>
         <div class="family-img-grid" id="familyPendingImgs" hidden></div>
       </div>
+      <div class="fg family-txn-field">
+        <div class="family-txn-head">
+          <label>关联交易</label>
+          <button type="button" class="btn btn-sm" onclick="openFamilyTxnSearch()"><i class="ti ti-plus"></i> 添加</button>
+        </div>
+        <p class="family-txn-hint">关联账本中的支出/收入记录，便于回顾该事件相关花费。</p>
+        <div class="family-txn-list" id="familyLinkedTxns"></div>
+      </div>
     </div>
     <div class="mf">
       <button type="button" class="btn btn-a" id="familyDeleteBtn" hidden onclick="removeFamilyEvent()">删除</button>
@@ -899,6 +907,22 @@
   </div>
 </div>
 <input type="file" id="familyFileInp" accept="image/*,.heic,.heif" multiple style="display:none">
+
+<div class="mo hide" id="moFamilyTxnSearch">
+  <div class="mbox">
+    <div class="mh"><h3><i class="ti ti-search" style="color:var(--primary);margin-right:6px"></i>搜索交易</h3><button class="mclose" onclick="closeFamilyTxnSearch()"><i class="ti ti-x"></i></button></div>
+    <div class="mb family-txn-search-body">
+      <label class="family-txn-search" for="familyTxnSearchInp">
+        <i class="ti ti-search" aria-hidden="true"></i>
+        <input id="familyTxnSearchInp" type="search" placeholder="搜索交易对方、说明、分类、来源…" oninput="onFamilyTxnSearch(this.value)" autocomplete="off">
+      </label>
+      <div class="family-txn-search-results" id="familyTxnSearchResults"></div>
+    </div>
+    <div class="mf">
+      <button type="button" class="btn" onclick="closeFamilyTxnSearch()">关闭</button>
+    </div>
+  </div>
+</div>
 
 <script type="module" src="/src/main.js"></script>
 </body>

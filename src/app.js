@@ -28,8 +28,11 @@ import {
 } from './company-cost.js';
 import {
   loadFamilyEvents, setupFamilyEvents,
+  initFamily,
   openFamilyCreate, openFamilyEdit, closeFamilyEdit, saveFamilyEdit,
   removeFamilyEvent, triggerFamilyUpload, onFamilySearch, clearFamilySearch,
+  openFamilyTxnSearch, closeFamilyTxnSearch, onFamilyTxnSearch,
+  pickFamilyLinkedTxn, removeFamilyLinkedTxn,
 } from './family.js';
 import {
   initSplits, hasSplits, expandRowForStats, rowMatchesCat, rowSearchHaystack,
@@ -4910,9 +4913,9 @@ function tradeCatCellHtml(row) {
     : '';
   return `<div class="trade-row-cat cat-cell">
     <div class="cat-cell-inner">
-      <span class="trade-cat-icon" aria-hidden="true">${icon}</span>
+      ${icon}
       <div class="cat-cell-text">
-        <span class="trade-cat-label"><span class="cat-pick-label">${escHtml(cat)}</span></span>${subPart}
+        <span class="trade-cat-label">${escHtml(cat)}</span>${subPart}
       </div>
     </div>
   </div>`;
@@ -4938,10 +4941,16 @@ function tradeLinkSortKey(link) {
 
 function renderTradeLinkSummary(link, stats) {
   const meta = linkBalanceMeta(stats);
+  const plHtml = stats.balanced
+    ? `<span class="txn-link-balance ok">${meta.label}</span>`
+    : `<span class="trade-card-pl trade-card-pl--${meta.cls}">
+        <span class="trade-card-pl-label">${meta.label}</span>
+        <span class="trade-card-pl-amt">${fmtMoney(Math.abs(stats.net))}</span>
+      </span>`;
   return `<span class="trade-card-name"><i class="ti ti-link"></i> ${escHtml(link.name)}</span>
     <span class="trade-card-stats">
-      支出 ${fmtMoney(stats.exp)} · 收入 ${fmtMoney(stats.inc)} · 净额 ${fmtMoneySigned(stats.net)}
-      <span class="txn-link-balance ${meta.cls}">${meta.label}</span>
+      支出 ${fmtMoney(stats.exp)} · 收入 ${fmtMoney(stats.inc)}
+      ${plHtml}
     </span>`;
 }
 
@@ -5319,6 +5328,13 @@ async function initAppInner() {
       if (!SUBCATS[cat].includes(sub)) SUBCATS[cat] = [...SUBCATS[cat], sub];
     }
   });
+  initFamily({
+    getAllData: () => allData,
+    rowSearchHaystack,
+    rowDisplayTitle,
+    formatDateLabel,
+    formatTimeShort,
+  });
   initSplits({
     getCats: () => CATS,
     getSubcatsFor: subcatsFor,
@@ -5376,6 +5392,7 @@ Object.assign(window, {
   toggleInvoicePrinted, downloadInvoiceFile, printInvoiceFile, openAppConfig,
   openFamilyCreate, openFamilyEdit, closeFamilyEdit, saveFamilyEdit, removeFamilyEvent, triggerFamilyUpload,
   onFamilySearch, clearFamilySearch,
+  openFamilyTxnSearch, closeFamilyTxnSearch, onFamilyTxnSearch, pickFamilyLinkedTxn, removeFamilyLinkedTxn,
   openSplitEditor, closeSplitEditor, addSplitLine, saveSplitEdit: handleSaveSplit,
   clearSplit: handleClearSplit, clearSplitFromModal, toggleSplitExpand: handleToggleSplitExpand,
   updSplitCat: handleUpdSplitCat, updSplitSub: handleUpdSplitSub,
