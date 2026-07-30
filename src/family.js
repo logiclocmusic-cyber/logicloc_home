@@ -46,7 +46,7 @@ function parseEventDateParts(ymd) {
 
 function sortedFamilyEvents() {
   return [...events].sort((a, b) =>
-    String(a.eventDate).localeCompare(String(b.eventDate)) || (a.id || 0) - (b.id || 0)
+    String(b.eventDate).localeCompare(String(a.eventDate)) || (b.id || 0) - (a.id || 0)
   );
 }
 
