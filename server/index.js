@@ -14,7 +14,8 @@ import {
 } from './invoices.js';
 import {
   listFamilyEvents, getFamilyEvent, createFamilyEvent, updateFamilyEvent,
-  deleteFamilyEvent, saveFamilyEventImage, removeFamilyEventImage, FAMILY_EVENT_DIR
+  deleteFamilyEvent, saveFamilyEventImage, removeFamilyEventImage, FAMILY_EVENT_DIR,
+  getFamilyEventStorageStats,
 } from './family-events.js';
 
 initAuth();
@@ -290,6 +291,14 @@ app.delete('/api/invoices/:id', requireAuth, (req, res) => {
       return res.status(404).json({ error: '发票不存在' });
     }
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/family-events/storage', requireAuth, (_req, res) => {
+  try {
+    res.json(getFamilyEventStorageStats());
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

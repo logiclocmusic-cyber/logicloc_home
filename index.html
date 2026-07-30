@@ -320,6 +320,16 @@
         </div>
         <button type="button" class="btn btn-p" onclick="openFamilyCreate()"><i class="ti ti-plus"></i> 新增事件</button>
       </div>
+      <div class="family-storage" id="familyStorage" hidden>
+        <div class="family-storage-head">
+          <span class="family-storage-label"><i class="ti ti-database" aria-hidden="true"></i> 图片存储</span>
+          <span class="family-storage-meta" id="familyStorageMeta"></span>
+        </div>
+        <div class="family-storage-bar" id="familyStorageBar" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+          <div class="family-storage-fill" id="familyStorageFill"></div>
+        </div>
+        <p class="family-storage-hint" id="familyStorageHint"></p>
+      </div>
       <label class="family-search" for="familySearchInp">
         <i class="ti ti-search" aria-hidden="true"></i>
         <input id="familySearchInp" type="search" placeholder="搜索标题、备注、日期…" oninput="onFamilySearch(this.value)" aria-label="搜索家庭事件">

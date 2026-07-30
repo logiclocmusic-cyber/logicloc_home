@@ -1,6 +1,7 @@
 import { assetUrl } from './apiBase.js';
 import {
   fetchFamilyEvents,
+  fetchFamilyEventStorage,
   createFamilyEvent,
   updateFamilyEvent,
   deleteFamilyEvent,
@@ -12,6 +13,7 @@ let events = [];
 let editingId = null;
 let pendingFiles = [];
 let familySearchQuery = '';
+let storageStats = null;
 
 function esc(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
@@ -130,6 +132,67 @@ function syncEvents(list) {
   syncFamilySearchClear();
 }
 
+function formatStorageBytes(bytes) {
+  const n = Math.max(0, Number(bytes) || 0);
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function storageLevel(percent) {
+  if (percent >= 90) return 'danger';
+  if (percent >= 75) return 'warn';
+  return 'ok';
+}
+
+function renderFamilyStorage() {
+  const wrap = document.getElementById('familyStorage');
+  const meta = document.getElementById('familyStorageMeta');
+  const fill = document.getElementById('familyStorageFill');
+  const bar = document.getElementById('familyStorageBar');
+  const hint = document.getElementById('familyStorageHint');
+  if (!wrap) return;
+  if (!storageStats) {
+    wrap.hidden = true;
+    return;
+  }
+
+  const { totalBytes, fileCount, limitBytes, limitMb, percent } = storageStats;
+  const pct = Math.min(100, Math.max(0, Number(percent) || 0));
+  const level = storageLevel(pct);
+
+  wrap.hidden = false;
+  wrap.dataset.level = level;
+  if (meta) {
+    meta.textContent = `${formatStorageBytes(totalBytes)} / ${formatStorageBytes(limitBytes)} · ${fileCount} 张`;
+  }
+  if (fill) fill.style.width = `${pct}%`;
+  if (bar) {
+    bar.setAttribute('aria-valuenow', String(Math.round(pct)));
+    bar.setAttribute('aria-label', `已用 ${Math.round(pct * 10) / 10}%`);
+  }
+  if (hint) {
+    if (level === 'danger') {
+      hint.textContent = '存储空间即将用尽，请删除旧事件中的照片或联系管理员扩容。';
+    } else if (level === 'warn') {
+      hint.textContent = '存储使用较高，建议清理不再需要的照片。';
+    } else {
+      hint.textContent = `照片保存在 Railway 云端，当前上限 ${limitMb} MB。`;
+    }
+  }
+}
+
+async function refreshFamilyStorage() {
+  try {
+    storageStats = await fetchFamilyEventStorage();
+    renderFamilyStorage();
+  } catch {
+    storageStats = null;
+    renderFamilyStorage();
+  }
+}
+
 function renderPendingPreviews() {
   const wrap = document.getElementById('familyPendingImgs');
   if (!wrap) return;
@@ -237,6 +300,7 @@ export async function loadFamilyEvents() {
   const data = await fetchFamilyEvents();
   syncEvents(data.events || []);
   renderFamilyPage();
+  await refreshFamilyStorage();
 }
 
 export function openFamilyCreate() {
@@ -272,6 +336,7 @@ async function refreshAfterMutation(ev) {
   renderFamilyPage();
   fillForm(ev);
   editingId = ev.id;
+  await refreshFamilyStorage();
 }
 
 export async function saveFamilyEdit() {
@@ -314,6 +379,7 @@ export async function removeFamilyEvent() {
     events = events.filter(e => e.id !== editingId);
     syncEvents(events);
     renderFamilyPage();
+    await refreshFamilyStorage();
     closeFamilyEdit();
   } catch (err) {
     alert(err.message || '删除失败');

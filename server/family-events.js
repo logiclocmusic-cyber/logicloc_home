@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, unlinkSync, existsSync, readdirSync } from 'fs';
+import { mkdirSync, writeFileSync, unlinkSync, existsSync, readdirSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { randomBytes } from 'crypto';
@@ -8,6 +8,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export const FAMILY_EVENT_DIR = process.env.FAMILY_EVENT_DIR
   || join(__dirname, '..', 'data', 'family-events');
 mkdirSync(FAMILY_EVENT_DIR, { recursive: true });
+
+const FAMILY_EVENT_STORAGE_LIMIT_MB = Math.max(
+  1,
+  Number(process.env.FAMILY_EVENT_STORAGE_LIMIT_MB) || 1024
+);
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS family_events (
@@ -71,6 +76,34 @@ export function listFamilyEvents() {
     'SELECT * FROM family_events ORDER BY event_date DESC, id DESC'
   ).all();
   return rows.map(rowToEvent);
+}
+
+export function getFamilyEventStorageStats() {
+  let totalBytes = 0;
+  let fileCount = 0;
+  try {
+    for (const name of readdirSync(FAMILY_EVENT_DIR)) {
+      if (name.startsWith('.')) continue;
+      const fp = join(FAMILY_EVENT_DIR, name);
+      try {
+        const st = statSync(fp);
+        if (st.isFile()) {
+          totalBytes += st.size;
+          fileCount += 1;
+        }
+      } catch { /* skip unreadable file */ }
+    }
+  } catch { /* empty or missing dir */ }
+
+  const limitBytes = FAMILY_EVENT_STORAGE_LIMIT_MB * 1024 * 1024;
+  const percent = limitBytes > 0 ? Math.min(100, (totalBytes / limitBytes) * 100) : 0;
+  return {
+    totalBytes,
+    fileCount,
+    limitBytes,
+    limitMb: FAMILY_EVENT_STORAGE_LIMIT_MB,
+    percent,
+  };
 }
 
 export function getFamilyEvent(id) {

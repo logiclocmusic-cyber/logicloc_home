@@ -248,6 +248,13 @@ export async function fetchFamilyEvents() {
   return res.json();
 }
 
+export async function fetchFamilyEventStorage() {
+  const res = await fetch(`${API}/family-events/storage`, { headers: authHeaders() });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) throw new Error(`加载存储信息失败 (${res.status})`);
+  return res.json();
+}
+
 export async function createFamilyEvent(payload) {
   const res = await fetch(`${API}/family-events`, {
     method: 'POST',
