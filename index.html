@@ -251,8 +251,11 @@
 
   <div class="page view" id="view-trades">
     <div class="trades-head">
-      <h2 class="trades-title">关联交易</h2>
-      <p class="trades-sub">借还、买卖等组合账目 · 自动核对收支盈亏</p>
+      <div class="trades-head-main">
+        <h2 class="trades-title">关联交易</h2>
+        <p class="trades-sub">借还、买卖等组合账目 · 自动核对收支盈亏</p>
+      </div>
+      <div class="trades-total" id="tradesTotal" hidden></div>
     </div>
     <div class="trades-list" id="tradesList"></div>
   </div>
@@ -306,6 +309,13 @@
     <div class="gear-head">
       <p class="gear-intro">支出会按分类/子分类自动收录为装备。可添加子分类标签，点开明细可改名称、分类与子分类，并上传产品图、标记卖出。</p>
       <span class="gear-count" id="gearCount"></span>
+    </div>
+    <div class="gear-sections-bar">
+      <div class="gear-sections-bar-head">
+        <span class="gear-sections-bar-title"><i class="ti ti-tags" aria-hidden="true"></i> 子分类管理</span>
+        <button type="button" class="btn btn-sm btn-p" onclick="openGearSectionAdd()"><i class="ti ti-plus"></i> 添加子分类</button>
+      </div>
+      <div class="gear-sections-list" id="gearSectionsList"></div>
     </div>
     <div class="gear-tabs" id="gearTabs"></div>
     <div class="gear-gallery" id="gearGallery"></div>

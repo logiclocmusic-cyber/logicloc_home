@@ -24,7 +24,7 @@ db.exec(`
   );
 `);
 
-const META_KEYS = ['refunded', 'excluded', 'categories', 'sources', 'rules', 'importHistory', 'nextId', 'gearLibrary', 'nextGearId', 'gearSections', 'renqingAvatars', 'accountCardFaces', 'accountLogos', 'accountRegistry', 'txnPairs', 'dayNotes', 'stateVersion'];
+const META_KEYS = ['refunded', 'excluded', 'categories', 'sources', 'rules', 'importHistory', 'nextId', 'gearLibrary', 'nextGearId', 'gearSections', 'hiddenGearSectionIds', 'renqingAvatars', 'accountCardFaces', 'accountLogos', 'accountRegistry', 'txnPairs', 'dayNotes', 'stateVersion'];
 
 function txnRowKey(row) {
   const oid = String(row['交易单号'] || '').trim();
@@ -58,6 +58,7 @@ export function readState() {
     gearLibrary: meta.gearLibrary || [],
     nextGearId: meta.nextGearId || 1,
     gearSections: meta.gearSections || [],
+    hiddenGearSectionIds: meta.hiddenGearSectionIds || [],
     renqingAvatars: meta.renqingAvatars || {},
     accountCardFaces: meta.accountCardFaces || {},
     accountLogos: meta.accountLogos || {},
@@ -101,6 +102,7 @@ export function writeState(state, opts = {}) {
       gearLibrary: state.gearLibrary || [],
       nextGearId: state.nextGearId || 1,
       gearSections: state.gearSections || [],
+      hiddenGearSectionIds: state.hiddenGearSectionIds || [],
       renqingAvatars: state.renqingAvatars || {},
       accountCardFaces: state.accountCardFaces || {},
       accountLogos: state.accountLogos || {},

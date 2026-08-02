@@ -465,6 +465,7 @@ function buildState() {
     gearLibrary: gear.gearLibrary,
     nextGearId: gear.nextGearId,
     gearSections: gear.gearSections || [],
+    hiddenGearSectionIds: gear.hiddenGearSectionIds || [],
     renqingAvatars: getRenqingState().renqingAvatars,
     accountCardFaces: getAccountsState().accountCardFaces,
     accountRegistry: getAccountsState().accountRegistry,
@@ -4939,6 +4940,41 @@ function tradeLinkSortKey(link) {
   return rows.map(r => r['日期'] + r['时间']).sort().pop();
 }
 
+function computeAllTradesStats(links) {
+  const seen = new Set();
+  const rows = [];
+  for (const link of links || []) {
+    for (const row of rowsForLinkKeys(link.keys, allData)) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      rows.push(row);
+    }
+  }
+  return computeLinkStats(rows);
+}
+
+function renderTradesTotal(links) {
+  const el = document.getElementById('tradesTotal');
+  if (!el) return;
+  if (!links?.length) {
+    el.hidden = true;
+    el.innerHTML = '';
+    return;
+  }
+  const stats = computeAllTradesStats(links);
+  const meta = linkBalanceMeta(stats);
+  const plHtml = stats.balanced
+    ? `<span class="txn-link-balance ok">${meta.label}</span>`
+    : `<span class="trade-card-pl trade-card-pl--${meta.cls}">
+        <span class="trade-card-pl-label">${meta.label}</span>
+        <span class="trade-card-pl-amt">${fmtMoney(Math.abs(stats.net))}</span>
+      </span>`;
+  el.hidden = false;
+  el.innerHTML = `<div class="trades-total-meta">${links.length} 组关联交易</div>
+    <div class="trades-total-stats">支出 ${fmtMoney(stats.exp)} · 收入 ${fmtMoney(stats.inc)}</div>
+    <div class="trades-total-pl">${plHtml}</div>`;
+}
+
 function renderTradeLinkSummary(link, stats) {
   const meta = linkBalanceMeta(stats);
   const plHtml = stats.balanced
@@ -4958,6 +4994,7 @@ function renderTradesPage() {
   const el = document.getElementById('tradesList');
   if (!el) return;
   const links = getTxnPairs().slice().sort((a, b) => tradeLinkSortKey(b).localeCompare(tradeLinkSortKey(a)));
+  renderTradesTotal(links);
   if (!links.length) {
     el.innerHTML = `<div class="trades-empty">
       <i class="ti ti-link-off"></i>

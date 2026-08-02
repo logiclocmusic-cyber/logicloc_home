@@ -755,8 +755,12 @@ export const Parsers = (() => {
     return out;
   }
 
-  function isAlipaySuccessStatus(status) {
-    return status === '交易成功' || status === '转账成功';
+  /** 支付宝可入账状态（含担保交易「等待确认收货」等已付款状态） */
+  function isAlipayImportableStatus(status) {
+    const s = cleanField(status);
+    if (!s) return false;
+    if (/退款成功|交易关闭|待付款|等待付款/.test(s)) return false;
+    return /^(交易成功|转账成功|等待确认收货|等待对方确认收货|收款成功|还款成功)$/.test(s);
   }
 
   function alipayBaseOrderId(orderId) {
@@ -796,7 +800,7 @@ export const Parsers = (() => {
 
       const status = pick(map, row, '交易状态', '当前状态');
       if (/退款成功/.test(status)) continue;
-      if (!isAlipaySuccessStatus(status)) continue;
+      if (!isAlipayImportableStatus(status)) continue;
 
       const dt = parseDateTime(pick(map, row, '交易时间'));
       const type = parseType(typeRaw, 0);

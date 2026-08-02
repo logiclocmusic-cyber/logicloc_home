@@ -18,7 +18,7 @@ export const GEAR_SUBCAT = '母婴装备';
 
 export const DEFAULT_GEAR_SECTIONS = [
   { id: 'baby', label: '母婴装备', icon: 'ti-baby-carriage', cat: '母婴亲子', sub: '母婴装备' },
-  { id: 'digital', label: '数码设备', icon: 'ti-device-laptop', cat: '数码电器', sub: null },
+  { id: 'digital', label: '数码设备', icon: 'ti-device-laptop', cat: '数码电器', sub: '数码设备' },
 ];
 
 /** @deprecated alias */
@@ -27,6 +27,8 @@ export const GEAR_SECTIONS = DEFAULT_GEAR_SECTIONS;
 let gearLibrary = [];
 let nextGearId = 1;
 let customGearSections = [];
+/** 用户隐藏的内置子分类 id */
+let hiddenSectionIds = [];
 let activeGearSection = DEFAULT_GEAR_SECTIONS[0].id;
 let getAllData = () => [];
 let onPersist = () => {};
@@ -42,9 +44,17 @@ export function initGear(deps) {
   ensureSubcat = deps.ensureSubcat || (() => {});
 }
 
+function sectionKey(cat, sub) {
+  return `${cat}\0${sub || ''}`;
+}
+
 export function loadGearState(state) {
   gearLibrary = state.gearLibrary || [];
   nextGearId = state.nextGearId || 1;
+  hiddenSectionIds = Array.isArray(state.hiddenGearSectionIds)
+    ? state.hiddenGearSectionIds.map(String)
+    : [];
+  const defaultKeys = new Set(DEFAULT_GEAR_SECTIONS.map(s => sectionKey(s.cat, s.sub)));
   customGearSections = Array.isArray(state.gearSections)
     ? state.gearSections
       .filter(s => s && s.id && s.cat)
@@ -56,11 +66,19 @@ export function loadGearState(state) {
         sub: s.sub ? String(s.sub) : null,
         custom: true,
       }))
+      // 清理历史上误加的「数码电器整类」标签（会吞掉手机/电脑等子分类）
+      .filter(s => !(s.cat === '数码电器' && !s.sub))
+      .filter(s => !defaultKeys.has(sectionKey(s.cat, s.sub)))
     : [];
 }
 
 export function getGearState() {
-  return { gearLibrary, nextGearId, gearSections: customGearSections };
+  return {
+    gearLibrary,
+    nextGearId,
+    gearSections: customGearSections,
+    hiddenGearSectionIds: hiddenSectionIds,
+  };
 }
 
 export function getGearLibrary() {
@@ -68,7 +86,8 @@ export function getGearLibrary() {
 }
 
 function getAllGearSections() {
-  return [...DEFAULT_GEAR_SECTIONS, ...customGearSections];
+  const hidden = new Set(hiddenSectionIds);
+  return [...DEFAULT_GEAR_SECTIONS, ...customGearSections].filter(s => !hidden.has(s.id));
 }
 
 function txnById(id) {
@@ -87,7 +106,7 @@ function isExpenseRow(row) {
   return !!row && row['收支'] === '支出' && row['退款状态'] !== 'refunded';
 }
 
-/** 优先匹配带具体子分类的装备分区，再匹配整类分区 */
+/** 优先匹配带具体子分类的装备分区；整类分区仅收录未被其它标签占用的子分类 */
 function sectionForRow(row) {
   if (!isExpenseRow(row)) return null;
   const cat = row['分类'];
@@ -95,6 +114,10 @@ function sectionForRow(row) {
   const sections = getAllGearSections();
   const exact = sections.find(s => s.cat === cat && s.sub && s.sub === sub);
   if (exact) return exact;
+  const dedicatedSubs = new Set(
+    sections.filter(s => s.cat === cat && s.sub).map(s => s.sub)
+  );
+  if (sub && dedicatedSubs.has(sub)) return null;
   return sections.find(s => s.cat === cat && !s.sub) || null;
 }
 
@@ -112,7 +135,7 @@ function gearSectionId(gear) {
     return gear.sectionId;
   }
   const row = txnById(gear.txnId);
-  return sectionForRow(row)?.id || DEFAULT_GEAR_SECTIONS[0].id;
+  return sectionForRow(row)?.id || getAllGearSections()[0]?.id || DEFAULT_GEAR_SECTIONS[0].id;
 }
 
 function gearItemsForSection(sectionId) {
@@ -187,6 +210,7 @@ export function selectGearTab(sectionId) {
   if (!getAllGearSections().some(s => s.id === sectionId)) return;
   activeGearSection = sectionId;
   renderGearGallery();
+  document.querySelector(`.gear-section-chip[data-section="${sectionId}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
 }
 
 function setGearSoldState(gearId, sold) {
@@ -407,6 +431,33 @@ function gearCardHtml(gear) {
   </article>`;
 }
 
+function sectionMetaLabel(section) {
+  return section.sub ? `${section.cat} · ${section.sub}` : `${section.cat}（整类）`;
+}
+
+function renderGearSectionsManager() {
+  const el = document.getElementById('gearSectionsList');
+  if (!el) return;
+  const sections = getAllGearSections();
+  if (!sections.length) {
+    el.innerHTML = `<div class="gear-sections-empty">暂无子分类，请添加一个以收录装备支出。</div>`;
+    return;
+  }
+  el.innerHTML = sections.map(section => {
+    const count = gearItemsForSection(section.id).length;
+    const on = section.id === activeGearSection ? ' on' : '';
+    return `<div class="gear-section-chip${on}" role="button" tabindex="0" data-section="${section.id}" onclick="selectGearTab('${section.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectGearTab('${section.id}')}">
+      <i class="ti ${section.icon} gear-section-chip-icon" aria-hidden="true"></i>
+      <div class="gear-section-chip-text">
+        <span class="gear-section-chip-label">${section.label}</span>
+        <span class="gear-section-chip-meta">${sectionMetaLabel(section)}</span>
+      </div>
+      <span class="gear-section-chip-count">${fmtCount(count)} 件</span>
+      <button type="button" class="gear-section-chip-del" title="删除子分类" onclick="event.stopPropagation();removeGearSection('${section.id}')"><i class="ti ti-trash"></i></button>
+    </div>`;
+  }).join('');
+}
+
 function renderGearTabs() {
   const tabsEl = document.getElementById('gearTabs');
   if (!tabsEl) return;
@@ -414,19 +465,12 @@ function renderGearTabs() {
   tabsEl.innerHTML = sections.map(section => {
     const count = gearItemsForSection(section.id).length;
     const on = section.id === activeGearSection ? ' on' : '';
-    const remove = section.custom
-      ? `<button type="button" class="gear-tab-remove" title="移除该子分类标签" onclick="event.stopPropagation();removeGearSection('${section.id}')"><i class="ti ti-x"></i></button>`
-      : '';
     return `<button type="button" class="gear-tab${on}" data-section="${section.id}" onclick="selectGearTab('${section.id}')">
       <i class="ti ${section.icon}"></i>
       <span class="gear-tab-label">${section.label}</span>
       <span class="gear-tab-count">${fmtCount(count)}</span>
-      ${remove}
     </button>`;
-  }).join('') + `<button type="button" class="gear-tab gear-tab-add" onclick="openGearSectionAdd()" title="添加子分类">
-      <i class="ti ti-plus"></i>
-      <span class="gear-tab-label">添加子分类</span>
-    </button>`;
+  }).join('');
 }
 
 function sectionEmptyHtml(section) {
@@ -442,6 +486,7 @@ export function renderGearGallery() {
   const sections = getAllGearSections();
   const section = sections.find(s => s.id === activeGearSection) || sections[0];
   const items = gearItemsForSection(section.id);
+  renderGearSectionsManager();
   renderGearTabs();
   if (cnt) cnt.textContent = items.length ? `共 ${fmtCount(items.length)} 件` : '';
   if (!el) return;
@@ -671,12 +716,25 @@ export function confirmGearSectionAdd() {
 }
 
 export function removeGearSection(sectionId) {
-  const idx = customGearSections.findIndex(s => s.id === sectionId);
-  if (idx < 0) return;
-  if (!confirm('移除该子分类标签？装备仍保留在账本中，符合其它标签条件时会自动归入。')) return;
-  customGearSections.splice(idx, 1);
-  if (activeGearSection === sectionId) {
-    activeGearSection = DEFAULT_GEAR_SECTIONS[0].id;
+  const sections = getAllGearSections();
+  const section = sections.find(s => s.id === sectionId);
+  if (!section) return;
+  if (sections.length <= 1) {
+    alert('至少保留一个子分类');
+    return;
+  }
+  if (!confirm(`删除「${section.label}」？账本流水不受影响；符合其它子分类条件的装备会自动归入。`)) return;
+
+  const customIdx = customGearSections.findIndex(s => s.id === sectionId);
+  if (customIdx >= 0) {
+    customGearSections.splice(customIdx, 1);
+  } else if (!hiddenSectionIds.includes(sectionId)) {
+    hiddenSectionIds.push(sectionId);
+  }
+
+  const remaining = getAllGearSections();
+  if (!remaining.some(s => s.id === activeGearSection)) {
+    activeGearSection = remaining[0]?.id || DEFAULT_GEAR_SECTIONS[0].id;
   }
   syncGear();
   onPersist();

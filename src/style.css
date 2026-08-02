@@ -2824,9 +2824,27 @@ select.btn:hover:not(:disabled){
 .txn-link-filter-close{margin-left:auto;min-width:30px;padding:0 8px}
 
 /* Trades page */
-.trades-head{margin-bottom:16px}
+.trades-head{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px;
+}
+.trades-head-main{min-width:0;flex:1}
 .trades-title{font-size:22px;font-weight:700;letter-spacing:-.3px;color:var(--txt);margin:0 0 4px}
 .trades-sub{font-size:13px;color:var(--txt3);margin:0}
+.trades-total{
+  flex-shrink:0;min-width:168px;max-width:min(100%,320px);
+  padding:12px 16px;text-align:right;
+  background:var(--surf);border:1px solid var(--bdr);border-radius:12px;
+  box-shadow:var(--shadow-sm);
+}
+.trades-total-meta{font-size:11px;font-weight:600;color:var(--txt3);margin-bottom:6px}
+.trades-total-stats{font-size:12px;font-weight:600;color:var(--txt2);font-variant-numeric:tabular-nums;line-height:1.4}
+.trades-total-pl{margin-top:8px;display:flex;justify-content:flex-end}
+.trades-total-pl .trade-card-pl{margin-left:0}
+@media(max-width:720px){
+  .trades-head{flex-direction:column;align-items:stretch}
+  .trades-total{max-width:none;text-align:left}
+  .trades-total-pl{justify-content:flex-start}
+}
 .trades-list{display:flex;flex-direction:column;gap:12px}
 .trades-empty{
   display:flex;flex-direction:column;align-items:center;gap:8px;padding:48px 20px;
@@ -3024,7 +3042,50 @@ select.btn:hover:not(:disabled){
 
 /* 装备库 */
 .gear-head{
-  display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px;flex-wrap:wrap;
+  display:flex;flex-wrap:wrap;gap:8px 16px;align-items:flex-start;justify-content:space-between;margin-bottom:14px
+}
+.gear-sections-bar{
+  margin-bottom:14px;padding:14px 16px;border:1px solid var(--bdr);border-radius:var(--r-lg);background:var(--surf2)
+}
+.gear-sections-bar-head{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap
+}
+.gear-sections-bar-title{
+  display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--txt2)
+}
+.gear-sections-bar-title i{font-size:15px;color:var(--primary-t);opacity:.9}
+.gear-sections-list{
+  display:flex;flex-wrap:wrap;gap:8px
+}
+.gear-sections-empty{
+  font-size:12.5px;color:var(--txt3);line-height:1.5;padding:4px 0
+}
+.gear-section-chip{
+  display:inline-flex;align-items:center;gap:8px;max-width:100%;padding:8px 10px 8px 12px;
+  border:1px solid var(--bdr);border-radius:999px;background:var(--surf);cursor:pointer;
+  transition:border-color .15s,background .15s,box-shadow .15s
+}
+.gear-section-chip:hover{border-color:var(--bdr2);background:var(--surf2)}
+.gear-section-chip.on{
+  border-color:var(--primary-l);background:var(--primary-bg);box-shadow:0 0 0 1px var(--primary-bg)
+}
+.gear-section-chip-icon{font-size:15px;line-height:1;opacity:.85;flex-shrink:0}
+.gear-section-chip-text{display:flex;flex-direction:column;gap:1px;min-width:0}
+.gear-section-chip-label{font-size:13px;font-weight:600;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px}
+.gear-section-chip-meta{font-size:10.5px;color:var(--txt3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+.gear-section-chip-count{
+  font-size:11px;font-weight:600;color:var(--txt3);white-space:nowrap;padding:0 2px;flex-shrink:0
+}
+.gear-section-chip.on .gear-section-chip-count{color:var(--primary-t)}
+.gear-section-chip-del{
+  flex-shrink:0;width:28px;height:28px;border:none;border-radius:999px;background:transparent;
+  color:var(--txt3);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+  transition:background .15s,color .15s
+}
+.gear-section-chip-del:hover{background:rgba(217,86,101,.12);color:var(--red-t)}
+@media (max-width:560px){
+  .gear-section-chip{flex:1 1 100%;border-radius:var(--r);padding:10px 12px}
+  .gear-section-chip-label,.gear-section-chip-meta{max-width:none}
 }
 .gear-intro{font-size:13px;color:var(--txt2);line-height:1.55;margin:0;flex:1;min-width:200px}
 .gear-count{font-size:12.5px;color:var(--txt3);font-weight:500;white-space:nowrap;padding-top:2px}
