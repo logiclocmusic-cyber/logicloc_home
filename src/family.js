@@ -84,12 +84,17 @@ function linkedTxnTotals(ids = []) {
   return { income, expense };
 }
 
-function linkedTxnTitleSuffix(ids = []) {
+function renderLinkedTxnTitleSuffixHtml(ids = []) {
   const { income, expense } = linkedTxnTotals(ids);
   const parts = [];
-  if (income > 0) parts.push(`收入${fmtYuan(income)}元`);
-  if (expense > 0) parts.push(`支出${fmtYuan(expense)}元`);
-  return parts.join('/');
+  if (income > 0) {
+    parts.push(`<span class="family-milestone-title-sum is-inc">收入<span class="family-milestone-title-amt">${fmtYuan(income)}</span>元</span>`);
+  }
+  if (expense > 0) {
+    parts.push(`<span class="family-milestone-title-sum is-exp">支出<span class="family-milestone-title-amt">${fmtYuan(expense)}</span>元</span>`);
+  }
+  if (!parts.length) return '';
+  return parts.join('<span class="family-milestone-title-sum-sep">/</span>');
 }
 
 function fmtYuan(n) {
@@ -381,13 +386,16 @@ function syncFamilySearchClear() {
   btn.classList.toggle('hide', !familySearchQuery.trim());
 }
 
-function renderFamilyImages(imgs) {
+function renderFamilyImages(imgs, { compact = false } = {}) {
   if (!imgs?.length) return '';
   const cells = imgs.map(img => `
-    <a class="family-feed-img" href="${esc(assetUrl(img.url))}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
+    <a class="family-feed-img${compact ? ' family-feed-img--thumb' : ''}" href="${esc(assetUrl(img.url))}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
       <img src="${esc(assetUrl(img.url))}" alt="">
     </a>
   `).join('');
+  if (compact) {
+    return `<div class="family-feed-media family-feed-media--thumbs">${cells}</div>`;
+  }
   const cls = imgs.length === 1 ? 'family-feed-media--1'
     : imgs.length === 2 ? 'family-feed-media--2'
       : imgs.length === 4 ? 'family-feed-media--4'
@@ -395,11 +403,11 @@ function renderFamilyImages(imgs) {
   return `<div class="family-feed-media ${cls}">${cells}</div>`;
 }
 
-function renderFamilyEventMain(ev) {
-  const mediaHtml = renderFamilyImages(ev.images || []);
-  const txnSuffix = linkedTxnTitleSuffix(ev.linkedTxnIds || []);
+function renderFamilyEventMain(ev, { compactImages = false } = {}) {
+  const mediaHtml = renderFamilyImages(ev.images || [], { compact: compactImages });
+  const txnSuffixHtml = renderLinkedTxnTitleSuffixHtml(ev.linkedTxnIds || []);
   return `<div class="family-milestone-head">
-      <h3 class="family-milestone-title">${esc(ev.title)}${txnSuffix ? `<span class="family-milestone-title-sum">${esc(txnSuffix)}</span>` : ''}</h3>
+      <h3 class="family-milestone-title">${esc(ev.title)}${txnSuffixHtml}</h3>
       <button type="button" class="family-milestone-edit" onclick="event.stopPropagation();openFamilyEdit(${ev.id})" title="编辑" aria-label="编辑"><i class="ti ti-pencil"></i></button>
     </div>
     ${ev.notes ? `<p class="family-milestone-notes">${esc(ev.notes)}</p>` : ''}
@@ -432,7 +440,7 @@ function renderFamilyListItem(ev, showYear, year) {
     <div class="family-list-date" aria-label="${esc(formatDateLabel(ev.eventDate))}">
       <span class="family-list-date-text">${esc(formatTimelineDate(ev.eventDate))}</span>
     </div>
-    <div class="family-list-card">${renderFamilyEventMain(ev)}</div>
+    <div class="family-list-card">${renderFamilyEventMain(ev, { compactImages: true })}</div>
   </article>`;
 }
 

@@ -493,6 +493,7 @@ body{
 .home-exp-cat-setting-item input{flex-shrink:0}
 .home-charts{
   display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;
+  margin-bottom:22px;
 }
 @media(max-width:900px){.home-charts{grid-template-columns:1fr}}
 .home-chart-card{
@@ -3947,7 +3948,15 @@ select.btn:hover:not(:disabled){
   margin:0;font-size:15px;font-weight:700;color:var(--txt);line-height:1.35;
 }
 .family-milestone-title-sum{
-  margin-left:6px;font-size:13px;font-weight:600;color:var(--txt2);white-space:nowrap;
+  margin-left:6px;font-size:13px;font-weight:600;white-space:nowrap;
+}
+.family-milestone-title-sum.is-exp{color:var(--red-t)}
+.family-milestone-title-sum.is-inc{color:var(--grn-t)}
+.family-milestone-title-amt{
+  margin:0 1px;font-size:17px;font-weight:800;font-variant-numeric:tabular-nums;
+}
+.family-milestone-title-sum-sep{
+  margin:0 2px;font-size:13px;font-weight:500;color:var(--txt3);
 }
 .family-milestone-edit{
   width:28px;height:28px;border:0;border-radius:8px;
@@ -3983,6 +3992,15 @@ select.btn:hover:not(:disabled){
 .family-feed-media--empty{display:none}
 .family-feed-img img{width:100%;height:100%;object-fit:cover;display:block;aspect-ratio:1}
 .family-feed-media--1 .family-feed-img img{aspect-ratio:16/10}
+.family-feed-media--thumbs{
+  display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;
+}
+.family-feed-img--thumb{
+  width:56px;height:56px;flex-shrink:0;border-radius:8px;
+}
+.family-feed-img--thumb img{
+  width:100%;height:100%;object-fit:cover;aspect-ratio:1;
+}
 .family-modal-body .fg{margin-bottom:14px}
 .family-img-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
 .family-img-hint{font-size:12px;color:var(--txt3)}
