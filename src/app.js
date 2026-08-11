@@ -30,7 +30,7 @@ import {
   loadFamilyEvents, setupFamilyEvents,
   initFamily,
   openFamilyCreate, openFamilyEdit, closeFamilyEdit, saveFamilyEdit,
-  removeFamilyEvent, triggerFamilyUpload, onFamilySearch, clearFamilySearch,
+  removeFamilyEvent, triggerFamilyUpload, onFamilySearch, clearFamilySearch, setFamilyViewMode,
   openFamilyTxnSearch, closeFamilyTxnSearch, onFamilyTxnSearch,
   pickFamilyLinkedTxn, removeFamilyLinkedTxn,
 } from './family.js';
@@ -5428,7 +5428,7 @@ Object.assign(window, {
   openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload, triggerManualInvoiceUpload,
   toggleInvoicePrinted, downloadInvoiceFile, printInvoiceFile, openAppConfig,
   openFamilyCreate, openFamilyEdit, closeFamilyEdit, saveFamilyEdit, removeFamilyEvent, triggerFamilyUpload,
-  onFamilySearch, clearFamilySearch,
+  onFamilySearch, clearFamilySearch, setFamilyViewMode,
   openFamilyTxnSearch, closeFamilyTxnSearch, onFamilyTxnSearch, pickFamilyLinkedTxn, removeFamilyLinkedTxn,
   openSplitEditor, closeSplitEditor, addSplitLine, saveSplitEdit: handleSaveSplit,
   clearSplit: handleClearSplit, clearSplitFromModal, toggleSplitExpand: handleToggleSplitExpand,

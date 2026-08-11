@@ -328,7 +328,13 @@
           <p class="family-intro">记录家里的重要日子与瞬间，可写备注并上传照片。</p>
           <span class="family-count" id="familyCount"></span>
         </div>
-        <button type="button" class="btn btn-p" onclick="openFamilyCreate()"><i class="ti ti-plus"></i> 新增事件</button>
+        <div class="family-head-actions">
+          <div class="fb-seg family-view-seg" id="familyViewSeg" role="group" aria-label="视图模式">
+            <button type="button" class="fb-seg-btn on" data-val="timeline" onclick="setFamilyViewMode('timeline')" title="时间轴"><i class="ti ti-timeline"></i></button>
+            <button type="button" class="fb-seg-btn" data-val="list" onclick="setFamilyViewMode('list')" title="列表"><i class="ti ti-list"></i></button>
+          </div>
+          <button type="button" class="btn btn-p" onclick="openFamilyCreate()"><i class="ti ti-plus"></i> 新增事件</button>
+        </div>
       </div>
       <div class="family-storage" id="familyStorage" hidden>
         <div class="family-storage-head">

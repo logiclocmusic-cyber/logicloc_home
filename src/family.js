@@ -17,6 +17,15 @@ let familySearchQuery = '';
 let storageStats = null;
 let linkedTxnIds = [];
 let familyTxnSearchQuery = '';
+const FAMILY_VIEW_KEY = 'familyViewMode';
+let familyViewMode = (() => {
+  try {
+    const v = localStorage.getItem(FAMILY_VIEW_KEY);
+    return v === 'list' ? 'list' : 'timeline';
+  } catch {
+    return 'timeline';
+  }
+})();
 
 let getAllData = () => [];
 let rowSearchHaystack = () => '';
@@ -63,15 +72,43 @@ function renderFamilyLinkedTxns() {
   }).join('');
 }
 
+function linkedTxnTotals(ids = []) {
+  const rows = linkedTxnRows(ids);
+  let income = 0;
+  let expense = 0;
+  for (const row of rows) {
+    const amt = Math.abs(Number(row['金额']) || 0);
+    if (row['收支'] === '收入') income += amt;
+    else expense += amt;
+  }
+  return { income, expense };
+}
+
+function linkedTxnTitleSuffix(ids = []) {
+  const { income, expense } = linkedTxnTotals(ids);
+  const parts = [];
+  if (income > 0) parts.push(`收入${fmtYuan(income)}元`);
+  if (expense > 0) parts.push(`支出${fmtYuan(expense)}元`);
+  return parts.join('/');
+}
+
+function fmtYuan(n) {
+  const num = Math.abs(Number(n));
+  if (!Number.isFinite(num)) return '0';
+  return num.toFixed(2);
+}
+
 function renderFamilyLinkedTxnsSummary(ev) {
   const rows = linkedTxnRows(ev.linkedTxnIds || []);
   if (!rows.length) return '';
-  const chips = rows.slice(0, 2).map(row => {
+  const items = rows.map(row => {
     const isInc = row['收支'] === '收入';
-    return `<span class="family-milestone-txn-chip ${isInc ? 'inc' : 'exp'}">${esc(rowDisplayTitle(row))} ${isInc ? '+' : '-'}${fmtMoney(row['金额'])}</span>`;
+    return `<div class="family-milestone-txn-row ${isInc ? 'inc' : 'exp'}">
+      <span class="family-milestone-txn-name">${esc(rowDisplayTitle(row))}</span>
+      <span class="family-milestone-txn-amt">${isInc ? '+' : '-'}${fmtMoney(row['金额'])}</span>
+    </div>`;
   }).join('');
-  const more = rows.length > 2 ? `<span class="family-milestone-txn-more">+${rows.length - 2} 笔</span>` : '';
-  return `<div class="family-milestone-txns" onclick="event.stopPropagation()">${chips}${more}</div>`;
+  return `<div class="family-milestone-txn-list" onclick="event.stopPropagation()">${items}</div>`;
 }
 
 function pad2(n) {
@@ -358,25 +395,27 @@ function renderFamilyImages(imgs) {
   return `<div class="family-feed-media ${cls}">${cells}</div>`;
 }
 
+function renderFamilyEventMain(ev) {
+  const mediaHtml = renderFamilyImages(ev.images || []);
+  const txnSuffix = linkedTxnTitleSuffix(ev.linkedTxnIds || []);
+  return `<div class="family-milestone-head">
+      <h3 class="family-milestone-title">${esc(ev.title)}${txnSuffix ? `<span class="family-milestone-title-sum">${esc(txnSuffix)}</span>` : ''}</h3>
+      <button type="button" class="family-milestone-edit" onclick="event.stopPropagation();openFamilyEdit(${ev.id})" title="编辑" aria-label="编辑"><i class="ti ti-pencil"></i></button>
+    </div>
+    ${ev.notes ? `<p class="family-milestone-notes">${esc(ev.notes)}</p>` : ''}
+    ${mediaHtml}
+    ${renderFamilyLinkedTxnsSummary(ev)}`;
+}
+
 function renderFamilyMilestoneItem(ev, index, showYear, year) {
   const side = index % 2 === 0 ? 'is-left' : 'is-right';
-  const imgs = ev.images || [];
   const date = parseEventDateParts(ev.eventDate);
-  const mediaHtml = renderFamilyImages(imgs);
   const dateHtml = `<div class="family-milestone-date" aria-label="${esc(formatDateLabel(ev.eventDate))}">
           <span class="family-milestone-month">${esc(date.month)}</span>
           <span class="family-milestone-day">${esc(date.day)}</span>
           <span class="family-milestone-year-num">${esc(date.year)}</span>
         </div>`;
-  const mainHtml = `<div class="family-milestone-main">
-          <div class="family-milestone-head">
-            <h3 class="family-milestone-title">${esc(ev.title)}</h3>
-            <button type="button" class="family-milestone-edit" onclick="event.stopPropagation();openFamilyEdit(${ev.id})" title="编辑" aria-label="编辑"><i class="ti ti-pencil"></i></button>
-          </div>
-          ${ev.notes ? `<p class="family-milestone-notes">${esc(ev.notes)}</p>` : ''}
-          ${renderFamilyLinkedTxnsSummary(ev)}
-          ${mediaHtml}
-        </div>`;
+  const mainHtml = `<div class="family-milestone-main">${renderFamilyEventMain(ev)}</div>`;
   const bodyHtml = side === 'is-left' ? `${dateHtml}${mainHtml}` : `${mainHtml}${dateHtml}`;
   return `${showYear ? `<div class="family-milestone-year"><span>${esc(year)}</span></div>` : ''}
   <article class="family-milestone ${side}" onclick="openFamilyEdit(${ev.id})">
@@ -385,6 +424,30 @@ function renderFamilyMilestoneItem(ev, index, showYear, year) {
     </div>
     <div class="family-milestone-marker" aria-hidden="true"><span class="family-milestone-dot"></span></div>
   </article>`;
+}
+
+function renderFamilyListItem(ev, showYear, year) {
+  return `${showYear ? `<div class="family-milestone-year"><span>${esc(year)}</span></div>` : ''}
+  <article class="family-list-item" onclick="openFamilyEdit(${ev.id})">
+    <div class="family-list-date" aria-label="${esc(formatDateLabel(ev.eventDate))}">
+      <span class="family-list-date-text">${esc(formatTimelineDate(ev.eventDate))}</span>
+    </div>
+    <div class="family-list-card">${renderFamilyEventMain(ev)}</div>
+  </article>`;
+}
+
+function syncFamilyViewToggle() {
+  document.querySelectorAll('#familyViewSeg .fb-seg-btn').forEach(btn => {
+    btn.classList.toggle('on', btn.dataset.val === familyViewMode);
+  });
+}
+
+export function setFamilyViewMode(mode) {
+  if (mode !== 'list' && mode !== 'timeline') return;
+  familyViewMode = mode;
+  try { localStorage.setItem(FAMILY_VIEW_KEY, mode); } catch { /* ignore */ }
+  syncFamilyViewToggle();
+  renderFamilyPage();
 }
 
 function syncEvents(list) {
@@ -546,6 +609,7 @@ function fillForm(ev) {
 export function renderFamilyPage() {
   const listEl = document.getElementById('familyList');
   if (!listEl) return;
+  syncFamilyViewToggle();
 
   if (!events.length) {
     listEl.innerHTML = `<div class="family-empty">
@@ -571,10 +635,13 @@ export function renderFamilyPage() {
     const year = String(ev.eventDate || '').slice(0, 4);
     const showYear = !!(year && year !== lastYear);
     if (showYear) lastYear = year;
-    return renderFamilyMilestoneItem(ev, index, showYear, year);
+    return familyViewMode === 'list'
+      ? renderFamilyListItem(ev, showYear, year)
+      : renderFamilyMilestoneItem(ev, index, showYear, year);
   }).join('');
 
-  listEl.innerHTML = `<div class="family-timeline">${rows}</div>`;
+  const containerClass = familyViewMode === 'list' ? 'family-rows' : 'family-timeline';
+  listEl.innerHTML = `<div class="${containerClass}">${rows}</div>`;
 }
 
 export function onFamilySearch(query) {
