@@ -905,7 +905,11 @@
           <label>关联交易</label>
           <button type="button" class="btn btn-sm" onclick="openFamilyTxnSearch()"><i class="ti ti-plus"></i> 添加</button>
         </div>
-        <p class="family-txn-hint">关联账本中的支出/收入记录，便于回顾该事件相关花费。</p>
+        <p class="family-txn-hint">下方默认列出事件当天的可关联交易；也可点「添加」搜索其它日期或关键词。</p>
+        <div class="family-txn-day-block" id="familyTxnDayBlock" hidden>
+          <div class="family-txn-day-head" id="familyTxnDayLabel"></div>
+          <div class="family-txn-day-list" id="familyTxnDayPick"></div>
+        </div>
         <div class="family-txn-list" id="familyLinkedTxns"></div>
       </div>
     </div>
@@ -922,9 +926,10 @@
   <div class="mbox">
     <div class="mh"><h3><i class="ti ti-search" style="color:var(--primary);margin-right:6px"></i>搜索交易</h3><button class="mclose" onclick="closeFamilyTxnSearch()"><i class="ti ti-x"></i></button></div>
     <div class="mb family-txn-search-body">
+      <p class="family-txn-search-scope" id="familyTxnSearchScope"></p>
       <label class="family-txn-search" for="familyTxnSearchInp">
         <i class="ti ti-search" aria-hidden="true"></i>
-        <input id="familyTxnSearchInp" type="search" placeholder="搜索交易对方、说明、分类、来源…" oninput="onFamilyTxnSearch(this.value)" autocomplete="off">
+        <input id="familyTxnSearchInp" type="search" placeholder="默认显示事件当天；可输入 2026-07-31 或关键词…" oninput="onFamilyTxnSearch(this.value)" autocomplete="off">
       </label>
       <div class="family-txn-search-results" id="familyTxnSearchResults"></div>
     </div>

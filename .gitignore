@@ -10,6 +10,7 @@ data/gear-images/
 data/tesseract-cache/
 data/cloud-snapshot-*.json
 electron/seed/
+.cache/
 release/
 build/icon.iconset/
 dist-electron/

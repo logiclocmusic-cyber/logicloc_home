@@ -3971,6 +3971,11 @@ select.btn:hover:not(:disabled){
 .family-txn-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
 .family-txn-head label{margin:0}
 .family-txn-hint{margin:0 0 10px;font-size:12px;color:var(--txt3);line-height:1.45}
+.family-txn-day-block{margin-bottom:12px;padding:10px 12px;background:var(--surf2);border:1px solid var(--bdr);border-radius:12px}
+.family-txn-day-head{font-size:12px;font-weight:600;color:var(--txt2);margin-bottom:8px}
+.family-txn-day-list{display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto}
+.family-txn-day-empty{margin:0;font-size:12px;color:var(--txt3);line-height:1.5}
+.family-txn-search-scope{margin:0 0 10px;font-size:12px;font-weight:600;color:var(--primary-t)}
 .family-txn-empty{margin:0;font-size:12px;color:var(--txt3);line-height:1.5;padding:10px 12px;background:var(--surf2);border:1px dashed var(--bdr);border-radius:10px}
 .family-txn-list{display:flex;flex-direction:column;gap:8px}
 .family-txn-item{

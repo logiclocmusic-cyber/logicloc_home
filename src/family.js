@@ -1,4 +1,4 @@
-import { assetUrl } from './apiBase.js';
+import { assetUrl, API_BASE } from './apiBase.js';
 import { fmtMoney } from './format.js';
 import {
   fetchFamilyEvents,
@@ -74,36 +74,164 @@ function renderFamilyLinkedTxnsSummary(ev) {
   return `<div class="family-milestone-txns" onclick="event.stopPropagation()">${chips}${more}</div>`;
 }
 
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+function currentEventDate() {
+  return document.getElementById('familyDateInp')?.value?.trim() || '';
+}
+
+/** 解析搜索框：空=事件当天；日期格式=按日/月筛选；其它=关键词 */
+function parseTxnSearchQuery(query) {
+  const raw = String(query || '').trim();
+  if (!raw) return { mode: 'eventDate' };
+
+  let m = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return { mode: 'date', date: `${m[1]}-${pad2(m[2])}-${pad2(m[3])}` };
+
+  m = raw.match(/^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/);
+  if (m) return { mode: 'date', date: `${m[1]}-${pad2(m[2])}-${pad2(m[3])}` };
+
+  m = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (m) return { mode: 'date', date: `${m[1]}-${m[2]}-${m[3]}` };
+
+  m = raw.match(/^(\d{4})年(\d{1,2})月(\d{1,2})日?$/);
+  if (m) return { mode: 'date', date: `${m[1]}-${pad2(m[2])}-${pad2(m[3])}` };
+
+  m = raw.match(/^(\d{4})-(\d{1,2})$/);
+  if (m) return { mode: 'month', month: `${m[1]}-${pad2(m[2])}` };
+
+  m = raw.match(/^(\d{4})年(\d{1,2})月?$/);
+  if (m) return { mode: 'month', month: `${m[1]}-${pad2(m[2])}` };
+
+  return { mode: 'text', needle: raw.toLowerCase() };
+}
+
+function familyTxnSearchEmptyMessage() {
+  const q = String(familyTxnSearchQuery || '').trim();
+  if (!q) {
+    const d = currentEventDate();
+    if (d) return `${formatDateLabel(d)} 暂无其他可关联交易`;
+    return '请先填写事件日期，或输入日期/关键词搜索';
+  }
+  const parsed = parseTxnSearchQuery(q);
+  if (parsed.mode === 'date') return `${formatDateLabel(parsed.date)} 没有匹配的交易`;
+  if (parsed.mode === 'month') return `${parsed.month.replace('-', '年')}月 没有匹配的交易`;
+  return '没有匹配的交易';
+}
+
 function familyTxnSearchResults(limit = 40) {
-  const needle = String(familyTxnSearchQuery || '').trim().toLowerCase();
   const linked = new Set(linkedTxnIds);
   const all = getAllData()
     .filter(row => !linked.has(row.id))
     .sort((a, b) => (b['日期'] + b['时间']).localeCompare(a['日期'] + a['时间']));
-  if (!needle) return all.slice(0, limit);
-  return all.filter(row => rowSearchHaystack(row).includes(needle)).slice(0, limit);
+
+  const parsed = parseTxnSearchQuery(familyTxnSearchQuery);
+
+  if (parsed.mode === 'eventDate') {
+    const eventDate = currentEventDate();
+    if (eventDate) {
+      return all.filter(row => row['日期'] === eventDate).slice(0, limit);
+    }
+    return all.slice(0, limit);
+  }
+
+  if (parsed.mode === 'date') {
+    return all.filter(row => row['日期'] === parsed.date).slice(0, limit);
+  }
+
+  if (parsed.mode === 'month') {
+    return all.filter(row => String(row['日期'] || '').startsWith(parsed.month)).slice(0, limit);
+  }
+
+  const needle = parsed.needle;
+  return all.filter(row => {
+    const hay = `${rowSearchHaystack(row)} ${row['日期'] || ''}`.toLowerCase();
+    return hay.includes(needle);
+  }).slice(0, limit);
 }
 
-function renderFamilyTxnSearchResults() {
-  const wrap = document.getElementById('familyTxnSearchResults');
-  if (!wrap) return;
-  const rows = familyTxnSearchResults();
-  if (!rows.length) {
-    wrap.innerHTML = `<div class="family-txn-search-empty">${familyTxnSearchQuery.trim() ? '没有匹配的交易' : '输入关键词搜索账本交易'}</div>`;
-    return;
-  }
-  wrap.innerHTML = rows.map(row => {
-    const isInc = row['收支'] === '收入';
-    const sub = (row['子分类'] || '').trim();
-    const catTxt = sub ? `${row['分类']} · ${sub}` : (row['分类'] || '—');
-    return `<button type="button" class="family-txn-search-item" onclick="pickFamilyLinkedTxn(${row.id})">
+function familyTxnRowsForEventDay(limit = 12) {
+  const eventDate = currentEventDate();
+  if (!eventDate) return [];
+  const linked = new Set(linkedTxnIds);
+  return getAllData()
+    .filter(row => !linked.has(row.id) && row['日期'] === eventDate)
+    .sort((a, b) => (b['日期'] + b['时间']).localeCompare(a['日期'] + a['时间']))
+    .slice(0, limit);
+}
+
+function familyTxnPickItemHtml(row) {
+  const isInc = row['收支'] === '收入';
+  const sub = (row['子分类'] || '').trim();
+  const catTxt = sub ? `${row['分类']} · ${sub}` : (row['分类'] || '—');
+  return `<button type="button" class="family-txn-search-item" onclick="pickFamilyLinkedTxn(${row.id})">
       <div class="family-txn-search-main">
         <div class="family-txn-search-title">${esc(rowDisplayTitle(row))}</div>
         <div class="family-txn-search-meta">${esc(formatTxnDateLabel(row['日期']))}${row['时间'] ? ` ${esc(formatTxnTimeShort(row['时间']))}` : ''} · ${esc(catTxt)} · ${esc(row['来源'] || '')}</div>
       </div>
       <div class="family-txn-search-amt ${isInc ? 'inc' : 'exp'}">${isInc ? '+' : '-'}${fmtMoney(row['金额'])}</div>
     </button>`;
-  }).join('');
+}
+
+function updateFamilyTxnSearchScope() {
+  const el = document.getElementById('familyTxnSearchScope');
+  if (!el) return;
+  const q = String(familyTxnSearchQuery || '').trim();
+  if (q) {
+    const parsed = parseTxnSearchQuery(q);
+    if (parsed.mode === 'date') el.textContent = `按日期：${formatDateLabel(parsed.date)}`;
+    else if (parsed.mode === 'month') el.textContent = `按月份：${parsed.month.replace('-', '年')}月`;
+    else el.textContent = `关键词：${q}`;
+    return;
+  }
+  const d = currentEventDate();
+  el.textContent = d ? `默认显示事件当天 · ${formatDateLabel(d)}` : '请先填写事件日期';
+}
+
+function renderFamilyTxnDayPick() {
+  const block = document.getElementById('familyTxnDayBlock');
+  const label = document.getElementById('familyTxnDayLabel');
+  const wrap = document.getElementById('familyTxnDayPick');
+  if (!block || !wrap) return;
+
+  const eventDate = currentEventDate();
+  if (!eventDate) {
+    block.hidden = true;
+    return;
+  }
+
+  const rows = familyTxnRowsForEventDay(12);
+  block.hidden = false;
+  if (label) {
+    label.textContent = `${formatDateLabel(eventDate)} 可关联（${rows.length} 笔）`;
+  }
+  if (!rows.length) {
+    wrap.innerHTML = '<p class="family-txn-day-empty">当日暂无可关联的其他交易</p>';
+    return;
+  }
+  wrap.innerHTML = rows.map(familyTxnPickItemHtml).join('');
+}
+
+function onFamilyEventDateChange() {
+  renderFamilyTxnDayPick();
+  if (!document.getElementById('moFamilyTxnSearch')?.classList.contains('hide')) {
+    renderFamilyTxnSearchResults();
+    updateFamilyTxnSearchScope();
+  }
+}
+
+function renderFamilyTxnSearchResults() {
+  updateFamilyTxnSearchScope();
+  const wrap = document.getElementById('familyTxnSearchResults');
+  if (!wrap) return;
+  const rows = familyTxnSearchResults();
+  if (!rows.length) {
+    wrap.innerHTML = `<div class="family-txn-search-empty">${familyTxnSearchEmptyMessage()}</div>`;
+    return;
+  }
+  wrap.innerHTML = rows.map(familyTxnPickItemHtml).join('');
 }
 
 export function openFamilyTxnSearch() {
@@ -138,6 +266,7 @@ export function pickFamilyLinkedTxn(id) {
   }
   linkedTxnIds = [...linkedTxnIds, n];
   renderFamilyLinkedTxns();
+  renderFamilyTxnDayPick();
   renderFamilyTxnSearchResults();
 }
 
@@ -145,6 +274,7 @@ export function removeFamilyLinkedTxn(id) {
   const n = Number(id);
   linkedTxnIds = linkedTxnIds.filter(x => x !== n);
   renderFamilyLinkedTxns();
+  renderFamilyTxnDayPick();
   if (!document.getElementById('moFamilyTxnSearch')?.classList.contains('hide')) {
     renderFamilyTxnSearchResults();
   }
@@ -286,6 +416,29 @@ function storageLevel(percent) {
   return 'ok';
 }
 
+function isLocalFamilyStorage() {
+  if (!API_BASE) return true;
+  try {
+    const host = new URL(API_BASE).hostname;
+    return host === 'localhost' || host === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
+function familyStorageHintText(limitMb, level) {
+  if (level === 'danger') {
+    return '存储空间即将用尽，请删除旧事件中的照片或调大上限。';
+  }
+  if (level === 'warn') {
+    return '存储使用较高，建议清理不再需要的照片。';
+  }
+  if (isLocalFamilyStorage()) {
+    return `照片保存在本机，当前上限 ${limitMb} MB。`;
+  }
+  return `照片保存在服务器，当前上限 ${limitMb} MB。`;
+}
+
 function renderFamilyStorage() {
   const wrap = document.getElementById('familyStorage');
   const meta = document.getElementById('familyStorageMeta');
@@ -313,13 +466,7 @@ function renderFamilyStorage() {
     bar.setAttribute('aria-label', `已用 ${Math.round(pct * 10) / 10}%`);
   }
   if (hint) {
-    if (level === 'danger') {
-      hint.textContent = '存储空间即将用尽，请删除旧事件中的照片或联系管理员扩容。';
-    } else if (level === 'warn') {
-      hint.textContent = '存储使用较高，建议清理不再需要的照片。';
-    } else {
-      hint.textContent = `照片保存在 Railway 云端，当前上限 ${limitMb} MB。`;
-    }
+    hint.textContent = familyStorageHintText(limitMb, level);
   }
 }
 
@@ -377,9 +524,15 @@ function fillForm(ev) {
   document.getElementById('familyNotesInp').value = ev?.notes || '';
   linkedTxnIds = [...(ev?.linkedTxnIds || [])];
   pendingFiles = [];
+  const dateInp = document.getElementById('familyDateInp');
+  if (dateInp && !dateInp.dataset.familyTxnBound) {
+    dateInp.dataset.familyTxnBound = '1';
+    dateInp.addEventListener('change', onFamilyEventDateChange);
+  }
   renderPendingPreviews();
   renderSavedImages(ev);
   renderFamilyLinkedTxns();
+  renderFamilyTxnDayPick();
   const delBtn = document.getElementById('familyDeleteBtn');
   if (delBtn) delBtn.hidden = !ev?.id;
   const title = document.querySelector('#moFamily .mh h3');
