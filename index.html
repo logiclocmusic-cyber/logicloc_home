@@ -57,7 +57,7 @@
   <nav class="nav">
     <button class="ni on" onclick="sw('home',this)" title="首页"><span class="ni-icon"><i class="ti ti-home"></i></span><span class="ni-label">首页</span></button>
     <button class="ni" onclick="sw('ledger',this)" title="明细列表"><span class="ni-icon"><i class="ti ti-list-details"></i></span><span class="ni-label">明细</span></button>
-    <button class="ni" onclick="sw('trades',this)" title="关联交易"><span class="ni-icon"><i class="ti ti-arrows-exchange"></i></span><span class="ni-label">交易</span></button>
+    <button class="ni" id="nav-trades" onclick="sw('trades',this)" title="关联交易事件"><span class="ni-icon"><i class="ti ti-calendar-event"></i></span><span class="ni-label">事件</span></button>
     <button class="ni" onclick="sw('catbrowse',this)" title="分类检索"><span class="ni-icon"><i class="ti ti-category"></i></span><span class="ni-label">检索</span></button>
     <button class="ni" onclick="sw('gear',this)" title="装备库"><span class="ni-icon"><i class="ti ti-baby-carriage"></i></span><span class="ni-label">装备</span></button>
     <button class="ni" onclick="sw('family',this)" title="家庭事件"><span class="ni-icon"><i class="ti ti-home-heart"></i></span><span class="ni-label">家庭</span></button>
@@ -208,7 +208,7 @@
           <input type="checkbox" id="rfHide" onchange="applyF()" aria-label="隐藏退款" checked>
           <span class="fb-switch-ui"></span>
         </label>
-        <button type="button" class="fb-unset-filter" id="unsetSubFilterBtn" onclick="toggleUnsetSubFilter(this)" title="仅显示未设置子分类的记录">未分类</button>
+        <button type="button" class="fb-unset-filter" id="unsetSubFilterBtn" onclick="toggleUnsetSubFilter(this)" title="仅显示未设置子分类的记录" aria-pressed="false">未分类</button>
       </div>
       <div class="fb-sep" aria-hidden="true"></div>
       <div class="fb-group fb-sort">
@@ -218,6 +218,7 @@
       </div>
     </div>
     <div class="chips chips-src" id="srcChips"></div>
+    <div class="chips chips-days" id="ledgerDayChips" role="tablist" aria-label="本月日期"></div>
     <div class="txn-link-filter-bar hide" id="txnLinkFilterBar"></div>
     <div class="tw ledger-day-view">
       <div class="ledger-table-wrap">
@@ -252,7 +253,7 @@
   <div class="page view" id="view-trades">
     <div class="trades-head">
       <div class="trades-head-main">
-        <h2 class="trades-title">关联交易</h2>
+        <h2 class="trades-title">关联交易事件</h2>
         <p class="trades-sub">借还、买卖等组合账目 · 自动核对收支盈亏</p>
       </div>
       <div class="trades-total" id="tradesTotal" hidden></div>
@@ -719,6 +720,23 @@
       <button class="btn" onclick="closeHomeIncCatSettings()">取消</button>
       <button class="btn btn-p" onclick="saveHomeIncCatSettings()">确定</button>
     </div>
+  </div>
+</div>
+
+<div class="mo hide" id="moTradeAdd">
+  <div class="mbox wide">
+    <div class="mh"><h3><i class="ti ti-plus" style="color:var(--primary);margin-right:6px"></i>加入交易账目</h3><button class="mclose" onclick="closeTradeAddModal()"><i class="ti ti-x"></i></button></div>
+    <div class="mb trade-add-body">
+      <p class="trade-add-event" id="tradeAddEventName"></p>
+      <div class="form-grid trade-add-filters">
+        <div class="fg"><label>开始日期</label><input type="date" id="tradeAddD1" onchange="onTradeAddFilterChange()"></div>
+        <div class="fg"><label>结束日期</label><input type="date" id="tradeAddD2" onchange="onTradeAddFilterChange()"></div>
+        <div class="fg span2"><label>关键词</label><input type="search" id="tradeAddQ" placeholder="对方、说明、分类、来源…" oninput="onTradeAddFilterChange()" autocomplete="off"></div>
+      </div>
+      <div class="trade-add-count" id="tradeAddCount"></div>
+      <div class="trade-add-results" id="tradeAddResults"></div>
+    </div>
+    <div class="mf"><button class="btn" onclick="closeTradeAddModal()">关闭</button></div>
   </div>
 </div>
 

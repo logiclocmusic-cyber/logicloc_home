@@ -51,7 +51,7 @@ import {
 } from './cat-browse.js';
 import {
   loadTxnPairs, getTxnPairs, validateTxnPair, validateTxnLink, addTxnPair, addTxnLink,
-  removeTxnPairByKey, removeTxnLinkById,
+  appendTxnLinkKeys, removeTxnPairByKey, removeTxnLinkById,
   findPairForKey, findLinkForKey, findLinkById, rowInLink, rowsForLinkKeys,
   computeLinkStats, linkBalanceMeta, suggestTxnLinkName
 } from './txn-pairs.js';
@@ -94,6 +94,7 @@ let filterUnsetSubOnly = false;
 let filterSubCat = '';
 let activeTxnLinkId = null;
 let activeTradeLinkId = null;
+let tradeAddLinkId = null;
 let dayNotes = {};
 let detRows = [], detSort = 'a-';
 let detIsIncome = false;
@@ -163,6 +164,8 @@ function renderImportTimelineView() {
 }
 
 const WEEKDAY_LABELS = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+const WEEKDAY_SHORT = ['日', '一', '二', '三', '四', '五', '六'];
+let pendingDayChipScroll = null;
 
 function formatDateLabel(date) {
   if (!date) return '—';
@@ -1424,6 +1427,93 @@ function filterSrc(s) {
   applyF();
 }
 
+function currentMonthYm(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthDateRange(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  const last = new Date(y, m, 0).getDate();
+  return {
+    d1: `${ym}-01`,
+    d2: `${ym}-${String(last).padStart(2, '0')}`,
+    last,
+  };
+}
+
+function todayIso() {
+  const n = new Date();
+  return `${currentMonthYm(n)}-${String(n.getDate()).padStart(2, '0')}`;
+}
+
+function buildLedgerDayChips() {
+  const el = document.getElementById('ledgerDayChips');
+  if (!el) return;
+  const ym = currentMonthYm();
+  const range = monthDateRange(ym);
+  const today = todayIso();
+  const d1 = document.getElementById('d1')?.value || '';
+  const d2 = document.getElementById('d2')?.value || '';
+  const selectedDay = d1 && d1 === d2 ? d1 : '';
+  const monthOn = !selectedDay && d1 === range.d1 && d2 === range.d2;
+  const prefix = `${ym}-`;
+  const daysWithTxn = new Set();
+  for (const r of allData) {
+    const dt = r['日期'];
+    if (dt && dt.startsWith(prefix)) daysWithTxn.add(dt);
+  }
+
+  const prevScroll = el.scrollLeft;
+  const firstBuild = !el.dataset.ready;
+  const [year, month] = ym.split('-').map(Number);
+  let html = `<button type="button" class="chip-day chip-day-month${monthOn ? ' on' : ''}" data-month="${ym}" onclick="filterLedgerMonth('${ym}')" role="tab" aria-selected="${monthOn ? 'true' : 'false'}" title="查看${month}月全部"><span class="chip-day-wd">${year}</span><span class="chip-day-num">${month}月</span></button>`;
+  for (let d = 1; d <= range.last; d++) {
+    const iso = `${ym}-${String(d).padStart(2, '0')}`;
+    const wd = new Date(`${iso}T12:00:00`).getDay();
+    const on = iso === selectedDay;
+    const isToday = iso === today;
+    const hasTxn = daysWithTxn.has(iso);
+    html += `<button type="button" class="chip-day${on ? ' on' : ''}${isToday ? ' is-today' : ''}${hasTxn ? ' has-txn' : ''}${wd === 0 || wd === 6 ? ' is-weekend' : ''}" data-date="${iso}" onclick="filterLedgerDay('${iso}')" role="tab" aria-selected="${on ? 'true' : 'false'}" title="${iso} ${WEEKDAY_LABELS[wd]}${isToday ? '（今天）' : ''}"><span class="chip-day-wd">${WEEKDAY_SHORT[wd]}</span><span class="chip-day-num">${d}</span></button>`;
+  }
+  el.innerHTML = html;
+  el.dataset.ready = '1';
+
+  const forceScroll = pendingDayChipScroll;
+  const scrollTo = pendingDayChipScroll || selectedDay || today;
+  pendingDayChipScroll = null;
+  if (forceScroll || firstBuild) {
+    const target = el.querySelector(`[data-date="${scrollTo}"]`);
+    if (target) target.scrollIntoView({ inline: 'center', block: 'nearest', behavior: firstBuild ? 'auto' : 'smooth' });
+  } else {
+    el.scrollLeft = prevScroll;
+  }
+}
+
+function filterLedgerDay(iso) {
+  const d1 = document.getElementById('d1');
+  const d2 = document.getElementById('d2');
+  if (!d1 || !d2) return;
+  if (d1.value === iso && d2.value === iso) {
+    filterLedgerMonth(iso.slice(0, 7));
+    return;
+  }
+  pendingDayChipScroll = iso;
+  d1.value = iso;
+  d2.value = iso;
+  applyF();
+}
+
+function filterLedgerMonth(ym) {
+  const range = monthDateRange(ym || currentMonthYm());
+  const d1 = document.getElementById('d1');
+  const d2 = document.getElementById('d2');
+  if (!d1 || !d2) return;
+  pendingDayChipScroll = todayIso().startsWith(range.d1.slice(0, 7)) ? todayIso() : range.d1;
+  d1.value = range.d1;
+  d2.value = range.d2;
+  applyF();
+}
+
 function syncCatFilterBtn(cat) {
   const btn = document.getElementById('cfPickBtn');
   const hidden = document.getElementById('cf');
@@ -1604,6 +1694,7 @@ function applyF() {
   syncSortHeaders();
   syncDateSortBtn();
   updateTxnLinkFilterBar();
+  buildLedgerDayChips();
 }
 
 function syncDateSortBtn() {
@@ -3664,7 +3755,7 @@ function sw(name, el) {
   document.querySelectorAll('.ni').forEach(n => n.classList.remove('on'));
   document.getElementById('view-' + name).classList.add('on');
   el.classList.add('on');
-  document.getElementById('vt').textContent = { home: '首页', ledger: '明细列表', trades: '交易', catbrowse: '分类检索', catreport: '分类报表', renqing: '人情往来', accounts: '信用账户', charts: '统计图表', monitor: '统计监控', gear: '装备库', family: '家庭', report: '收支报告', income: '收入数据', company: '公司成本', refunds: '退款管理', import: '导入预览' }[name];
+  document.getElementById('vt').textContent = { home: '首页', ledger: '明细列表', trades: '事件', catbrowse: '分类检索', catreport: '分类报表', renqing: '人情往来', accounts: '信用账户', charts: '统计图表', monitor: '统计监控', gear: '装备库', family: '家庭', report: '收支报告', income: '收入数据', company: '公司成本', refunds: '退款管理', import: '导入预览' }[name];
   if (name === 'home') setTimeout(renderHome, 60);
   if (name === 'trades') setTimeout(renderTradesPage, 60);
   if (name === 'charts') setTimeout(renderCharts, 60);
@@ -3701,7 +3792,9 @@ function setQuick(type) {
 
 function syncUnsetSubFilterUI() {
   const btn = document.getElementById('unsetSubFilterBtn');
-  if (btn) btn.classList.toggle('on', filterUnsetSubOnly);
+  if (!btn) return;
+  btn.classList.toggle('on', filterUnsetSubOnly);
+  btn.setAttribute('aria-pressed', filterUnsetSubOnly ? 'true' : 'false');
 }
 
 function toggleUnsetSubFilter(btn) {
@@ -4970,7 +5063,7 @@ function renderTradesTotal(links) {
         <span class="trade-card-pl-amt">${fmtMoney(Math.abs(stats.net))}</span>
       </span>`;
   el.hidden = false;
-  el.innerHTML = `<div class="trades-total-meta">${links.length} 组关联交易</div>
+  el.innerHTML = `<div class="trades-total-meta">${links.length} 个事件</div>
     <div class="trades-total-stats">支出 ${fmtMoney(stats.exp)} · 收入 ${fmtMoney(stats.inc)}</div>
     <div class="trades-total-pl">${plHtml}</div>`;
 }
@@ -4998,7 +5091,7 @@ function renderTradesPage() {
   if (!links.length) {
     el.innerHTML = `<div class="trades-empty">
       <i class="ti ti-link-off"></i>
-      <p>暂无关联交易</p>
+      <p>暂无关联交易事件</p>
       <span>在明细列表勾选多笔账目后，点击「关联」即可创建</span>
     </div>`;
     return;
@@ -5018,6 +5111,7 @@ function renderTradesPage() {
           <i class="ti ti-chevron-down trade-card-chevron"></i>
         </button>
         <span class="trade-card-actions">
+          <button type="button" class="btn btn-sm btn-p" onclick="openTradeAddModal('${escHtml(link.id)}')" title="加入交易账目"><i class="ti ti-plus"></i> 加入交易账目</button>
           <button type="button" class="btn btn-sm" onclick="viewTradeInLedger('${escHtml(link.id)}')" title="在明细中查看"><i class="ti ti-list-details"></i></button>
           <button type="button" class="btn btn-sm btn-a" onclick="unlinkTradeGroup('${escHtml(link.id)}')" title="取消关联"><i class="ti ti-unlink"></i></button>
         </span>
@@ -5035,7 +5129,7 @@ function toggleTradeCard(id) {
 function openTradeLink(id) {
   if (!findLinkById(id)) return;
   activeTradeLinkId = id;
-  const nav = document.querySelector('.ni[title="关联交易"]');
+  const nav = document.getElementById('nav-trades') || document.querySelector('.ni[title="关联交易事件"]');
   if (nav) sw('trades', nav);
   else renderTradesPage();
 }
@@ -5058,6 +5152,122 @@ function unlinkTradeGroup(id) {
   persist();
   renderTradesPage();
   applyF();
+}
+
+function tradeAddRowTitle(row) {
+  const product = (row['产品名称'] || '').trim();
+  const peer = (row['交易对方'] || '').trim();
+  const desc = (row['商品说明'] || '').trim();
+  return product || peer || (desc && desc !== '/' ? desc : '—');
+}
+
+function tradeEventDateRange(link) {
+  const rows = rowsForLinkKeys(link?.keys || [], allData);
+  const dates = rows.map(r => r['日期']).filter(Boolean).sort();
+  if (!dates.length) return { d1: '', d2: '' };
+  return { d1: dates[0], d2: dates[dates.length - 1] };
+}
+
+function openTradeAddModal(id) {
+  const link = findLinkById(id);
+  if (!link) return;
+  tradeAddLinkId = id;
+  activeTradeLinkId = id;
+  const nameEl = document.getElementById('tradeAddEventName');
+  if (nameEl) nameEl.textContent = `事件：${link.name}`;
+  const range = tradeEventDateRange(link);
+  const d1 = document.getElementById('tradeAddD1');
+  const d2 = document.getElementById('tradeAddD2');
+  const q = document.getElementById('tradeAddQ');
+  if (d1) d1.value = range.d1;
+  if (d2) d2.value = range.d2;
+  if (q) q.value = '';
+  renderTradeAddResults();
+  document.getElementById('moTradeAdd')?.classList.remove('hide');
+  setTimeout(() => document.getElementById('tradeAddQ')?.focus(), 60);
+}
+
+function closeTradeAddModal() {
+  document.getElementById('moTradeAdd')?.classList.add('hide');
+  tradeAddLinkId = null;
+}
+
+function onTradeAddFilterChange() {
+  renderTradeAddResults();
+}
+
+function tradeAddCandidateRows(link, limit = 80) {
+  const owned = new Set(link.keys.map(String));
+  const d1 = document.getElementById('tradeAddD1')?.value || '';
+  const d2 = document.getElementById('tradeAddD2')?.value || '';
+  const q = (document.getElementById('tradeAddQ')?.value || '').trim().toLowerCase();
+  const matched = allData
+    .filter(row => {
+      const key = String(row.id);
+      if (owned.has(key)) return false;
+      if (d1 && row['日期'] < d1) return false;
+      if (d2 && row['日期'] > d2) return false;
+      if (q && !`${rowSearchHaystack(row)} ${row['日期'] || ''}`.includes(q)) return false;
+      return true;
+    })
+    .sort((a, b) => (b['日期'] + b['时间']).localeCompare(a['日期'] + a['时间']));
+  return { rows: matched.slice(0, limit), total: matched.length, limit };
+}
+
+function renderTradeAddResults() {
+  const wrap = document.getElementById('tradeAddResults');
+  const countEl = document.getElementById('tradeAddCount');
+  const link = findLinkById(tradeAddLinkId);
+  if (!wrap || !link) return;
+  const { rows, total, limit } = tradeAddCandidateRows(link);
+  if (countEl) {
+    if (!total) countEl.textContent = '没有符合条件的账目';
+    else if (total > limit) countEl.textContent = `找到 ${total} 笔，显示前 ${limit} 笔，点击加入本事件`;
+    else countEl.textContent = `找到 ${total} 笔，点击加入本事件`;
+  }
+  if (!rows.length) {
+    wrap.innerHTML = '<div class="trade-add-empty">没有符合条件的账目，试试调整日期或关键词。</div>';
+    return;
+  }
+  wrap.innerHTML = rows.map(row => {
+    const other = findLinkForKey(String(row.id));
+    const blocked = other && other.id !== link.id;
+    const isInc = row['收支'] === '收入';
+    const sub = (row['子分类'] || '').trim();
+    const catTxt = sub ? `${row['分类']} · ${sub}` : (row['分类'] || '—');
+    const meta = `${formatDateLabel(row['日期'])}${row['时间'] ? ` ${formatTimeShort(row['时间'])}` : ''} · ${catTxt} · ${row['来源'] || ''}`;
+    if (blocked) {
+      return `<div class="trade-add-item is-blocked" title="已属于事件「${escHtml(other.name)}」">
+        <div class="trade-add-main">
+          <div class="trade-add-title">${escHtml(tradeAddRowTitle(row))}</div>
+          <div class="trade-add-meta">${escHtml(meta)} · 已在「${escHtml(other.name)}」</div>
+        </div>
+        <div class="trade-add-amt ${isInc ? 'inc' : 'exp'}">${isInc ? '+' : '-'}${fmtMoney(row['金额'])}</div>
+      </div>`;
+    }
+    return `<button type="button" class="trade-add-item" onclick="addTxnToTradeEvent(${row.id})">
+      <div class="trade-add-main">
+        <div class="trade-add-title">${escHtml(tradeAddRowTitle(row))}</div>
+        <div class="trade-add-meta">${escHtml(meta)}</div>
+      </div>
+      <div class="trade-add-amt ${isInc ? 'inc' : 'exp'}">${isInc ? '+' : '-'}${fmtMoney(row['金额'])}</div>
+    </button>`;
+  }).join('');
+}
+
+function addTxnToTradeEvent(id) {
+  const linkId = tradeAddLinkId;
+  if (!linkId) return;
+  try {
+    appendTxnLinkKeys(linkId, [String(id)]);
+  } catch (e) {
+    alert(e.message || '加入失败');
+    return;
+  }
+  persist();
+  renderTradesPage();
+  applyF();
+  renderTradeAddResults();
 }
 
 function filterTxnLink(id) {
@@ -5094,7 +5304,7 @@ function updateTxnLinkFilterBar() {
       支出 ${fmtMoney(stats.exp)} · 收入 ${fmtMoney(stats.inc)} · 净额 ${fmtMoneySigned(stats.net)}
       <span class="txn-link-balance ${meta.cls}">${meta.label}</span>
     </span>
-    <button type="button" class="btn btn-sm txn-link-filter-close" onclick="openTradeLink('${escHtml(link.id)}')" title="在交易页查看"><i class="ti ti-arrows-exchange"></i></button>
+    <button type="button" class="btn btn-sm txn-link-filter-close" onclick="openTradeLink('${escHtml(link.id)}')" title="在事件页查看"><i class="ti ti-calendar-event"></i></button>
     <button type="button" class="btn btn-sm txn-link-filter-close" onclick="clearTxnLinkFilter()" title="退出筛选"><i class="ti ti-x"></i></button>`;
 }
 
@@ -5395,10 +5605,11 @@ Object.assign(window, {
   applyCatBrowseBulkCat, applyCatBrowseBulkSub, linkCatBrowsePair, unlinkCatBrowsePair,
   openAdd, closeAdd, saveAdd, openEditRow, openSrc, closeSrc, addSrc, saveSrc,
   openCat, closeCat, addCat, saveCat, delCat, toggleCatSub, pickCatEmoji, pickNewCatEmoji,
-  setQuick, resetF, applyF, changePgSize, filterSrc, setTypeFilter, onSubFilterChange, toggleSortCol, toggleDateSort,
+  setQuick, resetF, applyF, changePgSize, filterSrc, filterLedgerDay, filterLedgerMonth, setTypeFilter, onSubFilterChange, toggleSortCol, toggleDateSort,
   toggleSelect, toggleSelectAll, clearSelection, applyBulkCat, applyBulkSubCat, bulkToggleRefund,
   linkLedgerGroup, unlinkLedgerGroup, closeTxnLinkModal, confirmTxnLinkModal,
   filterTxnLink, clearTxnLinkFilter, toggleTradeCard, openTradeLink, viewTradeInLedger, unlinkTradeGroup,
+  openTradeAddModal, closeTradeAddModal, onTradeAddFilterChange, addTxnToTradeEvent,
   resetImportPreview, confirmImport, onImportSrcChange, toggleDupImport, toggleAllDupImport,
   toggleImportRecordType, updateImportRecordAmount, resetAllLedger,
   openBatchSrc, closeBatchSrc, saveBatchSrc, onCatReportChange, onCatReportYearChange, selectRenqingPerson, goRenqingPage, triggerRenqingAvatarUpload,

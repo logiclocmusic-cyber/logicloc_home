@@ -137,6 +137,19 @@ export function addTxnLink(name, keys) {
   return id;
 }
 
+export function appendTxnLinkKeys(id, keys) {
+  const link = links.find(l => l.id === id);
+  if (!link) throw new Error('事件不存在');
+  const add = uniqKeys(keys).filter(k => !link.keys.includes(k));
+  if (!add.length) return 0;
+  const others = links.filter(l => l.id !== id);
+  for (const k of add) {
+    if (others.some(l => l.keys.includes(k))) throw new Error('该账目已属于其他事件');
+  }
+  link.keys = [...link.keys, ...add];
+  return add.length;
+}
+
 export function addTxnPair(keyA, keyB) {
   addTxnLink('已完成配对', [keyA, keyB]);
 }

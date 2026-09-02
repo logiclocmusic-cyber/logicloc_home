@@ -629,8 +629,42 @@ body{
   to{transform:translateX(130%) skewX(-18deg)}
 }
 #view-ledger > .chips-src{
-  gap:5px;margin-top:6px;margin-bottom:10px;
+  gap:5px;margin-top:6px;margin-bottom:6px;
 }
+#view-ledger > .chips-days{
+  display:flex;flex-wrap:nowrap;gap:4px;align-items:stretch;
+  margin:0 0 10px;padding:2px 2px 8px;
+  overflow-x:auto;-webkit-overflow-scrolling:touch;
+  scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.18) transparent;
+}
+.chip-day{
+  flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  min-width:40px;padding:6px 7px 7px;border-radius:10px;
+  border:1px solid var(--bdr);background:var(--surf2);color:var(--txt2);
+  cursor:pointer;font-family:inherit;line-height:1.1;
+  transition:background .12s,border-color .12s,color .12s,box-shadow .12s,transform .12s;
+}
+.chip-day:hover{border-color:var(--bdr2);background:var(--surf3);transform:translateY(-1px)}
+.chip-day-wd{font-size:10px;font-weight:600;color:var(--txt3);letter-spacing:.02em}
+.chip-day-num{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--txt)}
+.chip-day-month{min-width:46px;padding-left:8px;padding-right:8px}
+.chip-day.is-weekend .chip-day-wd,.chip-day.is-weekend .chip-day-num{color:#f9a8d4}
+.chip-day.has-txn{box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--primary) 55%,transparent)}
+.chip-day.is-today:not(.on){
+  border-color:color-mix(in srgb,var(--primary) 55%,var(--bdr));
+  box-shadow:0 0 0 1px color-mix(in srgb,var(--primary) 28%,transparent);
+}
+.chip-day.is-today.has-txn:not(.on){
+  box-shadow:0 0 0 1px color-mix(in srgb,var(--primary) 28%,transparent),inset 0 -2px 0 color-mix(in srgb,var(--primary) 55%,transparent);
+}
+.chip-day.on{
+  background:var(--primary);border-color:var(--primary);color:#fff;
+  box-shadow:0 4px 12px color-mix(in srgb,var(--primary) 38%,transparent);
+  transform:translateY(-1px);
+}
+.chip-day.on .chip-day-wd,.chip-day.on .chip-day-num{color:#fff}
+.chip-day.on.has-txn{box-shadow:0 4px 12px color-mix(in srgb,var(--primary) 38%,transparent),inset 0 -2px 0 rgba(255,255,255,.55)}
+.chip-day.on.is-weekend .chip-day-wd,.chip-day.on.is-weekend .chip-day-num{color:#fff}
 #view-ledger > .chips-src .chip.chip-src{
   padding:3px 8px;font-size:11px;border-radius:6px;line-height:1.25;
 }
@@ -2889,12 +2923,42 @@ select.btn:hover:not(:disabled){
 .trade-card-pl--profit .trade-card-pl-label,
 .trade-card-pl--profit .trade-card-pl-amt{color:var(--red-t)}
 .trade-card-actions{display:inline-flex;align-items:center;gap:6px;flex-shrink:0}
+.trade-card-actions .btn-p{white-space:nowrap}
+@media(max-width:720px){
+  .trade-card-head{flex-wrap:wrap}
+  .trade-card-toggle{flex:1 1 100%}
+  .trade-card-actions{width:100%;justify-content:flex-end;padding:0 4px 4px}
+}
 .trade-card-chevron{
   font-size:16px;color:var(--txt3);transition:transform .2s;flex-shrink:0;
 }
 .trade-card.is-open .trade-card-chevron{transform:rotate(180deg)}
 .trade-card-body{display:none;padding:8px 12px 12px}
 .trade-card.is-open .trade-card-body{display:block}
+.trade-add-body{padding-top:4px}
+.trade-add-event{
+  margin:0 0 12px;font-size:13px;font-weight:700;color:var(--primary-t);
+}
+.trade-add-filters{margin-bottom:12px}
+.trade-add-count{font-size:12px;font-weight:600;color:var(--txt3);margin:0 0 8px}
+.trade-add-results{
+  max-height:min(52vh,420px);overflow-y:auto;display:flex;flex-direction:column;gap:6px;
+}
+.trade-add-empty{padding:28px 12px;text-align:center;color:var(--txt3);font-size:13px;line-height:1.5}
+.trade-add-item{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;width:100%;
+  padding:10px 12px;border:1px solid var(--bdr);border-radius:10px;background:var(--surf2);
+  cursor:pointer;text-align:left;font-family:inherit;color:inherit;
+}
+.trade-add-item:hover{border-color:var(--primary);background:rgba(108,123,247,.08)}
+.trade-add-item.is-blocked{
+  cursor:default;opacity:.62;pointer-events:none;
+}
+.trade-add-title{font-size:13px;font-weight:600;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trade-add-meta{font-size:11px;color:var(--txt3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trade-add-amt{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.trade-add-amt.exp{color:var(--red-t)}
+.trade-add-amt.inc{color:var(--grn-t)}
 .trade-row{
   display:grid;grid-template-columns:108px minmax(0,1.1fr) minmax(0,1.35fr) auto auto;
   gap:8px 12px;align-items:center;padding:6px 8px;border-radius:10px;
@@ -4185,6 +4249,12 @@ select.btn{height:34px;padding:0 32px 0 12px;font-size:12px}
   background:var(--surf2) !important;
   border-color:var(--bdr) !important;
   color:var(--txt);
+}
+.fb-unset-filter.on{
+  background:#ff6b47 !important;
+  border-color:#ff6b47 !important;
+  color:#fff !important;
+  box-shadow:0 0 0 2px color-mix(in srgb,#ff6b47 32%,transparent),0 4px 12px rgba(255,107,71,.28);
 }
 #view-ledger .cat-pick-btn--icon,
 .det-cat-cell .cat-pick-btn--icon{
