@@ -44,8 +44,7 @@ export function fmtChartAxis(v) {
   return `¥${num}`;
 }
 
-/** Chart.js 深色仪表盘主题 */
-export const CHART_THEME = {
+const CHART_THEME_DARK = {
   pieBorder: '#17171f',
   inc: '#34d399',
   exp: '#f472b6',
@@ -61,6 +60,47 @@ export const CHART_THEME = {
     padding: 10
   }
 };
+
+const CHART_THEME_LIGHT = {
+  pieBorder: '#ffffff',
+  inc: '#059669',
+  exp: '#db2777',
+  grid: 'rgba(28,29,40,.06)',
+  gridY: 'rgba(28,29,40,.08)',
+  tick: 'rgba(28,29,40,.45)',
+  tooltip: {
+    backgroundColor: '#ffffff',
+    titleColor: '#1a1b27',
+    bodyColor: '#5a5d72',
+    borderColor: 'rgba(61,110,245,.28)',
+    borderWidth: 1,
+    padding: 10
+  }
+};
+
+/** Chart.js 仪表盘主题（随浅色/深色切换更新） */
+export const CHART_THEME = { ...CHART_THEME_DARK, tooltip: { ...CHART_THEME_DARK.tooltip } };
+
+export function applyChartTheme() {
+  const light = document.documentElement.getAttribute('data-theme') === 'light';
+  const next = light ? CHART_THEME_LIGHT : CHART_THEME_DARK;
+  CHART_THEME.pieBorder = next.pieBorder;
+  CHART_THEME.inc = next.inc;
+  CHART_THEME.exp = next.exp;
+  CHART_THEME.grid = next.grid;
+  CHART_THEME.gridY = next.gridY;
+  CHART_THEME.tick = next.tick;
+  Object.assign(CHART_THEME.tooltip, next.tooltip);
+  Object.assign(chartMoneyTooltip, next.tooltip);
+  chartDarkScalesY.grid.color = CHART_THEME.gridY;
+  chartDarkScalesY.ticks.color = CHART_THEME.tick;
+  chartDarkScalesXY.x.grid.color = CHART_THEME.grid;
+  chartDarkScalesXY.x.ticks.color = CHART_THEME.tick;
+  if (typeof Chart !== 'undefined') {
+    Chart.defaults.color = CHART_THEME.tick;
+    Chart.defaults.borderColor = CHART_THEME.grid;
+  }
+}
 
 export const chartDarkScalesY = {
   grid: { color: CHART_THEME.gridY },

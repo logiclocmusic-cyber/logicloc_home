@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <meta name="theme-color" content="#0b0b0f">
+<script>
+(function () {
+  try {
+    if (localStorage.getItem('ledger-theme') === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light');
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute('content', '#eef0f7');
+    }
+  } catch (e) {}
+})();
+</script>
 <title>Loc's Home</title>
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="icon" type="image/png" href="/favicon.png">
@@ -91,6 +102,9 @@
     <button class="btn-cta" onclick="openImport()"><i class="ti ti-plus"></i> 导入账单</button>
     <div class="topbar-actions">
       <div class="sv" id="sv"><i class="ti ti-check"></i> 已保存</div>
+      <button type="button" class="theme-toggle" id="themeToggleBtn" onclick="toggleAppTheme()" title="切换浅色模式" aria-label="切换浅色模式" aria-pressed="false">
+        <i class="ti ti-sun"></i>
+      </button>
       <div class="user-pill" id="userPill" title="点击退出登录">
         <div class="avatar" id="userAvatar"><img src="/avatar.png" alt=""></div>
         <span id="userDisplayName">Logic Loc</span>
@@ -170,6 +184,9 @@
       <button class="btn btn-a" id="bulkLinkBtn" onclick="linkLedgerGroup()" style="height:34px" disabled title="将多笔借还/付款账目关联并命名"><i class="ti ti-link"></i> 关联</button>
       <button class="btn" id="bulkUnlinkBtn" onclick="unlinkLedgerGroup()" style="height:34px" disabled title="取消已有关联"><i class="ti ti-unlink"></i> 取消关联</button>
       <div class="bulk-sep"></div>
+      <button class="btn btn-a" id="bulkMergeBtn" onclick="openTxnMergeModal()" style="height:34px" disabled title="将选中账目按净额计入一个分类统计"><i class="ti ti-arrows-join"></i> 合并统计</button>
+      <button class="btn" id="bulkUnmergeBtn" onclick="unmergeLedgerGroup()" style="height:34px" disabled title="取消合并统计"><i class="ti ti-arrows-split"></i> 取消合并</button>
+      <div class="bulk-sep"></div>
       <button class="btn btn-a" onclick="bulkToggleRefund(true)" style="height:34px">标记退款</button>
       <button class="btn" onclick="bulkToggleRefund(false)" style="height:34px">撤销退款</button>
       <button class="btn" onclick="clearSelection()" style="height:34px;margin-left:auto">✕ 取消</button>
@@ -218,7 +235,7 @@
       </div>
     </div>
     <div class="chips chips-src" id="srcChips"></div>
-    <div class="chips chips-days" id="ledgerDayChips" role="tablist" aria-label="本月日期"></div>
+    <div class="chips chips-days" id="ledgerDayChips" role="tablist" aria-label="上月与本月日期"></div>
     <div class="txn-link-filter-bar hide" id="txnLinkFilterBar"></div>
     <div class="tw ledger-day-view">
       <div class="ledger-table-wrap">
@@ -753,6 +770,30 @@
     <div class="mf">
       <button class="btn" onclick="closeTxnLinkModal()">取消</button>
       <button class="btn btn-p" onclick="confirmTxnLinkModal()">确定</button>
+    </div>
+  </div>
+</div>
+
+<div class="mo hide" id="moTxnMerge">
+  <div class="mbox">
+    <div class="mh"><h3><i class="ti ti-arrows-join" style="color:var(--primary);margin-right:6px"></i>合并统计</h3><button class="mclose" onclick="closeTxnMergeModal()"><i class="ti ti-x"></i></button></div>
+    <div class="mb">
+      <p class="cat-edit-hint">明细仍保留原流水。分类统计按净额计入下方分类，日期取最早一笔支出。</p>
+      <div id="txnMergePreview" class="txn-merge-preview"></div>
+      <div class="form-grid">
+        <div class="fg">
+          <label for="txnMergeCatSel">计入分类</label>
+          <select id="txnMergeCatSel" onchange="onTxnMergeCatChange()"></select>
+        </div>
+        <div class="fg">
+          <label for="txnMergeSubSel">子分类</label>
+          <select id="txnMergeSubSel"></select>
+        </div>
+      </div>
+    </div>
+    <div class="mf">
+      <button class="btn" onclick="closeTxnMergeModal()">取消</button>
+      <button class="btn btn-p" onclick="confirmTxnMergeModal()">确定合并</button>
     </div>
   </div>
 </div>

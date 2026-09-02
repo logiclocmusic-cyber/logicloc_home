@@ -56,6 +56,11 @@ import {
   computeLinkStats, linkBalanceMeta, suggestTxnLinkName
 } from './txn-pairs.js';
 import {
+  loadTxnMerges, getTxnMerges, validateTxnMerge, addTxnMerge, removeTxnMergeById,
+  findMergeForKey, findMergeById, mergedKeySet, rowInMerge, pruneTxnMerges,
+  computeMergeNet, mergeStatsRow
+} from './txn-merges.js';
+import {
   initRenqing, loadRenqingState, getRenqingState, renderRenqingPage,
   selectRenqingPerson, goRenqingPage, triggerRenqingAvatarUpload, setupRenqingUpload,
   RENQING_CAT
@@ -93,6 +98,7 @@ let activeSrc = 'all', refunded = new Set(), excluded = new Set(), charts = {};
 let filterUnsetSubOnly = false;
 let filterSubCat = '';
 let activeTxnLinkId = null;
+let activeTxnMergeId = null;
 let activeTradeLinkId = null;
 let tradeAddLinkId = null;
 let dayNotes = {};
@@ -268,7 +274,11 @@ function peerDescCell(row) {
   const linkTag = link
     ? `<button type="button" class="ledger-link-tag" onclick="event.stopPropagation();filterTxnLink('${escHtml(link.id)}')" title="查看关联账目并核对收支"><i class="ti ti-link"></i>${escHtml(link.name)}</button>`
     : '';
-  return `<div class="td peer-desc" title="${title}"><div class="peer-main">${dupTag}${main}${linkTag}</div>${showDesc ? `<div class="peer-sub">${d}</div>` : ''}</div>`;
+  const merge = findMergeForKey(String(row.id));
+  const mergeTag = merge
+    ? `<button type="button" class="ledger-merge-tag" onclick="event.stopPropagation();filterTxnMerge('${escHtml(merge.id)}')" title="查看合并统计的账目">合并</button>`
+    : '';
+  return `<div class="td peer-desc" title="${title}"><div class="peer-main">${dupTag}${main}${linkTag}${mergeTag}</div>${showDesc ? `<div class="peer-sub">${d}</div>` : ''}</div>`;
 }
 
 function dupReasonLabel(reason) {
@@ -408,6 +418,25 @@ function activeExpanded() {
   return out;
 }
 
+function statsExpanded() {
+  const expanded = [];
+  allData.filter(isCountedInStats).forEach(r => expanded.push(...expandRowForStats(r)));
+  const merged = mergedKeySet();
+  const kept = expanded.filter(r => {
+    const parent = String(r._splitOf ?? r.id);
+    return !merged.has(parent);
+  });
+  const virtuals = [];
+  getTxnMerges().forEach(m => {
+    const members = m.keys.map(k => allData.find(r => String(r.id) === String(k))).filter(Boolean);
+    const counted = members.filter(isCountedInStats);
+    if (!counted.length) return;
+    const row = mergeStatsRow(m, counted);
+    if (row) virtuals.push(row);
+  });
+  return [...kept, ...virtuals];
+}
+
 /** 人情往来独立页：不受统计排除分类影响，但仍隐藏已退款记录 */
 function renqingExpanded() {
   const out = [];
@@ -418,8 +447,7 @@ function renqingExpanded() {
 }
 
 function statsData() {
-  const expanded = [];
-  allData.filter(isCountedInStats).forEach(r => expanded.push(...expandRowForStats(r)));
+  const expanded = statsExpanded();
   const normal = expanded.filter(r => !OFFSET_CATS_SET.has(r['分类']));
   const netRows = [];
   const offsetRows = expanded.filter(r => OFFSET_CATS_SET.has(r['分类']));
@@ -473,6 +501,7 @@ function buildState() {
     accountCardFaces: getAccountsState().accountCardFaces,
     accountRegistry: getAccountsState().accountRegistry,
     txnPairs: getTxnPairs(),
+    txnMerges: getTxnMerges(),
     dayNotes: { ...dayNotes }
   };
 }
@@ -610,6 +639,7 @@ async function loadData() {
     loadAccountsState(state);
     if (consumeRegistryMigrationPersist()) await persistNow();
     loadTxnPairs(state);
+    loadTxnMerges(state);
     dayNotes = (state.dayNotes && typeof state.dayNotes === 'object') ? { ...state.dayNotes } : {};
 
     allData.forEach(r => {
@@ -625,6 +655,8 @@ async function loadData() {
       }
     });
     allData.sort((a, b) => (b['日期'] + b['时间']).localeCompare(a['日期'] + a['时间']));
+
+    if (pruneTxnMerges(allData.map(r => r.id))) persist();
 
     syncImportHistory();
     buildSrcChips();
@@ -1431,6 +1463,16 @@ function currentMonthYm(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
+function shiftMonthYm(ym, delta) {
+  const [y, m] = String(ym || currentMonthYm()).split('-').map(Number);
+  return currentMonthYm(new Date(y, m - 1 + delta, 1));
+}
+
+function ledgerDayChipMonths() {
+  const cur = currentMonthYm();
+  return [shiftMonthYm(cur, -1), cur];
+}
+
 function monthDateRange(ym) {
   const [y, m] = ym.split('-').map(Number);
   const last = new Date(y, m, 0).getDate();
@@ -1446,27 +1488,12 @@ function todayIso() {
   return `${currentMonthYm(n)}-${String(n.getDate()).padStart(2, '0')}`;
 }
 
-function buildLedgerDayChips() {
-  const el = document.getElementById('ledgerDayChips');
-  if (!el) return;
-  const ym = currentMonthYm();
+function buildLedgerDayChipMonthHtml(ym, selectedDay, d1, d2, today, daysWithTxn) {
   const range = monthDateRange(ym);
-  const today = todayIso();
-  const d1 = document.getElementById('d1')?.value || '';
-  const d2 = document.getElementById('d2')?.value || '';
-  const selectedDay = d1 && d1 === d2 ? d1 : '';
   const monthOn = !selectedDay && d1 === range.d1 && d2 === range.d2;
-  const prefix = `${ym}-`;
-  const daysWithTxn = new Set();
-  for (const r of allData) {
-    const dt = r['日期'];
-    if (dt && dt.startsWith(prefix)) daysWithTxn.add(dt);
-  }
-
-  const prevScroll = el.scrollLeft;
-  const firstBuild = !el.dataset.ready;
   const [year, month] = ym.split('-').map(Number);
-  let html = `<button type="button" class="chip-day chip-day-month${monthOn ? ' on' : ''}" data-month="${ym}" onclick="filterLedgerMonth('${ym}')" role="tab" aria-selected="${monthOn ? 'true' : 'false'}" title="查看${month}月全部"><span class="chip-day-wd">${year}</span><span class="chip-day-num">${month}月</span></button>`;
+  let html = `<div class="chip-day-group" data-month="${ym}">`;
+  html += `<button type="button" class="chip-day chip-day-month${monthOn ? ' on' : ''}" data-month="${ym}" onclick="filterLedgerMonth('${ym}')" role="tab" aria-selected="${monthOn ? 'true' : 'false'}" title="查看${year}年${month}月全部"><span class="chip-day-wd">${year}</span><span class="chip-day-num">${month}月</span></button>`;
   for (let d = 1; d <= range.last; d++) {
     const iso = `${ym}-${String(d).padStart(2, '0')}`;
     const wd = new Date(`${iso}T12:00:00`).getDay();
@@ -1475,14 +1502,36 @@ function buildLedgerDayChips() {
     const hasTxn = daysWithTxn.has(iso);
     html += `<button type="button" class="chip-day${on ? ' on' : ''}${isToday ? ' is-today' : ''}${hasTxn ? ' has-txn' : ''}${wd === 0 || wd === 6 ? ' is-weekend' : ''}" data-date="${iso}" onclick="filterLedgerDay('${iso}')" role="tab" aria-selected="${on ? 'true' : 'false'}" title="${iso} ${WEEKDAY_LABELS[wd]}${isToday ? '（今天）' : ''}"><span class="chip-day-wd">${WEEKDAY_SHORT[wd]}</span><span class="chip-day-num">${d}</span></button>`;
   }
-  el.innerHTML = html;
+  html += '</div>';
+  return html;
+}
+
+function buildLedgerDayChips() {
+  const el = document.getElementById('ledgerDayChips');
+  if (!el) return;
+  const months = ledgerDayChipMonths();
+  const today = todayIso();
+  const d1 = document.getElementById('d1')?.value || '';
+  const d2 = document.getElementById('d2')?.value || '';
+  const selectedDay = d1 && d1 === d2 ? d1 : '';
+  const monthSet = new Set(months);
+  const daysWithTxn = new Set();
+  for (const r of allData) {
+    const dt = r['日期'];
+    if (dt && monthSet.has(dt.slice(0, 7))) daysWithTxn.add(dt);
+  }
+
+  const prevScroll = el.scrollLeft;
+  const firstBuild = !el.dataset.ready;
+  el.innerHTML = months.map(ym => buildLedgerDayChipMonthHtml(ym, selectedDay, d1, d2, today, daysWithTxn)).join('');
   el.dataset.ready = '1';
 
   const forceScroll = pendingDayChipScroll;
   const scrollTo = pendingDayChipScroll || selectedDay || today;
   pendingDayChipScroll = null;
   if (forceScroll || firstBuild) {
-    const target = el.querySelector(`[data-date="${scrollTo}"]`);
+    const target = el.querySelector(`[data-date="${scrollTo}"]`)
+      || el.querySelector(`[data-month="${String(scrollTo).slice(0, 7)}"]`);
     if (target) target.scrollIntoView({ inline: 'center', block: 'nearest', behavior: firstBuild ? 'auto' : 'smooth' });
   } else {
     el.scrollLeft = prevScroll;
@@ -1632,6 +1681,13 @@ function applyF() {
   const d2 = document.getElementById('d2').value;
 
   filteredData = allData.filter(r => {
+    if (activeTxnMergeId) {
+      const merge = findMergeById(activeTxnMergeId);
+      if (!merge || !rowInMerge(r, merge)) return false;
+      if (hideRf && r['退款状态'] === 'refunded') return false;
+      if (q && !rowMatchesSearch(r, q)) return false;
+      return true;
+    }
     if (activeTxnLinkId) {
       const link = findLinkById(activeTxnLinkId);
       if (!link || !rowInLink(r, link)) return false;
@@ -1777,6 +1833,7 @@ function resetF() {
   document.getElementById('sf').value = 'd-';
   activeSrc = 'all';
   activeTxnLinkId = null;
+  activeTxnMergeId = null;
   buildSrcChips();
   applyF();
 }
@@ -2130,7 +2187,7 @@ function showAllDetail(cat) {
   detFilterUnsetSubOnly = false;
   detContext = { type: 'expense', cat };
   detSelectedIds.clear();
-  const ad = activeExpanded().filter(r => r['收支'] === '支出' && r['分类'] === cat);
+  const ad = statsExpanded().filter(r => r['收支'] === '支出' && r['分类'] === cat);
   const total = ad.reduce((s, r) => s + r['金额'], 0);
   document.getElementById('detTitle').innerHTML = `<span class="inline-cat-icon" style="margin-right:6px">${catIconHtml(cat, { size: 18 })}</span>${cat} · 全部`;
   document.getElementById('detSummary').textContent = `共 ${fmtCount(ad.length)} 笔支出`;
@@ -2149,7 +2206,7 @@ function showDetail(month, cat) {
   detFilterUnsetSubOnly = false;
   detContext = { type: 'expense', month, cat };
   detSelectedIds.clear();
-  const rows = activeExpanded().filter(r => r['收支'] === '支出' && r['日期'].startsWith(month) && r['分类'] === cat);
+  const rows = statsExpanded().filter(r => r['收支'] === '支出' && r['日期'].startsWith(month) && r['分类'] === cat);
   const total = rows.reduce((s, r) => s + r['金额'], 0);
   document.getElementById('detTitle').innerHTML = `<span class="inline-cat-icon" style="margin-right:6px">${catIconHtml(cat, { size: 18, value: MONITOR_EMOJIS[cat] })}</span>${cat} · ${month}`;
   document.getElementById('detSummary').textContent = `共 ${fmtCount(rows.length)} 笔支出`;
@@ -2251,7 +2308,7 @@ function getDetailRows() {
     const flow = detContext.flow === 'exp' ? '支出' : detContext.flow === 'inc' ? '收入' : 'all';
     return homeMonthTxnRows(detContext.month, flow);
   }
-  const ad = activeExpanded();
+  const ad = statsExpanded();
   if (detContext.type === 'catreport') {
     const { month, cat, sub } = detContext;
     let rows = ad.filter(r => r['分类'] === cat && r['日期'].startsWith(month));
@@ -2368,7 +2425,8 @@ function renderDetailBody(rows) {
   }
   const sorted = sortDetRows(detRows);
   const amtSortIcon = detSort === 'a-' ? '↓' : '↑';
-  const allChecked = sorted.length > 0 && sorted.every(r => detSelectedIds.has(r.id));
+  const selectable = sorted.filter(r => !r._statsMerge);
+  const allChecked = selectable.length > 0 && selectable.every(r => detSelectedIds.has(r.id));
   const showTypeCol = detShowsTypeCol();
   const signedAmt = showTypeCol;
   const incomeCols = showTypeCol ? ' det-cols-income' : '';
@@ -2389,7 +2447,8 @@ function renderDetailBody(rows) {
       const d = (r['商品说明'] || '').trim();
       const showDesc = d && d !== '/' && d !== p;
       const isR = r['退款状态'] === 'refunded';
-      const isSel = detSelectedIds.has(r.id);
+      const isMerge = !!r._statsMerge;
+      const isSel = !isMerge && detSelectedIds.has(r.id);
       const typeCell = showTypeCol
         ? `<div class="det-type">${typeBadge(r['收支'], r['退款状态'], r['分类'])}</div>`
         : '';
@@ -2398,17 +2457,27 @@ function renderDetailBody(rows) {
       const amtTxt = signedAmt
         ? `${isInc ? '+' : '-'}¥${r['金额'].toFixed(2)}`
         : `¥${r['金额'].toFixed(2)}`;
-      return `<div class="det-row det-cols det-cols-actions${incomeCols}${i % 2 ? ' alt' : ''}${isSel ? ' selected' : ''}">
-        <div class="det-check"><input type="checkbox" class="cb" ${isSel ? 'checked' : ''} onchange="toggleDetSelect(${r.id},this)"></div>
+      const mergeTag = isMerge ? '<span class="ledger-merge-tag" title="合并统计净额">合并净额</span>' : '';
+      const checkCell = isMerge
+        ? '<div class="det-check"></div>'
+        : `<div class="det-check"><input type="checkbox" class="cb" ${isSel ? 'checked' : ''} onchange="toggleDetSelect(${r.id},this)"></div>`;
+      const catCell = isMerge
+        ? `<div class="td no-strike cat-cell det-cat-cell">${escHtml(r['分类'] || '')}${r['子分类'] ? ' · ' + escHtml(r['子分类']) : ''}</div>`
+        : detCatCellHtml(r);
+      const actCell = isMerge
+        ? '<div class="det-act"></div>'
+        : `<div class="det-act">
+          <button type="button" class="icon-act rf ${isR ? 'um' : 'mk'}" title="${isR ? '撤销退款' : '标记退款'}" onclick="toggleRf(${r.id})"><i class="ti ${isR ? 'ti-rotate-clockwise' : 'ti-receipt-refund'}"></i></button>
+        </div>`;
+      return `<div class="det-row det-cols det-cols-actions${incomeCols}${i % 2 ? ' alt' : ''}${isSel ? ' selected' : ''}${isMerge ? ' det-merge-row' : ''}">
+        ${checkCell}
         <div class="det-dt">${formatDateLabel(r['日期'])}<span>${formatTimeShort(r['时间'])}</span></div>
         <div class="det-src">${srcBadge(r['来源'])}</div>
-        <div class="det-peer"><div class="det-peer-main">${p}</div>${showDesc ? `<div class="det-peer-sub">${d}</div>` : ''}</div>
-        ${detCatCellHtml(r)}
+        <div class="det-peer"><div class="det-peer-main">${p}${mergeTag}</div>${showDesc ? `<div class="det-peer-sub">${d}</div>` : ''}</div>
+        ${catCell}
         ${typeCell}
         <div class="det-amt${amtCls}">${amtTxt}</div>
-        <div class="det-act">
-          <button type="button" class="icon-act rf ${isR ? 'um' : 'mk'}" title="${isR ? '撤销退款' : '标记退款'}" onclick="toggleRf(${r.id})"><i class="ti ${isR ? 'ti-rotate-clockwise' : 'ti-receipt-refund'}"></i></button>
-        </div>
+        ${actCell}
       </div>`;
     }).join('')}`;
 }
@@ -2642,7 +2711,7 @@ let catReportYear = new Date().getFullYear();
 
 function catReportAvailableYears() {
   const years = new Set();
-  activeExpanded().forEach(r => {
+  statsExpanded().forEach(r => {
     const y = r['日期']?.slice(0, 4);
     if (y && /^\d{4}$/.test(y)) years.add(+y);
   });
@@ -2656,7 +2725,7 @@ function catReportFilterByYear(rows, year) {
 }
 
 function catReportRows(cat) {
-  return activeExpanded().filter(r => r['分类'] === cat);
+  return statsExpanded().filter(r => r['分类'] === cat);
 }
 
 function catReportSubcats(cat, rows, type) {
@@ -4784,6 +4853,7 @@ function saveCat() {
 // ── 批量选择 ─────────────────────────────────────────────────────────────────
 let selectedIds = new Set();
 let pendingTxnLinkKeys = null;
+let pendingTxnMergeKeys = null;
 
 function computeSelectedStats() {
   const rows = [...selectedIds].map(id => allData.find(r => r.id === id)).filter(Boolean);
@@ -4869,6 +4939,15 @@ function updateBulkBar() {
       });
       unlinkBtn.disabled = linkIds.size !== 1;
     }
+    const mergeBtn = document.getElementById('bulkMergeBtn');
+    const unmergeBtn = document.getElementById('bulkUnmergeBtn');
+    const mergeIds = new Set();
+    [...selectedIds].forEach(id => {
+      const merge = findMergeForKey(String(id));
+      if (merge) mergeIds.add(merge.id);
+    });
+    if (mergeBtn) mergeBtn.disabled = selectedIds.size < 2 || mergeIds.size > 0;
+    if (unmergeBtn) unmergeBtn.disabled = mergeIds.size !== 1;
   } else {
     bar.classList.remove('show');
     const statsEl = document.getElementById('bulkStats');
@@ -4996,6 +5075,141 @@ function unlinkLedgerGroup() {
   clearSelection();
   applyF();
   renderTradesPage();
+}
+
+function majorityValue(rows, field) {
+  const counts = new Map();
+  rows.forEach(r => {
+    const v = String(r[field] || '').trim();
+    if (!v) return;
+    counts.set(v, (counts.get(v) || 0) + 1);
+  });
+  let best = '';
+  let n = 0;
+  counts.forEach((c, v) => {
+    if (c > n) { best = v; n = c; }
+  });
+  return best;
+}
+
+function fillTxnMergeSubSel(cat, preferred) {
+  const subSel = document.getElementById('txnMergeSubSel');
+  if (!subSel) return;
+  const subs = subcatsFor(cat);
+  if (!subs.length) {
+    subSel.innerHTML = '<option value="">无</option>';
+    subSel.disabled = true;
+    return;
+  }
+  subSel.disabled = false;
+  subSel.innerHTML = ['<option value="">无</option>', ...subs.map(s =>
+    `<option value="${escHtml(s)}">${escHtml(s)}</option>`
+  )].join('');
+  subSel.value = preferred && subs.includes(preferred) ? preferred : '';
+}
+
+function openTxnMergeModal() {
+  const keys = [...selectedIds].map(id => String(id));
+  if (keys.length < 2) {
+    alert('请至少选择 2 笔账目进行合并统计');
+    return;
+  }
+  const rows = keys.map(id => allData.find(r => r.id === Number(id))).filter(Boolean);
+  const err = validateTxnMerge(keys, rows);
+  if (err) {
+    alert(err);
+    return;
+  }
+  pendingTxnMergeKeys = keys;
+  const stats = computeMergeNet(rows);
+  const preview = document.getElementById('txnMergePreview');
+  if (preview) {
+    const netKind = stats.net < -0.009 ? '支出' : stats.net > 0.009 ? '收入' : '相抵';
+    preview.innerHTML = `
+      <div>支出 ${fmtMoney(stats.exp)} · 收入 ${fmtMoney(stats.inc)}</div>
+      <div class="txn-merge-preview-net">统计净额 ${fmtMoneySigned(stats.net)}（${netKind} ${fmtMoney(stats.abs)}）</div>`;
+  }
+  const expRows = rows.filter(r => r['收支'] === '支出');
+  const catGuess = majorityValue(expRows.length ? expRows : rows, '分类') || CATS[0] || '';
+  const catSel = document.getElementById('txnMergeCatSel');
+  if (catSel) {
+    catSel.innerHTML = CATS.map(c => `<option value="${escHtml(c)}">${escHtml(catLabel(c))}</option>`).join('');
+    catSel.value = CATS.includes(catGuess) ? catGuess : (CATS[0] || '');
+  }
+  const sameCatRows = rows.filter(r => r['分类'] === (catSel?.value || catGuess));
+  fillTxnMergeSubSel(catSel?.value || catGuess, majorityValue(sameCatRows, '子分类'));
+  document.getElementById('moTxnMerge')?.classList.remove('hide');
+}
+
+function onTxnMergeCatChange() {
+  const cat = document.getElementById('txnMergeCatSel')?.value || '';
+  const keys = pendingTxnMergeKeys || [];
+  const rows = keys.map(id => allData.find(r => r.id === Number(id))).filter(Boolean);
+  const sameCatRows = rows.filter(r => r['分类'] === cat);
+  fillTxnMergeSubSel(cat, majorityValue(sameCatRows, '子分类'));
+}
+
+function closeTxnMergeModal() {
+  pendingTxnMergeKeys = null;
+  document.getElementById('moTxnMerge')?.classList.add('hide');
+}
+
+function confirmTxnMergeModal() {
+  const keys = pendingTxnMergeKeys;
+  if (!keys?.length) {
+    closeTxnMergeModal();
+    return;
+  }
+  const category = document.getElementById('txnMergeCatSel')?.value || '';
+  const subcategory = document.getElementById('txnMergeSubSel')?.value || '';
+  try {
+    addTxnMerge({ keys, category, subcategory });
+  } catch (e) {
+    alert(e.message || '合并失败');
+    return;
+  }
+  closeTxnMergeModal();
+  persist();
+  clearSelection();
+  applyF();
+  renderKPI();
+  renderMonitor();
+  refreshActiveViews();
+}
+
+function unmergeLedgerGroup() {
+  const keys = [...selectedIds].map(id => String(id));
+  if (!keys.length) return;
+  const mergeIds = new Set();
+  keys.forEach(k => {
+    const merge = findMergeForKey(k);
+    if (merge) mergeIds.add(merge.id);
+  });
+  if (mergeIds.size !== 1) {
+    alert('请选择属于同一合并的账目，或选择单条已合并账目');
+    return;
+  }
+  if (!confirm('确定取消合并统计？账目将恢复分别计入分类统计。')) return;
+  const mergeId = [...mergeIds][0];
+  removeTxnMergeById(mergeId);
+  if (activeTxnMergeId === mergeId) activeTxnMergeId = null;
+  persist();
+  clearSelection();
+  applyF();
+  renderKPI();
+  renderMonitor();
+  refreshActiveViews();
+}
+
+function filterTxnMerge(id) {
+  activeTxnMergeId = id;
+  activeTxnLinkId = null;
+  applyF();
+}
+
+function clearTxnMergeFilter() {
+  activeTxnMergeId = null;
+  applyF();
 }
 
 function tradeCatCellHtml(row) {
@@ -5282,6 +5496,27 @@ function clearTxnLinkFilter() {
 function updateTxnLinkFilterBar() {
   const bar = document.getElementById('txnLinkFilterBar');
   if (!bar) return;
+  if (activeTxnMergeId) {
+    const merge = findMergeById(activeTxnMergeId);
+    if (!merge) {
+      activeTxnMergeId = null;
+      bar.classList.add('hide');
+      bar.innerHTML = '';
+      return;
+    }
+    const rows = merge.keys.map(k => allData.find(r => String(r.id) === String(k))).filter(Boolean);
+    const stats = computeMergeNet(rows);
+    const netKind = stats.net < -0.009 ? '净支出' : stats.net > 0.009 ? '净收入' : '已相抵';
+    const sub = merge.subcategory ? ` · ${merge.subcategory}` : '';
+    bar.classList.remove('hide');
+    bar.innerHTML = `
+      <span class="txn-link-filter-name"><i class="ti ti-arrows-join"></i> 合并统计 · ${escHtml(merge.category)}${escHtml(sub)}</span>
+      <span class="txn-link-filter-stats">
+        支出 ${fmtMoney(stats.exp)} · 收入 ${fmtMoney(stats.inc)} · ${netKind} ${fmtMoney(stats.abs)}
+      </span>
+      <button type="button" class="btn btn-sm txn-link-filter-close" onclick="clearTxnMergeFilter()" title="退出筛选"><i class="ti ti-x"></i></button>`;
+    return;
+  }
   if (!activeTxnLinkId) {
     bar.classList.add('hide');
     bar.innerHTML = '';
@@ -5316,7 +5551,7 @@ function toggleDetSelect(id, cb) {
 }
 
 function toggleDetSelectAll(masterCb) {
-  const ids = sortDetRows(detRows).map(r => r.id);
+  const ids = sortDetRows(detRows).filter(r => !r._statsMerge).map(r => r.id);
   if (masterCb.checked) ids.forEach(id => detSelectedIds.add(id));
   else ids.forEach(id => detSelectedIds.delete(id));
   updateDetBulkBar();
@@ -5537,7 +5772,7 @@ async function initAppInner() {
     getCats: () => CATS,
     getEmoji: c => catIconHtml(c, { size: 20, wrapClass: 'catbrowse-tab-emoji-wrap' }),
     getSubcatsFor: subcatsFor,
-    getExpandedRows: activeExpanded,
+    getExpandedRows: statsExpanded,
     getCatLabel: catLabel,
     formatDateLabel,
     formatTimeShort,
@@ -5599,6 +5834,14 @@ async function initAppInner() {
   appReady = true;
 }
 
+export function refreshForTheme() {
+  if (!appReady) return;
+  renderKPI();
+  renderHome();
+  renderMonitor();
+  refreshActiveViews();
+}
+
 Object.assign(window, {
   sw, openImport, toggleUnsetSubFilter, toggleCatBrowseUnsetSubFilter, selectCatBrowse, toggleCatBrowseGroup,
   toggleCatBrowseSelect, toggleCatBrowseGroupSelect, toggleCatBrowseSelectAll, clearCatBrowseSelection,
@@ -5608,6 +5851,8 @@ Object.assign(window, {
   setQuick, resetF, applyF, changePgSize, filterSrc, filterLedgerDay, filterLedgerMonth, setTypeFilter, onSubFilterChange, toggleSortCol, toggleDateSort,
   toggleSelect, toggleSelectAll, clearSelection, applyBulkCat, applyBulkSubCat, bulkToggleRefund,
   linkLedgerGroup, unlinkLedgerGroup, closeTxnLinkModal, confirmTxnLinkModal,
+  openTxnMergeModal, closeTxnMergeModal, confirmTxnMergeModal, onTxnMergeCatChange, unmergeLedgerGroup,
+  filterTxnMerge, clearTxnMergeFilter,
   filterTxnLink, clearTxnLinkFilter, toggleTradeCard, openTradeLink, viewTradeInLedger, unlinkTradeGroup,
   openTradeAddModal, closeTradeAddModal, onTradeAddFilterChange, addTxnToTradeEvent,
   resetImportPreview, confirmImport, onImportSrcChange, toggleDupImport, toggleAllDupImport,

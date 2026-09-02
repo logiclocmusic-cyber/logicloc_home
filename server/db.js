@@ -24,7 +24,7 @@ db.exec(`
   );
 `);
 
-const META_KEYS = ['refunded', 'excluded', 'categories', 'sources', 'rules', 'importHistory', 'nextId', 'gearLibrary', 'nextGearId', 'gearSections', 'hiddenGearSectionIds', 'renqingAvatars', 'accountCardFaces', 'accountLogos', 'accountRegistry', 'txnPairs', 'dayNotes', 'stateVersion'];
+const META_KEYS = ['refunded', 'excluded', 'categories', 'sources', 'rules', 'importHistory', 'nextId', 'gearLibrary', 'nextGearId', 'gearSections', 'hiddenGearSectionIds', 'renqingAvatars', 'accountCardFaces', 'accountLogos', 'accountRegistry', 'txnPairs', 'txnMerges', 'dayNotes', 'stateVersion'];
 
 function txnRowKey(row) {
   const oid = String(row['交易单号'] || '').trim();
@@ -64,6 +64,7 @@ export function readState() {
     accountLogos: meta.accountLogos || {},
     accountRegistry: meta.accountRegistry || { overrides: {}, hidden: [], manual: [], merges: {}, creditHidden: [], creditPools: [], creditGroups: {} },
     txnPairs: meta.txnPairs || [],
+    txnMerges: meta.txnMerges || [],
     dayNotes: meta.dayNotes || {},
     stateVersion: meta.stateVersion || 0
   };
@@ -108,6 +109,7 @@ export function writeState(state, opts = {}) {
       accountLogos: state.accountLogos || {},
       accountRegistry: state.accountRegistry || { overrides: {}, hidden: [], manual: [], merges: {}, creditHidden: [] },
       txnPairs: state.txnPairs || [],
+      txnMerges: state.txnMerges || [],
       dayNotes: state.dayNotes || {},
       stateVersion: curVer + 1
     };

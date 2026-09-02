@@ -225,6 +225,11 @@ function rowTitle(row) {
 }
 
 function browseCatCell(row) {
+  if (row._statsMerge) {
+    const cat = row['分类'] || '';
+    const sub = row['子分类'] || '';
+    return `<div class="catbrowse-row-cat cat-cell"><span class="catbrowse-merge-cat">${getEmoji(cat)} ${escAttr(cat)}${sub ? ' · ' + escAttr(sub) : ''}</span></div>`;
+  }
   const parentId = row._splitOf ?? row.id;
   const splitIdx = row._splitIdx;
   const cat = row['分类'];
@@ -239,26 +244,33 @@ function browseCatCell(row) {
 }
 
 function renderBrowseRow(row) {
+  const isMerge = !!row._statsMerge;
   const key = selKey(row);
-  const isSel = catBrowseSelected.has(key);
+  const isSel = !isMerge && catBrowseSelected.has(key);
   const p = rowTitle(row);
   const d = (row['商品说明'] || '').trim();
   const showDesc = d && d !== '/' && d !== p;
   const isInc = row['收支'] === '收入';
   const splitTag = row._splitOf != null ? '<span class="catbrowse-split-tag">拆分</span>' : '';
-  const link = findPairForKey(key);
+  const link = isMerge ? null : findPairForKey(key);
   const pairLabel = link?.name === '已完成配对' ? '已完成' : (link?.name || '已完成');
   const pairTag = link
     ? `<span class="catbrowse-pair-tag" title="关联账目"><i class="ti ti-link"></i> ${escAttr(pairLabel)}</span>`
     : '';
-  return `<div class="catbrowse-row${isSel ? ' selected' : ''}${pairTag ? ' paired' : ''}" data-sel-key="${key}">
-    <div class="catbrowse-row-check" onclick="event.stopPropagation()">
+  const mergeTag = isMerge
+    ? '<span class="catbrowse-merge-tag" title="合并统计净额">合并净额</span>'
+    : '';
+  const checkHtml = isMerge
+    ? '<div class="catbrowse-row-check"></div>'
+    : `<div class="catbrowse-row-check" onclick="event.stopPropagation()">
       <input type="checkbox" class="cb" ${isSel ? 'checked' : ''}>
-    </div>
+    </div>`;
+  return `<div class="catbrowse-row${isSel ? ' selected' : ''}${pairTag ? ' paired' : ''}${isMerge ? ' merged' : ''}" data-sel-key="${key}">
+    ${checkHtml}
     <div class="catbrowse-row-dt">${formatDateLabel(row['日期'])}<span>${formatTimeShort(row['时间'])}</span></div>
     <div class="catbrowse-row-src">${srcBadge(row['来源'])}</div>
     <div class="catbrowse-row-peer">
-      <div class="catbrowse-row-title">${p}${splitTag}${pairTag}</div>
+      <div class="catbrowse-row-title">${p}${splitTag}${pairTag}${mergeTag}</div>
       ${showDesc ? `<div class="catbrowse-row-desc">${d}</div>` : ''}
     </div>
     ${browseCatCell(row)}
@@ -269,7 +281,7 @@ function renderBrowseRow(row) {
 function syncSelectAllUI(rows) {
   const selAllCb = document.getElementById('catBrowseSelAll');
   if (!selAllCb) return;
-  const keys = rows.map(selKey);
+  const keys = rows.filter(r => !r._statsMerge).map(selKey);
   const allSelected = keys.length > 0 && keys.every(k => catBrowseSelected.has(k));
   const someSelected = keys.some(k => catBrowseSelected.has(k));
   selAllCb.checked = allSelected;
@@ -346,7 +358,7 @@ export function toggleCatBrowseGroupSelect(groupKeyVal, cb) {
   if (sep < 0) return;
   const cat = groupKeyVal.slice(0, sep);
   const sub = groupKeyVal.slice(sep + 1);
-  const subRows = rowsForCat(cat).filter(r => (r['子分类'] || '未分类') === sub);
+  const subRows = rowsForCat(cat).filter(r => !r._statsMerge && (r['子分类'] || '未分类') === sub);
   const keys = subRows.map(selKey);
   if (cb.checked) keys.forEach(k => catBrowseSelected.add(k));
   else keys.forEach(k => catBrowseSelected.delete(k));
@@ -354,7 +366,7 @@ export function toggleCatBrowseGroupSelect(groupKeyVal, cb) {
 }
 
 export function toggleCatBrowseSelectAll(masterCb) {
-  const keys = rowsForCat(activeCat).map(selKey);
+  const keys = rowsForCat(activeCat).filter(r => !r._statsMerge).map(selKey);
   if (masterCb.checked) keys.forEach(k => catBrowseSelected.add(k));
   else keys.forEach(k => catBrowseSelected.delete(k));
   renderCatBrowse();
