@@ -28,6 +28,7 @@ const SUBCHART_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', 
 const collapsedGroups = new Set();
 const catBrowseSelected = new Set();
 let filterUnsetSubOnly = false;
+let catBrowseYear = String(new Date().getFullYear());
 
 export function initCatBrowse(deps) {
   getCats = deps.getCats || getCats;
@@ -56,10 +57,44 @@ function selKey(row) {
   return row._splitIdx != null ? `${parentId}:${row._splitIdx}` : `${parentId}`;
 }
 
+function browseAvailableYears() {
+  const years = new Set();
+  getExpandedRows().forEach(r => {
+    const y = r['日期']?.slice(0, 4);
+    if (y && /^\d{4}$/.test(y)) years.add(y);
+  });
+  years.add(String(new Date().getFullYear()));
+  return [...years].sort((a, b) => b.localeCompare(a));
+}
+
+function filterByBrowseYear(rows) {
+  const prefix = String(catBrowseYear);
+  return rows.filter(r => r['日期']?.startsWith(prefix));
+}
+
 function rowsForCat(cat) {
   let rows = getExpandedRows().filter(r => r['分类'] === cat);
+  rows = filterByBrowseYear(rows);
   if (filterUnsetSubOnly) rows = rows.filter(r => rowHasUnsetSub(r, getSubcatsFor));
   return rows;
+}
+
+export function onCatBrowseYearChange(year) {
+  catBrowseYear = String(year || new Date().getFullYear());
+  renderCatBrowse();
+}
+
+function renderCatBrowseYearSelect() {
+  const sel = document.getElementById('catBrowseYearSel');
+  if (!sel) return;
+  const years = browseAvailableYears();
+  if (!years.includes(catBrowseYear)) {
+    const current = String(new Date().getFullYear());
+    catBrowseYear = years.includes(current) ? current : years[0];
+  }
+  sel.innerHTML = years.map(y =>
+    `<option value="${y}"${y === catBrowseYear ? ' selected' : ''}>${y}年</option>`
+  ).join('');
 }
 
 export function toggleCatBrowseUnsetSubFilter(btn) {
@@ -520,6 +555,7 @@ export function renderCatBrowse() {
 
   ensureTabsEvents();
   ensureBodyEvents();
+  renderCatBrowseYearSelect();
 
   const cats = getCats();
   if (!activeCat || !cats.includes(activeCat)) {
@@ -548,7 +584,7 @@ export function renderCatBrowse() {
         </label>`
       : '';
     if (!rows.length) {
-      summaryEl.innerHTML = `<span class="catbrowse-summary-name">${getEmoji(activeCat)} ${activeCat}</span><span class="catbrowse-summary-meta">暂无账目</span>`;
+      summaryEl.innerHTML = `<span class="catbrowse-summary-name">${getEmoji(activeCat)} ${activeCat}</span><span class="catbrowse-summary-meta">${catBrowseYear}年暂无账目</span>`;
       if (chartEl) {
         chartEl.innerHTML = '';
         chartEl.classList.add('hide');
@@ -563,7 +599,7 @@ export function renderCatBrowse() {
       chartEl.innerHTML = '';
       chartEl.classList.add('hide');
     }
-    bodyEl.innerHTML = '<div class="catbrowse-empty"><i class="ti ti-inbox"></i>该分类暂无账目</div>';
+    bodyEl.innerHTML = `<div class="catbrowse-empty"><i class="ti ti-inbox"></i>${catBrowseYear}年该分类暂无账目</div>`;
     updateCatBrowseBulkBar();
     return;
   }

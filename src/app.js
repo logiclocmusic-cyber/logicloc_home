@@ -44,7 +44,7 @@ import { initCatPicker, catCellInnerHtml, openEmojiPicker, closeEmojiPicker } fr
 import { subCatSelectHtml, rowHasUnsetSub, rowMatchesSubCat, SUBCAT_UNSET_LABEL } from './subcat-ui.js';
 import { srcMarkHtml, srcBrandColor } from './source-logos.js';
 import {
-  initCatBrowse, renderCatBrowse, selectCatBrowse,
+  initCatBrowse, renderCatBrowse, selectCatBrowse, onCatBrowseYearChange,
   toggleCatBrowseGroup, toggleCatBrowseUnsetSubFilter,
   getCatBrowseSelectedKeys, clearCatBrowseSelection, updateCatBrowseBulkBar,
   toggleCatBrowseSelect, toggleCatBrowseGroupSelect, toggleCatBrowseSelectAll
@@ -6016,7 +6016,7 @@ export function refreshForTheme() {
 }
 
 Object.assign(window, {
-  sw, openImport, toggleUnsetSubFilter, toggleCatBrowseUnsetSubFilter, selectCatBrowse, toggleCatBrowseGroup,
+  sw, openImport, toggleUnsetSubFilter, toggleCatBrowseUnsetSubFilter, onCatBrowseYearChange, selectCatBrowse, toggleCatBrowseGroup,
   toggleCatBrowseSelect, toggleCatBrowseGroupSelect, toggleCatBrowseSelectAll, clearCatBrowseSelection,
   applyCatBrowseBulkCat, applyCatBrowseBulkSub, linkCatBrowsePair, unlinkCatBrowsePair,
   openAdd, closeAdd, saveAdd, openEditRow, openSrc, closeSrc, addSrc, saveSrc,

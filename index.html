@@ -308,6 +308,10 @@
     <div class="catbrowse-subchart hide" id="catBrowseSubChart"></div>
     <div class="catbrowse-filters">
       <button type="button" class="fb-unset-filter" id="catBrowseUnsetSubFilterBtn" onclick="toggleCatBrowseUnsetSubFilter(this)" title="仅显示未设置子分类的记录">未分类</button>
+      <label class="catbrowse-year-label">
+        <span class="catbrowse-year-lbl">年份</span>
+        <select id="catBrowseYearSel" class="btn catbrowse-year-sel" onchange="onCatBrowseYearChange(this.value)" aria-label="选择年份"></select>
+      </label>
     </div>
     <div class="bulk-bar catbrowse-bulk-bar" id="catBrowseBulkBar">
       <span class="bulk-cnt" id="catBrowseBulkCnt">0 项已选</span>
