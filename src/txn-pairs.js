@@ -150,6 +150,14 @@ export function appendTxnLinkKeys(id, keys) {
   return add.length;
 }
 
+export function renameTxnLink(id, name) {
+  const link = links.find(l => l.id === id);
+  if (!link) throw new Error('事件不存在');
+  const trimmed = String(name || '').trim();
+  if (!trimmed) throw new Error('关联名称不能为空');
+  link.name = trimmed;
+}
+
 export function addTxnPair(keyA, keyB) {
   addTxnLink('已完成配对', [keyA, keyB]);
 }

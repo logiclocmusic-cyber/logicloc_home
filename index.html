@@ -170,26 +170,29 @@
 
   <div class="page view" id="view-ledger">
     <div class="bulk-bar" id="bulkBar">
-      <span class="bulk-cnt" id="bulkCnt">0 项已选</span>
-      <span class="bulk-stats" id="bulkStats"></span>
-      <div class="bulk-sep"></div>
-      <span style="font-size:12.5px;color:var(--txt2)">批量移动到：</span>
-      <select id="bulkCatSel" class="btn" style="height:34px;min-width:140px"></select>
-      <button class="btn btn-p" onclick="applyBulkCat()" style="height:34px"><i class="ti ti-check"></i> 应用</button>
-      <div class="bulk-sep"></div>
-      <span style="font-size:12.5px;color:var(--txt2)">子分类：</span>
-      <select id="bulkSubCatSel" class="btn bulk-sub-sel" style="height:34px;min-width:120px" disabled title="选中项需属于同一分类"></select>
-      <button class="btn btn-p" id="bulkSubCatBtn" onclick="applyBulkSubCat()" style="height:34px" disabled><i class="ti ti-check"></i> 应用</button>
-      <div class="bulk-sep"></div>
-      <button class="btn btn-a" id="bulkLinkBtn" onclick="linkLedgerGroup()" style="height:34px" disabled title="将多笔借还/付款账目关联并命名"><i class="ti ti-link"></i> 关联</button>
-      <button class="btn" id="bulkUnlinkBtn" onclick="unlinkLedgerGroup()" style="height:34px" disabled title="取消已有关联"><i class="ti ti-unlink"></i> 取消关联</button>
-      <div class="bulk-sep"></div>
-      <button class="btn btn-a" id="bulkMergeBtn" onclick="openTxnMergeModal()" style="height:34px" disabled title="将选中账目按净额计入一个分类统计"><i class="ti ti-arrows-join"></i> 合并统计</button>
-      <button class="btn" id="bulkUnmergeBtn" onclick="unmergeLedgerGroup()" style="height:34px" disabled title="取消合并统计"><i class="ti ti-arrows-split"></i> 取消合并</button>
-      <div class="bulk-sep"></div>
-      <button class="btn btn-a" onclick="bulkToggleRefund(true)" style="height:34px">标记退款</button>
-      <button class="btn" onclick="bulkToggleRefund(false)" style="height:34px">撤销退款</button>
-      <button class="btn" onclick="clearSelection()" style="height:34px;margin-left:auto">✕ 取消</button>
+      <div class="bulk-bar-row">
+        <span class="bulk-cnt" id="bulkCnt">0 项已选</span>
+        <span class="bulk-stats" id="bulkStats"></span>
+        <div class="bulk-sep"></div>
+        <span class="bulk-lbl">批量移动到：</span>
+        <select id="bulkCatSel" class="btn bulk-cat-sel"></select>
+        <button class="btn btn-p bulk-apply" onclick="applyBulkCat()"><i class="ti ti-check"></i> 应用</button>
+        <div class="bulk-sep"></div>
+        <span class="bulk-lbl">子分类：</span>
+        <select id="bulkSubCatSel" class="btn bulk-sub-sel" disabled title="选中项需属于同一分类"></select>
+        <button class="btn btn-p bulk-apply" id="bulkSubCatBtn" onclick="applyBulkSubCat()" disabled><i class="ti ti-check"></i> 应用</button>
+      </div>
+      <div class="bulk-bar-row bulk-bar-row--actions">
+        <button class="btn btn-a bulk-action" id="bulkLinkBtn" onclick="linkLedgerGroup()" disabled title="将多笔借还/付款账目关联并命名"><i class="ti ti-link"></i> 关联</button>
+        <button class="btn bulk-action" id="bulkUnlinkBtn" onclick="unlinkLedgerGroup()" disabled title="取消已有关联"><i class="ti ti-unlink"></i> 取消关联</button>
+        <div class="bulk-sep"></div>
+        <button class="btn btn-a bulk-action" id="bulkMergeBtn" onclick="openTxnMergeModal()" disabled title="将选中账目按净额计入一个分类统计"><i class="ti ti-arrows-join"></i> 合并统计</button>
+        <button class="btn bulk-action" id="bulkUnmergeBtn" onclick="unmergeLedgerGroup()" disabled title="取消合并统计"><i class="ti ti-arrows-split"></i> 取消合并</button>
+        <div class="bulk-sep"></div>
+        <button class="btn btn-a bulk-action" onclick="bulkToggleRefund(true)">标记退款</button>
+        <button class="btn bulk-action" onclick="bulkToggleRefund(false)">撤销退款</button>
+        <button class="btn bulk-cancel" onclick="clearSelection()"><i class="ti ti-x"></i> 取消</button>
+      </div>
     </div>
     <div class="fb">
       <div class="fb-group fb-search">

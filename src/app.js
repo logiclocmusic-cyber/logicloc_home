@@ -51,7 +51,7 @@ import {
 } from './cat-browse.js';
 import {
   loadTxnPairs, getTxnPairs, validateTxnPair, validateTxnLink, addTxnPair, addTxnLink,
-  appendTxnLinkKeys, removeTxnPairByKey, removeTxnLinkById,
+  appendTxnLinkKeys, renameTxnLink, removeTxnPairByKey, removeTxnLinkById,
   findPairForKey, findLinkForKey, findLinkById, rowInLink, rowsForLinkKeys,
   computeLinkStats, linkBalanceMeta, suggestTxnLinkName
 } from './txn-pairs.js';
@@ -100,6 +100,7 @@ let filterSubCat = '';
 let activeTxnLinkId = null;
 let activeTxnMergeId = null;
 let activeTradeLinkId = null;
+let activeTradeNameEditId = null;
 let tradeAddLinkId = null;
 let dayNotes = {};
 let detRows = [], detSort = 'a-';
@@ -5247,6 +5248,61 @@ function tradeLinkSortKey(link) {
   return rows.map(r => r['日期'] + r['时间']).sort().pop();
 }
 
+function tradeLinkPrimaryCat(link) {
+  const rows = rowsForLinkKeys(link.keys, allData);
+  if (!rows.length) return '未分类';
+  const counts = new Map();
+  for (const r of rows) {
+    const cat = (r['分类'] || '').trim() || '未分类';
+    counts.set(cat, (counts.get(cat) || 0) + 1);
+  }
+  let best = '未分类';
+  let bestN = 0;
+  for (const [cat, n] of counts) {
+    if (n > bestN) { best = cat; bestN = n; }
+  }
+  return best;
+}
+
+function tradeCatSortIndex(cat) {
+  const idx = CATS.indexOf(cat);
+  return idx >= 0 ? idx : CATS.length + 1;
+}
+
+function groupTradesByCategory(links) {
+  const map = new Map();
+  for (const link of links) {
+    const cat = tradeLinkPrimaryCat(link);
+    if (!map.has(cat)) map.set(cat, []);
+    map.get(cat).push(link);
+  }
+  return [...map.entries()]
+    .sort((a, b) => {
+      const d = tradeCatSortIndex(a[0]) - tradeCatSortIndex(b[0]);
+      return d !== 0 ? d : a[0].localeCompare(b[0], 'zh-CN');
+    })
+    .map(([cat, items]) => ({
+      cat,
+      items: items.sort((a, b) => tradeLinkSortKey(b).localeCompare(tradeLinkSortKey(a)))
+    }));
+}
+
+function renderTradeLinkName(link) {
+  if (activeTradeNameEditId === link.id) {
+    return `<span class="trade-card-name trade-card-name--edit" onclick="event.stopPropagation()">
+      <input type="text" class="trade-card-name-inp" id="tradeNameInp-${escHtml(link.id)}" maxlength="80" value="${escHtml(link.name)}"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();saveTradeNameEdit('${escHtml(link.id)}');} if(event.key==='Escape'){event.preventDefault();cancelTradeNameEdit();}">
+      <button type="button" class="btn btn-sm btn-p" onclick="saveTradeNameEdit('${escHtml(link.id)}')"><i class="ti ti-check"></i></button>
+      <button type="button" class="btn btn-sm" onclick="cancelTradeNameEdit()"><i class="ti ti-x"></i></button>
+    </span>`;
+  }
+  return `<span class="trade-card-name">
+    <i class="ti ti-link"></i>
+    <span class="trade-card-name-text">${escHtml(link.name)}</span>
+    <button type="button" class="trade-card-name-edit" onclick="event.stopPropagation();startTradeNameEdit('${escHtml(link.id)}')" title="编辑名称"><i class="ti ti-pencil"></i></button>
+  </span>`;
+}
+
 function computeAllTradesStats(links) {
   const seen = new Set();
   const rows = [];
@@ -5290,11 +5346,35 @@ function renderTradeLinkSummary(link, stats) {
         <span class="trade-card-pl-label">${meta.label}</span>
         <span class="trade-card-pl-amt">${fmtMoney(Math.abs(stats.net))}</span>
       </span>`;
-  return `<span class="trade-card-name"><i class="ti ti-link"></i> ${escHtml(link.name)}</span>
+  return `${renderTradeLinkName(link)}
     <span class="trade-card-stats">
       支出 ${fmtMoney(stats.exp)} · 收入 ${fmtMoney(stats.inc)}
       ${plHtml}
     </span>`;
+}
+
+function renderTradeCardHtml(link) {
+  const rows = rowsForLinkKeys(link.keys, allData);
+  const stats = computeLinkStats(rows);
+  const expanded = activeTradeLinkId === link.id;
+  const rowHtml = rows
+    .sort((a, b) => (a['日期'] + a['时间']).localeCompare(b['日期'] + b['时间']))
+    .map(tradeRowHtml)
+    .join('');
+  return `<article class="trade-card${expanded ? ' is-open' : ''}" data-link-id="${escHtml(link.id)}">
+    <div class="trade-card-head">
+      <button type="button" class="trade-card-toggle" onclick="toggleTradeCard('${escHtml(link.id)}')">
+        <span class="trade-card-summary">${renderTradeLinkSummary(link, stats)}</span>
+        <i class="ti ti-chevron-down trade-card-chevron"></i>
+      </button>
+      <span class="trade-card-actions">
+        <button type="button" class="btn btn-sm btn-p" onclick="openTradeAddModal('${escHtml(link.id)}')" title="加入交易账目"><i class="ti ti-plus"></i> 加入交易账目</button>
+        <button type="button" class="btn btn-sm" onclick="viewTradeInLedger('${escHtml(link.id)}')" title="在明细中查看"><i class="ti ti-list-details"></i></button>
+        <button type="button" class="btn btn-sm btn-a" onclick="unlinkTradeGroup('${escHtml(link.id)}')" title="取消关联"><i class="ti ti-unlink"></i></button>
+      </span>
+    </div>
+    <div class="trade-card-body">${rowHtml}</div>
+  </article>`;
 }
 
 function renderTradesPage() {
@@ -5310,29 +5390,53 @@ function renderTradesPage() {
     </div>`;
     return;
   }
-  el.innerHTML = links.map(link => {
-    const rows = rowsForLinkKeys(link.keys, allData);
-    const stats = computeLinkStats(rows);
-    const expanded = activeTradeLinkId === link.id;
-    const rowHtml = rows
-      .sort((a, b) => (a['日期'] + a['时间']).localeCompare(b['日期'] + b['时间']))
-      .map(tradeRowHtml)
-      .join('');
-    return `<article class="trade-card${expanded ? ' is-open' : ''}" data-link-id="${escHtml(link.id)}">
-      <div class="trade-card-head">
-        <button type="button" class="trade-card-toggle" onclick="toggleTradeCard('${escHtml(link.id)}')">
-          <span class="trade-card-summary">${renderTradeLinkSummary(link, stats)}</span>
-          <i class="ti ti-chevron-down trade-card-chevron"></i>
-        </button>
-        <span class="trade-card-actions">
-          <button type="button" class="btn btn-sm btn-p" onclick="openTradeAddModal('${escHtml(link.id)}')" title="加入交易账目"><i class="ti ti-plus"></i> 加入交易账目</button>
-          <button type="button" class="btn btn-sm" onclick="viewTradeInLedger('${escHtml(link.id)}')" title="在明细中查看"><i class="ti ti-list-details"></i></button>
-          <button type="button" class="btn btn-sm btn-a" onclick="unlinkTradeGroup('${escHtml(link.id)}')" title="取消关联"><i class="ti ti-unlink"></i></button>
-        </span>
-      </div>
-      <div class="trade-card-body">${rowHtml}</div>
-    </article>`;
-  }).join('');
+  const groups = groupTradesByCategory(links);
+  el.innerHTML = groups.map(({ cat, items }) => `<section class="trades-group">
+    <header class="trades-group-head">
+      <span class="trades-group-icon">${catIconHtml(cat, { size: 18, wrapClass: 'cat-pick-emoji-wrap' })}</span>
+      <h3 class="trades-group-title">${escHtml(catLabel(cat))}</h3>
+      <span class="trades-group-meta">${items.length} 个事件</span>
+    </header>
+    <div class="trades-group-list">${items.map(renderTradeCardHtml).join('')}</div>
+  </section>`).join('');
+  if (activeTradeNameEditId) {
+    const inp = document.getElementById(`tradeNameInp-${activeTradeNameEditId}`);
+    inp?.focus();
+    inp?.select();
+  }
+}
+
+function startTradeNameEdit(id) {
+  if (!findLinkById(id)) return;
+  activeTradeNameEditId = id;
+  renderTradesPage();
+}
+
+function cancelTradeNameEdit() {
+  activeTradeNameEditId = null;
+  renderTradesPage();
+}
+
+function saveTradeNameEdit(id) {
+  const link = findLinkById(id);
+  if (!link) return;
+  const inp = document.getElementById(`tradeNameInp-${id}`);
+  const trimmed = inp?.value?.trim() || '';
+  if (!trimmed) {
+    alert('关联名称不能为空');
+    inp?.focus();
+    return;
+  }
+  try {
+    renameTxnLink(id, trimmed);
+  } catch (e) {
+    alert(e.message || '保存失败');
+    return;
+  }
+  activeTradeNameEditId = null;
+  persist();
+  renderTradesPage();
+  applyF();
 }
 
 function toggleTradeCard(id) {
@@ -5363,6 +5467,7 @@ function unlinkTradeGroup(id) {
   removeTxnLinkById(id);
   if (activeTxnLinkId === id) activeTxnLinkId = null;
   if (activeTradeLinkId === id) activeTradeLinkId = null;
+  if (activeTradeNameEditId === id) activeTradeNameEditId = null;
   persist();
   renderTradesPage();
   applyF();
@@ -5854,6 +5959,7 @@ Object.assign(window, {
   openTxnMergeModal, closeTxnMergeModal, confirmTxnMergeModal, onTxnMergeCatChange, unmergeLedgerGroup,
   filterTxnMerge, clearTxnMergeFilter,
   filterTxnLink, clearTxnLinkFilter, toggleTradeCard, openTradeLink, viewTradeInLedger, unlinkTradeGroup,
+  startTradeNameEdit, saveTradeNameEdit, cancelTradeNameEdit,
   openTradeAddModal, closeTradeAddModal, onTradeAddFilterChange, addTxnToTradeEvent,
   resetImportPreview, confirmImport, onImportSrcChange, toggleDupImport, toggleAllDupImport,
   toggleImportRecordType, updateImportRecordAmount, resetAllLedger,

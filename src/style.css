@@ -2764,15 +2764,28 @@ select.btn:hover:not(:disabled){
 .tr.selected{background:rgba(93,212,168,.08) !important}
 .tr.selected:hover{background:rgba(93,212,168,.12) !important}
 .bulk-bar{
-  display:none;align-items:center;gap:10px;padding:12px 16px;
+  display:none;flex-direction:column;gap:8px;padding:10px 12px;
   background:var(--primary-bg);border:1px solid rgba(93,212,168,.2);
-  border-radius:var(--rl);margin-bottom:12px;flex-wrap:wrap;
+  border-radius:var(--rl);margin-bottom:12px;
 }
 .bulk-bar.show{display:flex}
-.bulk-cnt{font-size:13px;font-weight:600;color:var(--primary-t);margin-right:4px}
-.bulk-stats{font-size:12.5px;font-weight:600;color:var(--txt2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.bulk-bar-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.bulk-bar-row--actions{width:100%}
+.bulk-cnt{font-size:11.5px;font-weight:600;color:var(--primary-t);margin-right:0;flex-shrink:0}
+.bulk-stats{font-size:11px;font-weight:600;color:var(--txt2);font-variant-numeric:tabular-nums;white-space:nowrap;flex-shrink:0}
 .bulk-stats:empty{display:none}
-.bulk-sep{width:1px;height:22px;background:var(--bdr);margin:0 4px}
+.bulk-lbl{font-size:11px;color:var(--txt2);white-space:nowrap;flex-shrink:0}
+.bulk-sep{width:1px;height:16px;background:var(--bdr);margin:0 2px;flex-shrink:0}
+.bulk-bar .btn,
+.bulk-bar select.btn{
+  height:28px;font-size:11px;gap:4px;flex-shrink:0;
+}
+.bulk-bar select.btn{padding:0 28px 0 10px}
+.bulk-bar .bulk-cat-sel{min-width:104px;max-width:140px}
+.bulk-bar .bulk-sub-sel{min-width:84px;max-width:120px}
+.bulk-bar .bulk-apply{padding:0 7px}
+.bulk-bar .bulk-action{padding:0 8px}
+.bulk-bar .bulk-cancel{margin-left:auto;padding:0 9px;min-width:28px}
 .bulk-sub-sel:disabled{opacity:.55;cursor:not-allowed}
 
 /* Import */
@@ -2926,7 +2939,21 @@ select.btn:hover:not(:disabled){
   .trades-total{max-width:none;text-align:left}
   .trades-total-pl{justify-content:flex-start}
 }
-.trades-list{display:flex;flex-direction:column;gap:12px}
+.trades-list{display:flex;flex-direction:column;gap:16px}
+.trades-group{
+  background:var(--surf);border:1px solid var(--bdr);border-radius:14px;overflow:hidden;
+  box-shadow:var(--shadow-sm);
+}
+.trades-group-head{
+  display:flex;align-items:center;gap:10px;padding:10px 14px;
+  background:var(--surf2);border-bottom:1px solid var(--bdr);
+}
+.trades-group-icon{display:inline-flex;flex-shrink:0}
+.trades-group-title{margin:0;flex:1;font-size:14px;font-weight:700;color:var(--txt)}
+.trades-group-meta{font-size:11px;font-weight:600;color:var(--txt3);white-space:nowrap}
+.trades-group-list{display:flex;flex-direction:column;gap:0}
+.trades-group-list .trade-card{border:none;border-radius:0;box-shadow:none;border-bottom:1px solid var(--bdr)}
+.trades-group-list .trade-card:last-child{border-bottom:none}
 .trades-empty{
   display:flex;flex-direction:column;align-items:center;gap:8px;padding:48px 20px;
   border:1px dashed var(--bdr);border-radius:16px;color:var(--txt3);text-align:center;
@@ -2953,6 +2980,20 @@ select.btn:hover:not(:disabled){
 .trade-card-name{
   display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:700;color:var(--primary-t);
 }
+.trade-card-name-text{min-width:0}
+.trade-card-name-edit{
+  width:22px;height:22px;padding:0;border:none;border-radius:6px;background:transparent;
+  color:var(--txt3);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+  flex-shrink:0;transition:color .15s,background .15s;
+}
+.trade-card-name-edit:hover{color:var(--primary-t);background:rgba(99,102,241,.1)}
+.trade-card-name-edit .ti{font-size:13px}
+.trade-card-name--edit{gap:6px;max-width:min(100%,360px)}
+.trade-card-name-inp{
+  flex:1;min-width:120px;height:28px;padding:0 8px;border:1px solid var(--bdr);border-radius:6px;
+  background:var(--surf);font-size:12px;font-weight:600;color:var(--txt);font-family:inherit;
+}
+.trade-card-name-inp:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px rgba(99,102,241,.15)}
 .trade-card-stats{
   font-size:12.5px;font-weight:600;color:var(--txt2);font-variant-numeric:tabular-nums;
 }
