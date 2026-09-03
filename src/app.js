@@ -5238,8 +5238,10 @@ function tradeRowHtml(row) {
     <div class="trade-row-dt">${formatDateLabel(row['日期'])}<span>${formatTimeShort(row['时间'])}</span></div>
     <div class="trade-row-peer">${escHtml(peer)}</div>
     ${tradeCatCellHtml(row)}
-    <div class="trade-row-type">${typeBadge(row['收支'], row['退款状态'], row['分类'])}</div>
-    <div class="trade-row-amt ${isInc ? 'inc' : 'exp'}">${isInc ? '+' : '-'}${fmtMoney(row['金额'])}</div>
+    <div class="trade-row-fin">
+      <div class="trade-row-type">${typeBadge(row['收支'], row['退款状态'], row['分类'])}</div>
+      <div class="trade-row-amt ${isInc ? 'inc' : 'exp'}">${isInc ? '+' : '-'}${fmtMoney(row['金额'])}</div>
+    </div>
   </div>`;
 }
 
