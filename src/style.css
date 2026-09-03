@@ -2743,9 +2743,9 @@ select.btn:hover:not(:disabled){
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;margin-bottom:10px}
 .fg{display:flex;flex-direction:column;gap:5px}
 .fg label{font-size:12px;color:var(--txt3);font-weight:500}
-.fg input,.fg textarea{border:1px solid var(--bdr);border-radius:10px;padding:9px 12px;font-size:13px;background:var(--surf2);color:var(--txt);outline:none;width:100%;font-family:inherit}
-.fg select{width:100%}
-.fg input:focus,.fg textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--focus-ring)}
+.fg input,.fg textarea,.fg select{border:1px solid var(--bdr);border-radius:10px;padding:9px 12px;font-size:13px;background:var(--surf2);color:var(--txt);outline:none;width:100%;font-family:inherit}
+.fg select{padding-right:32px}
+.fg input:focus,.fg textarea:focus,.fg select:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--focus-ring)}
 .fg textarea{height:56px;resize:vertical}
 .fg.span2{grid-column:1/-1}
 
@@ -3313,9 +3313,9 @@ select.btn:hover:not(:disabled){
   font-size:12px;line-height:1;
 }
 .gear-tab-remove:hover{background:rgba(217,86,101,.12);color:var(--red-t)}
-.gear-cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.gear-cat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;margin-bottom:12px}
 .gear-cat-grid .fg select{
-  text-align:center;text-align-last:center;padding:9px 32px;
+  text-align:center;text-align-last:center;
 }
 .gear-section-hint{font-size:12.5px;color:var(--txt3);line-height:1.5;margin:0 0 14px}
 @media (max-width:560px){.gear-cat-grid{grid-template-columns:1fr}}
@@ -4350,7 +4350,6 @@ select.btn{height:34px;padding:0 32px 0 12px;font-size:12px}
 .renqing-txn-sub .renqing-sub-sel{height:30px;padding:0 28px 0 10px;font-size:11px}
 .inv-filter-sel{height:36px;padding:0 32px 0 12px;font-size:12.5px}
 .split-line select{height:34px;padding:0 32px 0 10px;font-size:13px}
-.gear-cat-grid .fg select{padding:9px 32px}
 
 /* ── Dark dashboard polish (screenshot style) ── */
 .chip.chip-src.on{
@@ -4411,8 +4410,8 @@ select.btn{height:34px;padding:0 32px 0 12px;font-size:12px}
 select,input[type="text"],input[type="search"],input[type="number"],input[type="date"],input[type="url"],input[type="password"],textarea{
   color-scheme:inherit;
 }
-.fg input,.fg textarea,
-.form-grid input,.form-grid textarea{
+.fg input,.fg textarea,.fg select,
+.form-grid input,.form-grid textarea,.form-grid select{
   background:var(--surf2);
   border-color:var(--bdr);
   color:var(--txt);
