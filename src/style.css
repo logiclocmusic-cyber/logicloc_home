@@ -441,7 +441,7 @@ body{
 }
 .home-cat-card{
   --card-accent:#5b8cff;
-  --home-bar-muted:rgba(255,255,255,.12);
+  --home-bar-muted:color-mix(in srgb, var(--card-accent) 26%, transparent);
   background:var(--surf);border:1px solid var(--bdr);border-radius:22px;
   padding:10px 14px 12px;box-shadow:var(--shadow-sm);
   display:flex;align-items:flex-end;justify-content:space-between;gap:10px;min-height:100px;
@@ -4399,6 +4399,12 @@ html[data-theme="light"]{
   --scroll-thumb:rgba(28,29,48,.16);
   --scroll-thumb-hover:rgba(28,29,48,.26);
   color-scheme:light;
+}
+html[data-theme="light"] .home-cat-card{
+  --home-bar-muted:color-mix(in srgb, var(--card-accent) 38%, var(--surf3));
+}
+html[data-theme="light"] .home-cat-card-click:hover{
+  box-shadow:0 0 0 1px color-mix(in srgb, var(--card-accent) 35%, transparent),0 12px 28px rgba(40,45,80,.1);
 }
 html[data-theme="light"] .sb{
   box-shadow:0 8px 28px rgba(40,45,80,.08);
