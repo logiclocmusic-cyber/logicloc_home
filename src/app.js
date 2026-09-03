@@ -101,6 +101,7 @@ let activeTxnLinkId = null;
 let activeTxnMergeId = null;
 let activeTradeLinkId = null;
 let activeTradeNameEditId = null;
+let activeTradeCatFilter = '';
 let tradeAddLinkId = null;
 let dayNotes = {};
 let detRows = [], detSort = 'a-';
@@ -5251,22 +5252,57 @@ function tradeLinkSortKey(link) {
 function tradeLinkPrimaryCat(link) {
   const rows = rowsForLinkKeys(link.keys, allData);
   if (!rows.length) return '未分类';
-  const counts = new Map();
-  for (const r of rows) {
-    const cat = (r['分类'] || '').trim() || '未分类';
-    counts.set(cat, (counts.get(cat) || 0) + 1);
-  }
-  let best = '未分类';
-  let bestN = 0;
-  for (const [cat, n] of counts) {
-    if (n > bestN) { best = cat; bestN = n; }
-  }
-  return best;
+  const earliest = [...rows].sort((a, b) =>
+    (a['日期'] + a['时间']).localeCompare(b['日期'] + b['时间']))[0];
+  return (earliest['分类'] || '').trim() || '未分类';
 }
 
 function tradeCatSortIndex(cat) {
   const idx = CATS.indexOf(cat);
   return idx >= 0 ? idx : CATS.length + 1;
+}
+
+function tradeCategoriesFromLinks(links) {
+  const map = new Map();
+  for (const link of links) {
+    const cat = tradeLinkPrimaryCat(link);
+    map.set(cat, (map.get(cat) || 0) + 1);
+  }
+  return [...map.entries()]
+    .sort((a, b) => {
+      const d = tradeCatSortIndex(a[0]) - tradeCatSortIndex(b[0]);
+      return d !== 0 ? d : a[0].localeCompare(b[0], 'zh-CN');
+    });
+}
+
+function renderTradesCatChips(categories, totalCount) {
+  const el = document.getElementById('tradesCatChips');
+  if (!el) return;
+  if (!categories.length) {
+    el.classList.add('hide');
+    el.innerHTML = '';
+    return;
+  }
+  el.classList.remove('hide');
+  const allOn = !activeTradeCatFilter;
+  let html = `<button type="button" class="trades-cat-chip${allOn ? ' on' : ''}" onclick="filterTradeCat('')">
+    <span class="trades-cat-chip-label">全部</span>
+    <span class="trades-cat-chip-cnt">${totalCount}</span>
+  </button>`;
+  for (const [cat, count] of categories) {
+    const on = activeTradeCatFilter === cat;
+    html += `<button type="button" class="trades-cat-chip${on ? ' on' : ''}" onclick="filterTradeCat('${encodeURIComponent(cat)}')" title="${escHtml(catLabel(cat))}">
+      <span class="trades-cat-chip-icon">${catIconHtml(cat, { size: 14, wrapClass: 'cat-pick-emoji-wrap' })}</span>
+      <span class="trades-cat-chip-label">${escHtml(catLabel(cat))}</span>
+      <span class="trades-cat-chip-cnt">${count}</span>
+    </button>`;
+  }
+  el.innerHTML = html;
+}
+
+function filterTradeCat(catEnc) {
+  activeTradeCatFilter = catEnc ? decodeURIComponent(catEnc) : '';
+  renderTradesPage();
 }
 
 function groupTradesByCategory(links) {
@@ -5380,9 +5416,16 @@ function renderTradeCardHtml(link) {
 function renderTradesPage() {
   const el = document.getElementById('tradesList');
   if (!el) return;
-  const links = getTxnPairs().slice().sort((a, b) => tradeLinkSortKey(b).localeCompare(tradeLinkSortKey(a)));
-  renderTradesTotal(links);
-  if (!links.length) {
+  const allLinks = getTxnPairs().slice().sort((a, b) => tradeLinkSortKey(b).localeCompare(tradeLinkSortKey(a)));
+  const categories = tradeCategoriesFromLinks(allLinks);
+
+  if (activeTradeCatFilter && !categories.some(([cat]) => cat === activeTradeCatFilter)) {
+    activeTradeCatFilter = '';
+  }
+
+  if (!allLinks.length) {
+    renderTradesCatChips([], 0);
+    renderTradesTotal([]);
     el.innerHTML = `<div class="trades-empty">
       <i class="ti ti-link-off"></i>
       <p>暂无关联交易事件</p>
@@ -5390,15 +5433,38 @@ function renderTradesPage() {
     </div>`;
     return;
   }
-  const groups = groupTradesByCategory(links);
-  el.innerHTML = groups.map(({ cat, items }) => `<section class="trades-group">
-    <header class="trades-group-head">
-      <span class="trades-group-icon">${catIconHtml(cat, { size: 18, wrapClass: 'cat-pick-emoji-wrap' })}</span>
-      <h3 class="trades-group-title">${escHtml(catLabel(cat))}</h3>
-      <span class="trades-group-meta">${items.length} 个事件</span>
-    </header>
-    <div class="trades-group-list">${items.map(renderTradeCardHtml).join('')}</div>
-  </section>`).join('');
+
+  renderTradesCatChips(categories, allLinks.length);
+
+  const links = activeTradeCatFilter
+    ? allLinks.filter(link => tradeLinkPrimaryCat(link) === activeTradeCatFilter)
+    : allLinks;
+
+  renderTradesTotal(links);
+
+  if (!links.length) {
+    el.innerHTML = `<div class="trades-empty">
+      <i class="ti ti-filter-off"></i>
+      <p>该分类下暂无事件</p>
+      <span>点击「全部」查看所有关联交易</span>
+    </div>`;
+    return;
+  }
+
+  if (activeTradeCatFilter) {
+    el.innerHTML = `<div class="trades-filtered-list">${links.map(renderTradeCardHtml).join('')}</div>`;
+  } else {
+    const groups = groupTradesByCategory(links);
+    el.innerHTML = groups.map(({ cat, items }) => `<section class="trades-group">
+      <header class="trades-group-head">
+        <span class="trades-group-icon">${catIconHtml(cat, { size: 18, wrapClass: 'cat-pick-emoji-wrap' })}</span>
+        <h3 class="trades-group-title">${escHtml(catLabel(cat))}</h3>
+        <span class="trades-group-meta">${items.length} 个事件</span>
+      </header>
+      <div class="trades-group-list">${items.map(renderTradeCardHtml).join('')}</div>
+    </section>`).join('');
+  }
+
   if (activeTradeNameEditId) {
     const inp = document.getElementById(`tradeNameInp-${activeTradeNameEditId}`);
     inp?.focus();
@@ -5959,7 +6025,7 @@ Object.assign(window, {
   openTxnMergeModal, closeTxnMergeModal, confirmTxnMergeModal, onTxnMergeCatChange, unmergeLedgerGroup,
   filterTxnMerge, clearTxnMergeFilter,
   filterTxnLink, clearTxnLinkFilter, toggleTradeCard, openTradeLink, viewTradeInLedger, unlinkTradeGroup,
-  startTradeNameEdit, saveTradeNameEdit, cancelTradeNameEdit,
+  startTradeNameEdit, saveTradeNameEdit, cancelTradeNameEdit, filterTradeCat,
   openTradeAddModal, closeTradeAddModal, onTradeAddFilterChange, addTxnToTradeEvent,
   resetImportPreview, confirmImport, onImportSrcChange, toggleDupImport, toggleAllDupImport,
   toggleImportRecordType, updateImportRecordAmount, resetAllLedger,

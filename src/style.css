@@ -2939,6 +2939,33 @@ select.btn:hover:not(:disabled){
   .trades-total{max-width:none;text-align:left}
   .trades-total-pl{justify-content:flex-start}
 }
+.trades-cat-chips{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;
+}
+.trades-cat-chips.hide{display:none}
+.trades-cat-chip{
+  display:inline-flex;align-items:center;gap:6px;padding:5px 10px 5px 6px;
+  border:1px solid var(--bdr);border-radius:999px;background:var(--surf);
+  font-size:12px;font-weight:600;color:var(--txt);cursor:pointer;font-family:inherit;
+  transition:border-color .15s,background .15s,color .15s,box-shadow .15s;
+}
+.trades-cat-chip:hover{border-color:var(--bdr2);background:var(--surf2)}
+.trades-cat-chip.on{
+  border-color:rgba(139,127,212,.45);background:var(--primary-bg);color:var(--primary-t);
+  box-shadow:0 1px 4px rgba(99,102,241,.12);
+}
+.trades-cat-chip-icon{display:inline-flex;flex-shrink:0}
+.trades-cat-chip-icon .cat-pick-emoji-wrap{width:20px;height:20px}
+.trades-cat-chip-icon .cat-icon-img{width:12px;height:12px}
+.trades-cat-chip-label{white-space:nowrap;line-height:1.2}
+.trades-cat-chip-cnt{
+  min-width:18px;height:18px;padding:0 5px;border-radius:999px;
+  background:var(--surf2);font-size:10px;font-weight:700;color:var(--txt3);
+  display:inline-flex;align-items:center;justify-content:center;line-height:1;
+}
+.trades-cat-chip.on .trades-cat-chip-cnt{background:rgba(99,102,241,.15);color:var(--primary-t)}
+.trades-filtered-list{display:flex;flex-direction:column;gap:12px}
+.trades-filtered-list .trade-card{border:1px solid var(--bdr);border-radius:14px;box-shadow:var(--shadow-sm)}
 .trades-list{display:flex;flex-direction:column;gap:16px}
 .trades-group{
   background:var(--surf);border:1px solid var(--bdr);border-radius:14px;overflow:hidden;
