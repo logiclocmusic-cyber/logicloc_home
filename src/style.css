@@ -56,6 +56,8 @@
   --hair:rgba(255,255,255,.08);
   --scroll-thumb:rgba(255,255,255,.14);
   --scroll-thumb-hover:rgba(255,255,255,.22);
+  --cat-icon-bg:#000;
+  --cat-icon-bdr:rgba(255,255,255,.12);
   color-scheme:dark;
 }
 
@@ -683,13 +685,9 @@ body{
 .chip-day-num{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--txt)}
 .chip-day-month{min-width:46px;padding-left:8px;padding-right:8px}
 .chip-day.is-weekend .chip-day-wd,.chip-day.is-weekend .chip-day-num{color:#f9a8d4}
-.chip-day.has-txn{box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--primary) 55%,transparent)}
 .chip-day.is-today:not(.on){
   border-color:color-mix(in srgb,var(--primary) 55%,var(--bdr));
   box-shadow:0 0 0 1px color-mix(in srgb,var(--primary) 28%,transparent);
-}
-.chip-day.is-today.has-txn:not(.on){
-  box-shadow:0 0 0 1px color-mix(in srgb,var(--primary) 28%,transparent),inset 0 -2px 0 color-mix(in srgb,var(--primary) 55%,transparent);
 }
 .chip-day.on{
   background:var(--primary);border-color:var(--primary);color:#fff;
@@ -697,7 +695,6 @@ body{
   transform:translateY(-1px);
 }
 .chip-day.on .chip-day-wd,.chip-day.on .chip-day-num{color:#fff}
-.chip-day.on.has-txn{box-shadow:0 4px 12px color-mix(in srgb,var(--primary) 38%,transparent),inset 0 -2px 0 rgba(255,255,255,.55)}
 .chip-day.on.is-weekend .chip-day-wd,.chip-day.on.is-weekend .chip-day-num{color:#fff}
 #view-ledger > .chips-src .chip.chip-src{
   padding:3px 8px;font-size:11px;border-radius:6px;line-height:1.25;
@@ -1316,7 +1313,7 @@ select.btn:hover:not(:disabled){
 }
 .cat-pick-emoji-wrap{
   width:22px;height:22px;border-radius:50%;
-  border:1px solid rgba(255,255,255,.12);background:#000;flex-shrink:0;
+  border:1px solid var(--cat-icon-bdr);background:var(--cat-icon-bg);flex-shrink:0;
 }
 .cat-pick-emoji-wrap .cat-icon-img{width:14px;height:14px;object-fit:contain}
 .cat-pick-emoji-wrap .cat-icon-emoji{font-size:12px;line-height:1}
@@ -4398,6 +4395,8 @@ html[data-theme="light"]{
   --hair:rgba(28,29,48,.08);
   --scroll-thumb:rgba(28,29,48,.16);
   --scroll-thumb-hover:rgba(28,29,48,.26);
+  --cat-icon-bg:#fff;
+  --cat-icon-bdr:rgba(28,29,48,.12);
   color-scheme:light;
 }
 html[data-theme="light"] .home-cat-card{
