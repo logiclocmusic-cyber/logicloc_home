@@ -312,6 +312,11 @@
         <span class="catbrowse-year-lbl">年份</span>
         <select id="catBrowseYearSel" class="btn catbrowse-year-sel" onchange="onCatBrowseYearChange(this.value)" aria-label="选择年份"></select>
       </label>
+      <div class="catbrowse-date-range">
+        <input type="date" id="catBrowseD1" class="catbrowse-date-inp" onchange="onCatBrowseDateRangeChange()" aria-label="开始日期">
+        <span class="catbrowse-date-sep">至</span>
+        <input type="date" id="catBrowseD2" class="catbrowse-date-inp" onchange="onCatBrowseDateRangeChange()" aria-label="结束日期">
+      </div>
     </div>
     <div class="bulk-bar catbrowse-bulk-bar" id="catBrowseBulkBar">
       <span class="bulk-cnt" id="catBrowseBulkCnt">0 项已选</span>

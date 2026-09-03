@@ -44,7 +44,7 @@ import { initCatPicker, catCellInnerHtml, openEmojiPicker, closeEmojiPicker } fr
 import { subCatSelectHtml, rowHasUnsetSub, rowMatchesSubCat, SUBCAT_UNSET_LABEL } from './subcat-ui.js';
 import { srcMarkHtml, srcBrandColor } from './source-logos.js';
 import {
-  initCatBrowse, renderCatBrowse, selectCatBrowse, onCatBrowseYearChange,
+  initCatBrowse, renderCatBrowse, selectCatBrowse, onCatBrowseYearChange, onCatBrowseDateRangeChange,
   toggleCatBrowseGroup, toggleCatBrowseUnsetSubFilter,
   getCatBrowseSelectedKeys, clearCatBrowseSelection, updateCatBrowseBulkBar,
   toggleCatBrowseSelect, toggleCatBrowseGroupSelect, toggleCatBrowseSelectAll
@@ -3861,6 +3861,16 @@ function setQuick(type) {
   applyF();
 }
 
+function initLedgerDateInputs() {
+  const d1El = document.getElementById('d1');
+  const d2El = document.getElementById('d2');
+  if (!d1El || !d2El) return;
+  if (d1El.value || d2El.value) return;
+  const y = new Date().getFullYear();
+  d1El.value = `${y}-01-01`;
+  d2El.value = `${y}-12-31`;
+}
+
 function syncUnsetSubFilterUI() {
   const btn = document.getElementById('unsetSubFilterBtn');
   if (!btn) return;
@@ -6003,6 +6013,7 @@ async function initAppInner() {
   setupDropZone();
   setupImportHistoryActions();
   setupLedgerHeadScrollSync();
+  initLedgerDateInputs();
   await loadData();
   appReady = true;
 }
@@ -6016,7 +6027,7 @@ export function refreshForTheme() {
 }
 
 Object.assign(window, {
-  sw, openImport, toggleUnsetSubFilter, toggleCatBrowseUnsetSubFilter, onCatBrowseYearChange, selectCatBrowse, toggleCatBrowseGroup,
+  sw, openImport, toggleUnsetSubFilter, toggleCatBrowseUnsetSubFilter, onCatBrowseYearChange, onCatBrowseDateRangeChange, selectCatBrowse, toggleCatBrowseGroup,
   toggleCatBrowseSelect, toggleCatBrowseGroupSelect, toggleCatBrowseSelectAll, clearCatBrowseSelection,
   applyCatBrowseBulkCat, applyCatBrowseBulkSub, linkCatBrowsePair, unlinkCatBrowsePair,
   openAdd, closeAdd, saveAdd, openEditRow, openSrc, closeSrc, addSrc, saveSrc,
