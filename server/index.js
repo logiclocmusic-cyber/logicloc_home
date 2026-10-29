@@ -31,6 +31,14 @@ mkdirSync(TRAVEL_IMG_DIR, { recursive: true });
 mkdirSync(TRAVEL_FILE_DIR, { recursive: true });
 mkdirSync(FAMILY_EVENT_DIR, { recursive: true });
 const PORT = Number(process.env.PORT) || 3001;
+const APP_VERSION = (() => {
+  try {
+    const pkg = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf8'));
+    return String(pkg.version || '').trim() || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+})();
 const isProd = process.env.NODE_ENV === 'production';
 const serveStatic = process.env.SERVE_STATIC !== 'false';
 
@@ -133,7 +141,8 @@ app.get('/api/health', (_req, res) => {
     ...getStats(),
     port: PORT,
     mobileUrls: getLanUrls(PORT),
-    auth: 'pin'
+    auth: 'pin',
+    version: APP_VERSION
   });
 });
 

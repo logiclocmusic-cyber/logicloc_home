@@ -1117,26 +1117,40 @@ async function updateBackendFooter(count) {
   const btn = document.getElementById('sbFooterBtn');
   if (!sub || !tip) return;
   const titleEl = tip.querySelector('strong');
-  if (API_BASE) {
-    let host = API_BASE;
-    try { host = new URL(API_BASE).hostname; } catch { /* keep raw */ }
-    if (titleEl) titleEl.textContent = '云端数据库';
-    sub.textContent = count != null
-      ? `Railway · ${host} · ${count} 笔`
-      : `Railway · ${host}`;
-    btn?.setAttribute('title', `云端数据库 · Railway · ${host}${count != null ? ` · ${count} 笔` : ''}`);
-  } else {
-    if (titleEl) titleEl.textContent = '本地账本';
-    let mobileLine = '';
-    try {
-      const health = await checkHealth().catch(() => null);
+  let versionLabel = '';
+  try {
+    const health = await checkHealth().catch(() => null);
+    const ver = String(health?.version || '').trim();
+    if (ver) versionLabel = ` · v${ver}`;
+    if (API_BASE) {
+      let host = API_BASE;
+      try { host = new URL(API_BASE).hostname; } catch { /* keep raw */ }
+      if (titleEl) titleEl.textContent = '云端数据库';
+      sub.textContent = count != null
+        ? `Railway · ${host}${versionLabel} · ${count} 笔`
+        : `Railway · ${host}${versionLabel}`;
+      btn?.setAttribute('title', `云端数据库 · Railway · ${host}${versionLabel}${count != null ? ` · ${count} 笔` : ''}`);
+    } else {
+      if (titleEl) titleEl.textContent = '本地账本';
       const urls = health?.mobileUrls || [];
-      if (urls.length) mobileLine = ` · 手机 ${urls[0].replace(/^https?:\/\//, '')}`;
-    } catch { /* ignore */ }
-    sub.textContent = count != null
-      ? `本机 SQLite · ${count} 笔${mobileLine}`
-      : `本机 SQLite${mobileLine}`;
-    btn?.setAttribute('title', `本地账本 · SQLite${mobileLine}`);
+      const mobileLine = urls.length ? ` · 手机 ${urls[0].replace(/^https?:\/\//, '')}` : '';
+      sub.textContent = count != null
+        ? `本机 SQLite${versionLabel} · ${count} 笔${mobileLine}`
+        : `本机 SQLite${versionLabel}${mobileLine}`;
+      btn?.setAttribute('title', `本地账本 · SQLite${versionLabel}${mobileLine}`);
+    }
+  } catch {
+    if (API_BASE) {
+      let host = API_BASE;
+      try { host = new URL(API_BASE).hostname; } catch { /* keep raw */ }
+      if (titleEl) titleEl.textContent = '云端数据库';
+      sub.textContent = count != null ? `Railway · ${host} · ${count} 笔` : `Railway · ${host}`;
+      btn?.setAttribute('title', `云端数据库 · Railway · ${host}${count != null ? ` · ${count} 笔` : ''}`);
+    } else {
+      if (titleEl) titleEl.textContent = '本地账本';
+      sub.textContent = count != null ? `本机 SQLite · ${count} 笔` : '本机 SQLite';
+      btn?.setAttribute('title', '本地账本 · SQLite');
+    }
   }
 }
 

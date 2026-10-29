@@ -33,6 +33,7 @@ spawn rsync -avz --delete -e "$RSYNC_SSH" \
   --exclude node_modules --exclude .git --exclude data --exclude .env \
   --exclude electron --exclude release --exclude dist-electron \
   --exclude '*.db' --exclude '*.db-wal' --exclude '*.db-shm' \
+  --exclude .nas_pass_xfer --exclude .env.local \
   "$ROOT/" "$NAS_USER@$NAS_HOST:$NAS_DIR/"
 expect {
   -re "(?i)password:" { send "$NAS_PASS\r"; exp_continue }
