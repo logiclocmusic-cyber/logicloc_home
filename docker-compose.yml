@@ -1,0 +1,23 @@
+services:
+  ledger:
+    build: .
+    image: family-ledger:latest
+    container_name: family-ledger
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3001}:3001"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      LISTEN_HOST: 0.0.0.0
+      DB_PATH: /data/ledger.db
+      GEAR_IMG_DIR: /data/gear-images
+      TRAVEL_IMG_DIR: /data/travel-images
+      TRAVEL_FILE_DIR: /data/travel-files
+      INVOICE_DIR: /data/invoices
+      FAMILY_EVENT_DIR: /data/family-events
+      TESSERACT_CACHE: /data/tesseract-cache
+    volumes:
+      - ./data:/data

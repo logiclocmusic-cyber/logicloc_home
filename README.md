@@ -36,6 +36,15 @@ npm start
 
 访问 **http://localhost:3001**（同时提供 API 与静态页面）。
 
+## NAS / Docker 部署
+
+在群晖、威联通等 NAS 上可用 Docker 一键部署（前端 + API + 数据卷）。详见 **[NAS.md](./NAS.md)**。
+
+```bash
+cp .env.nas.example .env
+docker compose up -d --build
+```
+
 ## 从旧版（localStorage）迁移
 
 1. 在旧版页面使用「备份数据」导出 JSON

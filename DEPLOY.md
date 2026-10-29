@@ -1,4 +1,12 @@
-# 部署指南：Vercel 前端 + Railway 后端
+# 部署指南
+
+- **NAS / 自托管（Docker）**：见 **[NAS.md](./NAS.md)** — 单机运行前端 + API + SQLite，适合局域网或反向代理。
+- **停用云端**：见 **[STOP-CLOUD.md](./STOP-CLOUD.md)** — 关闭 Railway / Vercel。
+- **云端（下文）**：Vercel 前端 + Railway 后端。
+
+---
+
+## Vercel 前端 + Railway 后端
 
 ## 架构
 

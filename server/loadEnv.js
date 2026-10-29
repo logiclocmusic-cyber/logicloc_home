@@ -21,11 +21,9 @@ function loadEnvFile(path) {
   }
 }
 
-export function configEnvHint() {
-  const path = process.env.APP_CONFIG_PATH;
-  if (!path || !existsSync(path)) return null;
+function configHintFromRaw(raw) {
+  if (!raw) return null;
   try {
-    const raw = readFileSync(path, 'utf8');
     if (/^GEMINI_MODEL=.*2\.0-flash/im.test(raw)) {
       return 'config.env 中 GEMINI_MODEL 使用了已停用的 gemini-2.0-flash，请改为 gemini-2.5-flash-lite';
     }
@@ -43,6 +41,31 @@ export function configEnvHint() {
     }
   } catch { /* ignore */ }
   return null;
+}
+
+export function configEnvHint() {
+  const appPath = process.env.APP_CONFIG_PATH;
+  if (appPath && existsSync(appPath)) {
+    try {
+      const hint = configHintFromRaw(readFileSync(appPath, 'utf8'));
+      if (hint) return hint;
+    } catch { /* ignore */ }
+  }
+  const dotEnv = join(__dirname, '..', '.env');
+  if (existsSync(dotEnv)) {
+    try {
+      const raw = readFileSync(dotEnv, 'utf8');
+      if (/^#\s*DEEPSEEK_VISION_API_KEY=/m.test(raw) && !/^DEEPSEEK_VISION_API_KEY=\S+/m.test(raw)) {
+        return '.env 中硅基流动 DEEPSEEK_VISION_* 被注释了，请去掉行首 # 并填入密钥后重启容器';
+      }
+      if (/^DEEPSEEK_VISION_API_KEY=\s*$/m.test(raw)) {
+        return '.env 中 DEEPSEEK_VISION_API_KEY 为空，请填写硅基流动密钥后重启容器';
+      }
+      const hint = configHintFromRaw(raw);
+      if (hint) return hint;
+    } catch { /* ignore */ }
+  }
+  return '未找到 AI 配置。NAS 请编辑 /volume1/docker/family-ledger/.env 填入 DEEPSEEK_VISION_*，Mac 应用请编辑 config.env';
 }
 
 loadEnvFile(join(__dirname, '..', '.env'));

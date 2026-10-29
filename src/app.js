@@ -4,10 +4,11 @@ import { ImportTimeline } from './import-timeline.js';
 import { Parsers } from './parsers.js';
 import {
   DEFAULT_CATS, DEFAULT_EMOJIS, LEGACY_DEFAULT_EMOJIS, CAT_ICON_NAME_ALIASES, DEFAULT_SOURCES, DEFAULT_IMPORT_SOURCE, DEFAULT_SUBCATS, CAT_COLORS,
-  MONITOR_CATS, EXCLUDE_CATS, DEFAULT_OFFSET_CATS, DEFAULT_CAT_STATS_EXCLUDE, MONITOR_EMOJIS, DEFAULT_INCOME_DATA_CATS, DEFAULT_INCOME_CATS
+  MONITOR_CATS, EXCLUDE_CATS, DEFAULT_OFFSET_CATS, DEFAULT_CAT_STATS_EXCLUDE, MONITOR_EMOJIS, DEFAULT_INCOME_DATA_CATS, DEFAULT_INCOME_CATS,
+  DEFAULT_HOME_COST_GROUPS, DEFAULT_HOME_BIG_EXPENSE_MIN, DEFAULT_HOME_BIG_EXCLUDE
 } from './config.js';
 import { renderCatIcon, iconRef, isIconRef, isIconifyRef, normalizeIconRef, resolveCatIconValue } from './cat-icons.js';
-import { fetchState, saveState, resetLedger, deleteImportBatchApi, changeImportBatchSourceApi, checkHealth } from './api.js';
+import { fetchState, saveState, resetLedger, deleteImportBatchApi, changeImportBatchSourceApi, checkHealth, reportPresence } from './api.js';
 import {
   createBatchId, stampImportBatch, deriveImportHistory,
   recordsForBatch as batchRecords, deleteConfirmMessage
@@ -24,13 +25,24 @@ import {
 import {
   renderCompanyCostPage, setupCompanyCost,
   openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload, triggerManualInvoiceUpload,
-  toggleInvoicePrinted, downloadInvoiceFile, printInvoiceFile, openAppConfig
+  toggleInvoicePrinted, openInvoiceFile, downloadInvoiceFile, downloadFilteredInvoices, printInvoiceFile, openAppConfig,
+  preloadCompanyInvoices, invoiceMatchTagHtml, openInvoiceMatch, closeInvoiceMatch, searchInvoiceMatch, selectInvoiceMatch
 } from './company-cost.js';
+import { loadTravel, setupTravel, isTravelEditing, reloadTravelFromServer } from './travel.js';
+import { startLiveSync } from './live-sync.js';
+import {
+  loadEventTags, getEventTags, loadEventTagGroups, getEventTagGroups, setupEventTags, eventTagIds, eventTagById, eventTagTotals,
+  eventTagRowHtml, createEventTag, addRowTag, removeRowTag, renameEventTag, setEventTagHidden, deleteEventTag, convertSubcategoryToEventTag,
+  createEventTagGroup, renameEventTagGroup, deleteEventTagGroup, moveEventTagToGroup,
+  unionEventTags, unionEventTagGroups
+} from './event-tags.js';
 import {
   loadFamilyEvents, setupFamilyEvents,
   initFamily,
   openFamilyCreate, openFamilyEdit, closeFamilyEdit, saveFamilyEdit,
   removeFamilyEvent, triggerFamilyUpload, onFamilySearch, clearFamilySearch, setFamilyViewMode,
+  setFamilyPageFileCat, setFamilyModalFileCat, setFamilyPageFileStar, setFamilyModalFileStar,
+  assignSelectedFamilyFiles, clearSelectedFamilyFileCat,
   openFamilyTxnSearch, closeFamilyTxnSearch, onFamilyTxnSearch,
   pickFamilyLinkedTxn, removeFamilyLinkedTxn,
 } from './family.js';
@@ -41,7 +53,10 @@ import {
   parentCatCellHtml, splitSubRowHtml, splitSubRowNoDateHtml
 } from './splits.js';
 import { initCatPicker, catCellInnerHtml, openEmojiPicker, closeEmojiPicker } from './cat-picker.js';
-import { subCatSelectHtml, rowHasUnsetSub, rowMatchesSubCat, SUBCAT_UNSET_LABEL } from './subcat-ui.js';
+import { subCatSelectHtml, rowHasUnsetSub, rowMatchesSubCat, setupSubCatPop, SUBCAT_UNSET_LABEL } from './subcat-ui.js';
+import {
+  inferSubcategoryRenames, renameCategoriesInTransactions, renameSubcategoriesInTransactions
+} from './category-migration.js';
 import { srcMarkHtml, srcBrandColor } from './source-logos.js';
 import {
   initCatBrowse, renderCatBrowse, selectCatBrowse, onCatBrowseYearChange, onCatBrowseDateRangeChange,
@@ -53,7 +68,7 @@ import {
   loadTxnPairs, getTxnPairs, validateTxnPair, validateTxnLink, addTxnPair, addTxnLink,
   appendTxnLinkKeys, renameTxnLink, removeTxnPairByKey, removeTxnLinkById,
   findPairForKey, findLinkForKey, findLinkById, rowInLink, rowsForLinkKeys,
-  computeLinkStats, linkBalanceMeta, suggestTxnLinkName
+  computeLinkStats, linkBalanceMeta, suggestTxnLinkName, clearTxnPairs
 } from './txn-pairs.js';
 import {
   loadTxnMerges, getTxnMerges, validateTxnMerge, addTxnMerge, removeTxnMergeById,
@@ -66,7 +81,7 @@ import {
   RENQING_CAT
 } from './renqing.js';
 import {
-  initAccounts, loadAccountsState, getAccountsState, renderAccountsPage, renderHomeLongRemindersSection, selectAccountsTab,
+  initAccounts, loadAccountsState, getAccountsState, renderAccountsPage, renderRemindersPage, renderHomeLongRemindersSection, selectAccountsTab,
   consumeRegistryMigrationPersist,
   setupAccountsEvents,
   openAccountsMgr, closeAccountsMgr, resetAccountsMgrForm, saveAccountsMgr,
@@ -75,9 +90,11 @@ import {
   toggleCashAccountEditMode, addCashAccountRow, deleteCashAccount,
   toggleBudgetEditMode, addBudgetRow, deleteBudget,
   toggleLifeAccountEditMode, addLifeAccountRow, deleteLifeAccount,
-  toggleLongReminderEditMode, addLongReminderRow, deleteLongReminder, addLongReminderToCalendar,
+  addLifeGroup, deleteLifeGroup,
+  toggleLongReminderEditMode, addLongReminderRow, deleteLongReminder, toggleLongReminderDone,
   toggleTopbarReminders, closeTopbarReminders,
-  toggleWebAccountEditMode, addWebAccountRow, addWebAccountColumn, deleteWebAccountRow, deleteWebAccountColumn,
+  toggleWebAccountEditMode, addWebAccountPlatform, addWebAccountEntry, addWebAccountRow, addWebAccountColumn,
+  deleteWebAccountEntry, deleteWebAccountRow, deleteWebAccountPlatform, deleteWebAccountColumn, toggleWebPasswordReveal,
   bindSelectedCreditCards, unbindCreditCardFromPool, dissolveCreditPoolById
 } from './accounts.js';
 
@@ -99,11 +116,16 @@ let filterUnsetSubOnly = false;
 let filterSubCat = '';
 let activeTxnLinkId = null;
 let activeTxnMergeId = null;
+let activeEventTagId = null;
 let activeTradeLinkId = null;
 let activeTradeNameEditId = null;
-let activeTradeCatFilter = '';
+let activeTradeGroupEditId = null;
 let tradeAddLinkId = null;
+let tradeMoveTagId = null;
+let tradeHideHidden = true;
 let dayNotes = {};
+let homeCostGroups = normalizeHomeCostGroups(null);
+let homeCostSettingsDraft = null;
 let detRows = [], detSort = 'a-';
 let detIsIncome = false;
 let detFilterUnsetSubOnly = false;
@@ -182,6 +204,13 @@ function formatDateLabel(date) {
   return `${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
+function formatDateWithYearLabel(date) {
+  if (!date) return '—';
+  const d = new Date(`${date}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return date;
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
 function formatDayHeader(date) {
   if (!date) return '—';
   const d = new Date(`${date}T12:00:00`);
@@ -223,9 +252,11 @@ function renderLedgerDayRow(row) {
   const split = hasSplits(row);
   const catCell = split ? parentCatCellHtml(row) : catCellHtml(row);
   const typeCat = split ? (row.splits[0]?.category || row['分类']) : row['分类'];
-  let html = `<div class="tr COL COL-NODATE ledger-row${split ? ' has-splits' : ''}${isR ? ' refunded' : ''}${isEx ? ' excluded' : ''}${isSel ? ' selected' : ''}" data-id="${row.id}">
+  const unsetSub = rowHasUnsetSub(row, subcatsFor) ? ' sub-unset' : '';
+  let html = `<div class="tr COL COL-NODATE ledger-row${split ? ' has-splits' : ''}${isR ? ' refunded' : ''}${isEx ? ' excluded' : ''}${isSel ? ' selected' : ''}${unsetSub}" data-id="${row.id}">
     <div class="td td-check"><input type="checkbox" class="cb" ${isSel ? 'checked' : ''} onchange="toggleSelect(${row.id},this)"></div>
-    ${peerDescCell(row)}
+    ${peerDescCell(row, { editableNote: true })}
+    <div class="td no-strike event-tag-cell">${eventTagRowHtml(row)}</div>
     ${amtCellHtml(row, isR)}
     ${catCell}
     <div class="td no-strike type-cell">${typeBadge(row['收支'], row['退款状态'], typeCat)}</div>
@@ -262,13 +293,17 @@ function escHtml(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function peerDescCell(row) {
+function peerDescCell(row, opts = {}) {
   const product = (row['产品名称'] || '').trim();
   const peer = (row['交易对方'] || '').trim();
   const main = product || peer || '—';
   const d = (row['商品说明'] || '').trim();
+  const note = String(row['备注'] || '').trim();
   const showDesc = d && d !== '/' && d !== main && (!product || d !== peer);
-  const title = showDesc ? `${main} · ${d}` : main;
+  const titleParts = [main];
+  if (showDesc) titleParts.push(d);
+  if (note) titleParts.push(note);
+  const title = escHtml(titleParts.join(' · '));
   const dupTag = row._dupSuspect
     ? '<span class="ledger-dup-flag" title="疑似与其他来源账单重复，可手动删除或标记不计入"><i class="ti ti-copy"></i></span>'
     : '';
@@ -280,7 +315,104 @@ function peerDescCell(row) {
   const mergeTag = merge
     ? `<button type="button" class="ledger-merge-tag" onclick="event.stopPropagation();filterTxnMerge('${escHtml(merge.id)}')" title="查看合并统计的账目">合并</button>`
     : '';
-  return `<div class="td peer-desc" title="${title}"><div class="peer-main">${dupTag}${main}${linkTag}${mergeTag}</div>${showDesc ? `<div class="peer-sub">${d}</div>` : ''}</div>`;
+  const invoiceTag = invoiceMatchTagHtml(row.id);
+  const noteHtml = opts.editableNote ? txnNoteInlineHtml(row) : (note ? `<span class="txn-note txn-note-ro">· ${escHtml(note)}</span>` : '');
+  return `<div class="td peer-desc" title="${title}"><div class="peer-main">${dupTag}<span class="peer-name">${escHtml(main)}</span>${invoiceTag}${noteHtml}${linkTag}${mergeTag}</div>${showDesc ? `<div class="peer-sub">${escHtml(d)}</div>` : ''}</div>`;
+}
+
+function txnNoteInlineHtml(row) {
+  if (row?.id == null || row._statsMerge) return '';
+  const note = String(row['备注'] || '').trim();
+  if (note) {
+    return `<span class="txn-note" data-txn-note-id="${row.id}" role="button" tabindex="0" title="点击编辑备注">· ${escHtml(note)}</span>`;
+  }
+  return `<button type="button" class="txn-note-add" data-txn-note-add="${row.id}" title="添加备注" aria-label="添加备注"><i class="ti ti-message-plus"></i></button>`;
+}
+
+function updTxnNote(id, text) {
+  const row = allData.find(r => r.id === id);
+  if (!row) return;
+  const note = String(text || '').trim();
+  if (String(row['备注'] || '').trim() === note) {
+    renderTable();
+    refreshDetailModal();
+    return;
+  }
+  row['备注'] = note;
+  persist();
+  renderTable();
+  refreshDetailModal();
+  refreshActiveViews();
+}
+
+function startTxnNoteEdit(id, fromEl) {
+  const row = allData.find(r => r.id === id);
+  if (!row || !fromEl) return;
+  const wrap = fromEl.closest('.peer-main, .det-peer-main');
+  if (!wrap) return;
+  const existing = wrap.querySelector('.txn-note-inp');
+  if (existing) {
+    existing.focus();
+    existing.select();
+    return;
+  }
+  const note = String(row['备注'] || '').trim();
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.className = 'txn-note-inp';
+  inp.value = note;
+  inp.maxLength = 80;
+  inp.placeholder = '备注…';
+  inp.dataset.txnNoteId = String(id);
+  inp.setAttribute('aria-label', '交易备注');
+  fromEl.replaceWith(inp);
+  inp.focus();
+  inp.select();
+  const commit = () => {
+    if (inp.dataset.done) return;
+    inp.dataset.done = '1';
+    updTxnNote(id, inp.value);
+  };
+  inp.addEventListener('blur', commit);
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      inp.blur();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      inp.dataset.done = '1';
+      renderTable();
+      refreshDetailModal();
+    }
+  });
+}
+
+let txnNoteEventsBound = false;
+function ensureTxnNoteEvents() {
+  if (txnNoteEventsBound) return;
+  txnNoteEventsBound = true;
+  const onActivate = (e) => {
+    const addBtn = e.target.closest('[data-txn-note-add]');
+    if (addBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      startTxnNoteEdit(Number(addBtn.dataset.txnNoteAdd), addBtn);
+      return;
+    }
+    const noteEl = e.target.closest('[data-txn-note-id]');
+    if (noteEl && !noteEl.classList.contains('txn-note-inp')) {
+      e.preventDefault();
+      e.stopPropagation();
+      startTxnNoteEdit(Number(noteEl.dataset.txnNoteId), noteEl);
+    }
+  };
+  document.addEventListener('click', onActivate);
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const el = e.target.closest('[data-txn-note-id], [data-txn-note-add]');
+    if (!el || el.classList.contains('txn-note-inp')) return;
+    onActivate(e);
+  });
 }
 
 function dupReasonLabel(reason) {
@@ -377,11 +509,22 @@ function catCellHtml(row) {
 }
 
 function detCatCellHtml(row) {
-  return catCellHtml(row).replace('class="td no-strike cat-cell"', 'class="td no-strike cat-cell det-cat-cell"');
+  const html = catCellHtml(row).replace('class="td no-strike cat-cell"', 'class="td no-strike cat-cell det-cat-cell"');
+  const close = html.lastIndexOf('</div>');
+  return html.slice(0, close) + eventTagRowHtml(row) + html.slice(close);
 }
 
 function catLabel(c) { return c; }
-function catColor(c) { const i = CATS.indexOf(c); return i >= 0 ? CAT_COLORS[i] : '#98a2b3'; }
+function catColor(c) {
+  const i = CATS.indexOf(c);
+  if (i < 0) return '#84adff';
+  const color = CAT_COLORS[i % CAT_COLORS.length];
+  // 避免过深/近黑颜色在深色图例上不可见
+  if (!color || /^#0{3,6}$/i.test(color) || /^#1[0-4]/i.test(color) || color === '#000' || color === '#000000') {
+    return '#84adff';
+  }
+  return color;
+}
 
 function colorLuminance(hex) {
   const raw = String(hex || '').replace('#', '');
@@ -501,15 +644,38 @@ function buildState() {
     hiddenGearSectionIds: gear.hiddenGearSectionIds || [],
     renqingAvatars: getRenqingState().renqingAvatars,
     accountCardFaces: getAccountsState().accountCardFaces,
+    accountLogos: getAccountsState().accountLogos,
     accountRegistry: getAccountsState().accountRegistry,
     txnPairs: getTxnPairs(),
     txnMerges: getTxnMerges(),
-    dayNotes: { ...dayNotes }
+    dayNotes: { ...dayNotes },
+    eventTags: getEventTags(),
+    eventTagGroups: getEventTagGroups(),
+    homeCostGroups: {
+      housing: cloneHomeCostRules(homeCostGroups.housing),
+      car: cloneHomeCostRules(homeCostGroups.car),
+      medical: cloneHomeCostRules(homeCostGroups.medical),
+      son: cloneHomeCostRules(homeCostGroups.son),
+      company: cloneHomeCostRules(homeCostGroups.company),
+      bigMin: homeBigExpenseMin(),
+      bigExclude: cloneHomeCostRules(homeBigExcludeRules())
+    }
   };
 }
 
 let persistTimer = null;
 let persistChain = Promise.resolve();
+let persistSaving = false;
+let remoteLedgerVersion = 0;
+let ledgerCheck = false;
+let remoteApplyTimer = null;
+let applyingRemote = false;
+let liveTopicsPending = new Set();
+let streamState = 'connecting';
+let remotePages = [];
+let localEditing = false;
+let presenceKey = '';
+let syncError = '';
 const PERSIST_MAX_RETRIES = 5;
 const PERSIST_NETWORK_MAX_RETRIES = 3;
 
@@ -524,19 +690,109 @@ function isPersistNetworkError(err) {
     || msg.includes('Load failed');
 }
 
+function txnMergeKey(row) {
+  const oid = String(row['交易单号'] || '').trim();
+  if (oid) return `oid:${oid}`;
+  const t = String(row['时间'] || '00:00').trim().split(':');
+  const time = `${(t[0] || '0').padStart(2, '0')}:${(t[1] || '0').padStart(2, '0')}`;
+  return [
+    row['日期'], time, row['来源'],
+    (row['交易对方'] || '').trim(), row['收支'],
+    Number(row['金额'] || 0).toFixed(2)
+  ].join('|');
+}
+
+function adoptServerState(state) {
+  stateVersion = state.stateVersion || 0;
+  refunded = new Set((state.refunded || []).map(id => typeof id === 'string' ? parseInt(id, 10) : id));
+  excluded = new Set((state.excluded || []).map(id => typeof id === 'string' ? parseInt(id, 10) : id));
+  if (state.categories) applyLoadedCategories(state.categories);
+  if (state.sources) SOURCES = state.sources;
+  if (Array.isArray(state.sourceChipOrder)) SOURCE_CHIP_ORDER = [...state.sourceChipOrder];
+  allData = state.transactions || [];
+  const maxId = allData.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0);
+  nextId = Math.max(Number(state.nextId) || 1, maxId + 1);
+  importHistory = state.importHistory || [];
+  Categorizer.applyRules(state.rules);
+  loadGearState(state);
+  loadRenqingState(state);
+  loadAccountsState(state);
+  loadTxnPairs(state);
+  loadTxnMerges(state);
+  dayNotes = (state.dayNotes && typeof state.dayNotes === 'object') ? { ...state.dayNotes } : {};
+  loadEventTags(state);
+  loadEventTagGroups(state);
+  homeCostGroups = normalizeHomeCostGroups(state.homeCostGroups);
+}
+
+
+function unionLongReminders(localReminders) {
+  const reg = getAccountsState().accountRegistry;
+  if (!reg || !Array.isArray(localReminders) || !localReminders.length) return 0;
+  if (!Array.isArray(reg.longReminders)) reg.longReminders = [];
+  const byId = new Map(reg.longReminders.map(item => [item.id, item]));
+  let added = 0;
+  for (const item of localReminders) {
+    if (!item?.id) continue;
+    if (byId.has(item.id)) continue;
+    // skip duplicate name+expiry already on server
+    const dup = reg.longReminders.some(r => r.name === item.name && r.expiry === item.expiry);
+    if (dup) continue;
+    reg.longReminders.push({ ...item });
+    byId.set(item.id, item);
+    added++;
+  }
+  return added;
+}
+
+function mergeMissingTransactions(localTx) {
+  const keys = new Set(allData.map(txnMergeKey));
+  const ids = new Set(allData.map(r => r.id));
+  let added = 0;
+  for (const row of localTx) {
+    if (keys.has(txnMergeKey(row))) continue;
+    const copy = { ...row };
+    if (ids.has(copy.id)) {
+      copy.id = nextId++;
+      ids.add(copy.id);
+    }
+    keys.add(txnMergeKey(copy));
+    allData.push(copy);
+    added++;
+  }
+  if (added) allData.sort((a, b) => (b['日期'] + b['时间']).localeCompare(a['日期'] + a['时间']));
+  return added;
+}
+
 async function persistNowInner(conflictRetry = 0, networkRetry = 0) {
   try {
     const res = await saveState(buildState());
     if (res?.stateVersion != null) stateVersion = res.stateVersion;
     return true;
   } catch (err) {
-    if (err.code === 'STATE_CONFLICT' && err.currentVersion != null && conflictRetry < PERSIST_MAX_RETRIES) {
-      stateVersion = err.currentVersion;
-      return persistNowInner(conflictRetry + 1, networkRetry);
+    if (err.code === 'STATE_CONFLICT' && conflictRetry < 1) {
+      const localTx = allData.slice();
+      const localTags = getEventTags();
+      const localGroups = getEventTagGroups();
+      const localReminders = (getAccountsState().accountRegistry?.longReminders || []).map(item => ({ ...item }));
+      const remote = await fetchState();
+      adoptServerState(remote);
+      const added = mergeMissingTransactions(localTx);
+      const tagsAdded = unionEventTags(localTags);
+      const groupsAdded = unionEventTagGroups(localGroups);
+      const remindersAdded = unionLongReminders(localReminders);
+      syncImportHistory();
+      renderImportTimelineView();
+      renderImportHistoryUI();
+      renderTradesPage();
+      if (added || tagsAdded || groupsAdded || remindersAdded) return persistNowInner(conflictRetry + 1, networkRetry);
+      alert('云端数据已被其他设备更新，已同步最新数据');
+      return false;
     }
     if (err.code === 'STATE_CONFLICT') {
       await loadData();
       if (!document.getElementById('moCat')?.classList.contains('hide')) renderCatList();
+      syncError = '保存失败';
       alert('保存失败：云端数据已被其他设备更新，已同步最新数据');
       return false;
     }
@@ -544,24 +800,300 @@ async function persistNowInner(conflictRetry = 0, networkRetry = 0) {
       await new Promise(r => setTimeout(r, 2000 * (networkRetry + 1)));
       return persistNowInner(conflictRetry, networkRetry + 1);
     }
+    syncError = '保存失败';
     alert('保存失败：' + err.message);
     return false;
   }
 }
 
 async function persistNow() {
+  if (applyingRemote) return false;
   flash();
   updateSubtitle();
   clearTimeout(persistTimer);
   persistTimer = null;
-  const run = persistChain.then(() => persistNowInner());
+  const run = persistChain.then(async () => {
+    persistSaving = true;
+    syncError = '';
+    renderSyncStatus();
+    try {
+      const ok = await persistNowInner();
+      if (ok) syncError = '';
+      return ok;
+    } finally {
+      persistSaving = false;
+      scheduleRemoteApply();
+      syncPresence();
+    }
+  });
   persistChain = run.catch(() => {});
   return run;
 }
 
 function persist() {
+  if (applyingRemote) return;
   clearTimeout(persistTimer);
   persistTimer = setTimeout(() => { persistNow(); }, 300);
+  syncPresence();
+}
+
+function stampLoadedTransactions() {
+  allData.forEach(r => {
+    if (!r['子分类']) r['子分类'] = '';
+    if (!r['产品名称']) r['产品名称'] = '';
+    if (refunded.has(r.id)) r['退款状态'] = 'refunded';
+    else if (!r['退款状态']) r['退款状态'] = 'normal';
+    if (excluded.has(r.id) || r['统计状态'] === 'excluded') {
+      r['统计状态'] = 'excluded';
+      excluded.add(r.id);
+    } else {
+      r['统计状态'] = 'normal';
+    }
+  });
+  allData.sort((a, b) => (b['日期'] + b['时间']).localeCompare(a['日期'] + a['时间']));
+}
+
+function focusedEditor() {
+  const el = document.activeElement;
+  if (!el || el === document.body || el.id === 'topSearch' || el.id === 'qi') return null;
+  const tag = el.tagName;
+  if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT' && !el.isContentEditable) return null;
+  if (el.closest('.mo:not(.hide)')) return el;
+  if (el.closest('.view.on')) return el;
+  return null;
+}
+
+function ledgerEditBusy() {
+  if (persistTimer || persistSaving || pendingImport) return true;
+  if (document.querySelector('.mo:not(.hide)')) return true;
+  return !!focusedEditor();
+}
+
+function renderSyncedViews() {
+  buildSrcChips();
+  buildCatFilter();
+  syncEventTagFilterOptions();
+  applyF();
+  renderKPI();
+  renderMonitor();
+  updateSubtitle();
+  renderImportHistoryUI();
+  renderImportTimelineView();
+  renderGearPage();
+  refreshActiveViews();
+  const on = id => document.getElementById(id)?.classList.contains('on');
+  if (on('view-charts')) renderCharts();
+  if (on('view-company')) renderCompanyCostPage();
+  if (on('view-refunds')) renderRfView();
+  if (on('view-import')) renderImportPage();
+}
+
+function scheduleRemoteApply() {
+  if (remoteApplyTimer) return;
+  remoteApplyTimer = setTimeout(() => {
+    remoteApplyTimer = null;
+    applyRemoteUpdates();
+  }, 500);
+}
+
+async function applyRemoteUpdates() {
+  if (!appReady || applyingRemote) return;
+  const ledgerDue = ledgerCheck || remoteLedgerVersion > stateVersion;
+  const topics = liveTopicsPending;
+  if (!ledgerDue && !topics.size) return;
+  applyingRemote = true;
+  renderSyncStatus();
+  try {
+    if (ledgerDue) {
+      if (ledgerEditBusy()) {
+        scheduleRemoteApply();
+        renderSyncStatus();
+      }
+      else {
+        ledgerCheck = false;
+        const state = await fetchState();
+        const version = state.stateVersion || 0;
+        if (ledgerEditBusy()) {
+          remoteLedgerVersion = Math.max(remoteLedgerVersion, version);
+          scheduleRemoteApply();
+        } else if (version > stateVersion) {
+          adoptServerState(state);
+          stampLoadedTransactions();
+          syncImportHistory();
+          renderSyncedViews();
+          if (remoteLedgerVersion > stateVersion) scheduleRemoteApply();
+        } else {
+          remoteLedgerVersion = stateVersion;
+        }
+      }
+    }
+    if (topics.has('travel')) {
+      if (isTravelEditing()) scheduleRemoteApply();
+      else {
+        topics.delete('travel');
+        await reloadTravelFromServer();
+      }
+    }
+    const familyOn = document.getElementById('view-family')?.classList.contains('on');
+    if (topics.has('family')) {
+      const familyBusy = document.getElementById('moFamily') && !document.getElementById('moFamily').classList.contains('hide');
+      const searchBusy = document.getElementById('moFamilyTxnSearch') && !document.getElementById('moFamilyTxnSearch').classList.contains('hide');
+      if (familyOn && (familyBusy || searchBusy)) scheduleRemoteApply();
+      else {
+        topics.delete('family');
+        if (familyOn) await loadFamilyEvents();
+      }
+    }
+    const companyOn = document.getElementById('view-company')?.classList.contains('on');
+    if (topics.has('invoices')) {
+      const invoiceBusy = ['moInvoice', 'moInvoiceMatch']
+        .some(id => !document.getElementById(id)?.classList.contains('hide'));
+      if (companyOn && invoiceBusy) scheduleRemoteApply();
+      else {
+        topics.delete('invoices');
+        if (companyOn) await renderCompanyCostPage();
+        else await preloadCompanyInvoices();
+        renderTable();
+        refreshDetailModal();
+      }
+    }
+  } catch {
+    scheduleRemoteApply();
+  } finally {
+    applyingRemote = false;
+    renderSyncStatus();
+  }
+}
+
+function pageLabel() {
+  const id = document.querySelector('.view.on')?.id?.replace(/^view-/, '') || '';
+  return {
+    home: '首页', ledger: '明细列表', trades: '事件', catbrowse: '分类检索', catreport: '分类报表',
+    renqing: '人情往来', accounts: '信用账户', reminders: '提醒', charts: '统计图表', monitor: '统计监控', gear: '装备库',
+    family: '家庭记事', travel: '旅行', report: '收支报告', income: '收入数据', company: '公司管理',
+    refunds: '退款管理', import: '导入预览'
+  }[id] || '账本';
+}
+
+function computeLocalEditing() {
+  if (persistTimer || persistSaving || pendingImport || isTravelEditing()) return true;
+  if (document.querySelector('.mo:not(.hide)')) return true;
+  return !!focusedEditor();
+}
+
+function remoteEditorLabel() {
+  const pages = [...new Set(remotePages.filter(Boolean))];
+  if (pages.length === 1) return `另一台电脑正在编辑「${pages[0]}」`;
+  if (pages.length > 1) return `有 ${pages.length} 台电脑正在编辑`;
+  return '另一台电脑正在编辑';
+}
+
+function renderSyncStatus() {
+  const el = document.getElementById('syncStatus');
+  if (!el) return;
+  const editingNow = computeLocalEditing();
+  if (editingNow !== localEditing) {
+    localEditing = editingNow;
+    const page = editingNow ? pageLabel() : '';
+    const key = editingNow ? `1:${page}` : '0';
+    if (key !== presenceKey) {
+      presenceKey = key;
+      reportPresence(editingNow, page);
+    }
+  }
+  const remoteWaiting = applyingRemote || ledgerCheck || remoteLedgerVersion > stateVersion || liveTopicsPending.size > 0;
+  const remoteText = remotePages.length ? remoteEditorLabel() : '';
+  let text = '已同步';
+  let kind = 'ok';
+  if (streamState === 'retry') {
+    text = '连接已断开，正在重连';
+    kind = 'wait';
+  } else if (streamState !== 'live') {
+    text = '正在连接';
+    kind = 'wait';
+  } else if (syncError) {
+    text = syncError;
+    kind = 'bad';
+  } else if (persistSaving) {
+    text = '正在保存';
+    kind = 'wait';
+  } else if (localEditing && remoteWaiting) {
+    text = '本机正在编辑，完成后同步';
+    kind = 'edit';
+  } else if (localEditing && remoteText) {
+    text = `本机正在编辑 · ${remoteText}`;
+    kind = 'edit';
+  } else if (localEditing) {
+    text = '本机正在编辑';
+    kind = 'edit';
+  } else if (applyingRemote || remoteWaiting) {
+    text = '正在同步最新数据';
+    kind = 'wait';
+  } else if (remoteText) {
+    text = remoteText;
+    kind = 'edit';
+  }
+  el.className = `sync-status is-${kind}`;
+  el.textContent = text;
+}
+
+function syncPresence(force) {
+  const editing = computeLocalEditing();
+  const page = editing ? pageLabel() : '';
+  const key = editing ? `1:${page}` : '0';
+  if (force || editing !== localEditing || key !== presenceKey) {
+    localEditing = editing;
+    presenceKey = key;
+    reportPresence(editing, page);
+  } else {
+    localEditing = editing;
+  }
+  renderSyncStatus();
+}
+
+function onLiveEvent(msg) {
+  if (!msg) return;
+  if (msg.topic === 'presence') {
+    remotePages = Array.isArray(msg.pages) ? msg.pages.map(page => String(page || '').trim()).filter(Boolean) : [];
+    renderSyncStatus();
+    return;
+  }
+  if (msg.topic === 'ledger') {
+    const version = Number(msg.stateVersion) || 0;
+    if (version > stateVersion) {
+      remoteLedgerVersion = Math.max(remoteLedgerVersion, version);
+      scheduleRemoteApply();
+      renderSyncStatus();
+    }
+    return;
+  }
+  if (msg.topic === 'travel' || msg.topic === 'family' || msg.topic === 'invoices') {
+    liveTopicsPending.add(msg.topic);
+    scheduleRemoteApply();
+    renderSyncStatus();
+  }
+}
+
+function bindLiveSync() {
+  startLiveSync(onLiveEvent, (up) => {
+    streamState = up ? 'live' : (streamState === 'live' ? 'retry' : 'connecting');
+    renderSyncStatus();
+  });
+  document.addEventListener('focusin', () => syncPresence());
+  document.addEventListener('focusout', () => setTimeout(() => syncPresence(), 180));
+  setInterval(() => syncPresence(), 1000);
+  setInterval(() => { if (localEditing) syncPresence(true); }, 8000);
+  window.addEventListener('pagehide', () => { reportPresence(false, ''); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    ledgerCheck = true;
+    liveTopicsPending.add('travel');
+    if (document.getElementById('view-family')?.classList.contains('on')) liveTopicsPending.add('family');
+    if (document.getElementById('view-company')?.classList.contains('on')) liveTopicsPending.add('invoices');
+    scheduleRemoteApply();
+    renderSyncStatus();
+  });
+  renderSyncStatus();
 }
 
 function setupLedgerHeadScrollSync() {
@@ -608,6 +1140,33 @@ async function updateBackendFooter(count) {
   }
 }
 
+function migrateTradeEventsToTags() {
+  const pairs = getTxnPairs();
+  if (!pairs.length) return false;
+  for (const link of pairs) {
+    const linked = rowsForLinkKeys(link.keys, allData);
+    const rawName = String(link.name || '').trim();
+    const name = rawName && rawName !== '已完成配对' && rawName !== '关联账目'
+      ? rawName
+      : suggestTxnLinkName(linked);
+    const tag = createEventTag(name);
+    if (!tag) continue;
+    const parentIds = new Set();
+    for (const key of link.keys || []) {
+      const text = String(key);
+      const sep = text.indexOf(':');
+      const id = Number(sep < 0 ? text : text.slice(0, sep));
+      if (Number.isFinite(id)) parentIds.add(id);
+    }
+    for (const id of parentIds) {
+      const row = allData.find(item => item.id === id);
+      if (row) addRowTag(row, tag.id);
+    }
+  }
+  clearTxnPairs();
+  return true;
+}
+
 async function loadData() {
   try {
     const health = await checkHealth().catch(() => null);
@@ -639,30 +1198,25 @@ async function loadData() {
     } catch { /* ignore migration errors */ }
     loadRenqingState(state);
     loadAccountsState(state);
-    if (consumeRegistryMigrationPersist()) await persistNow();
     loadTxnPairs(state);
     loadTxnMerges(state);
     dayNotes = (state.dayNotes && typeof state.dayNotes === 'object') ? { ...state.dayNotes } : {};
+    loadEventTags(state);
+    loadEventTagGroups(state);
+    if (migrateTradeEventsToTags()) await persistNow();
+    homeCostGroups = normalizeHomeCostGroups(state.homeCostGroups);
+    // 迁移落库必须在 txnPairs / dayNotes 等全部载入之后，否则会用空值覆盖 NAS
+    if (consumeRegistryMigrationPersist()) await persistNow();
 
-    allData.forEach(r => {
-      if (!r['子分类']) r['子分类'] = '';
-      if (!r['产品名称']) r['产品名称'] = '';
-      if (refunded.has(r.id)) r['退款状态'] = 'refunded';
-      else if (!r['退款状态']) r['退款状态'] = 'normal';
-      if (excluded.has(r.id) || r['统计状态'] === 'excluded') {
-        r['统计状态'] = 'excluded';
-        excluded.add(r.id);
-      } else {
-        r['统计状态'] = 'normal';
-      }
-    });
-    allData.sort((a, b) => (b['日期'] + b['时间']).localeCompare(a['日期'] + a['时间']));
+    stampLoadedTransactions();
+    await preloadCompanyInvoices().catch(() => []);
 
     if (pruneTxnMerges(allData.map(r => r.id))) persist();
 
     syncImportHistory();
     buildSrcChips();
     buildCatFilter();
+    syncEventTagFilterOptions();
     applyF();
     renderKPI();
     renderHome();
@@ -684,16 +1238,154 @@ function updateSubtitle() {}
 
 function kpiCard(label, value, sub, icon, iconCls, valCls, opts = {}) {
   const clickable = opts.kind
-    ? ` role="button" tabindex="0" data-home-kpi="${opts.kind}" class="kpi-c kpi-c-click"`
+    ? ` role="button" tabindex="0" data-home-kpi="${opts.kind}" class="kpi-c kpi-c-click${opts.settingsFn ? ' kpi-c-has-settings' : ''}"`
     : ' class="kpi-c"';
+  const settingsBtn = opts.settingsFn
+    ? `<button type="button" class="kpi-settings-btn" onclick="event.stopPropagation();${opts.settingsFn}()" title="设置计入分类" aria-label="设置计入分类"><i class="ti ti-settings"></i></button>`
+    : '';
+  const iconInner = opts.emojiIcon
+    ? renderCatIcon(opts.emojiIcon, { size: 28, class: 'kpi-emoji-icon' })
+    : `<i class="ti ${icon}"></i>`;
   return `<div${clickable}>
-    <div class="kpi-icon ${iconCls}"><i class="ti ${icon}"></i></div>
+    ${settingsBtn}
+    <div class="kpi-icon ${iconCls}${opts.emojiIcon ? ' kpi-icon-emoji' : ''}">${iconInner}</div>
     <div class="kpi-body">
       <div class="kpi-l">${label}</div>
       <div class="kpi-v ${valCls || ''}">${value}</div>
       <div class="kpi-s">${sub}</div>
     </div>
   </div>`;
+}
+
+function cloneHomeCostRules(rules) {
+  return (Array.isArray(rules) ? rules : []).map(r => ({
+    cat: String(r?.cat || ''),
+    subs: Array.isArray(r?.subs) ? [...new Set(r.subs.map(String))] : null
+  })).filter(r => r.cat);
+}
+
+/** 规则型首页成本卡片（不含大额门槛） */
+const HOME_COST_RULE_KEYS = ['housing', 'car', 'medical', 'son', 'company'];
+/** 首页顶部成本卡片展示顺序 */
+const HOME_COST_CARD_KEYS = ['housing', 'car', 'medical', 'big', 'son', 'company'];
+
+function normalizeHomeCostGroups(raw) {
+  const out = {
+    housing: cloneHomeCostRules(DEFAULT_HOME_COST_GROUPS.housing),
+    car: cloneHomeCostRules(DEFAULT_HOME_COST_GROUPS.car),
+    medical: cloneHomeCostRules(DEFAULT_HOME_COST_GROUPS.medical),
+    son: cloneHomeCostRules(DEFAULT_HOME_COST_GROUPS.son),
+    company: cloneHomeCostRules(DEFAULT_HOME_COST_GROUPS.company),
+    bigMin: DEFAULT_HOME_BIG_EXPENSE_MIN,
+    bigExclude: cloneHomeCostRules(DEFAULT_HOME_BIG_EXCLUDE)
+  };
+  if (!raw || typeof raw !== 'object') return out;
+  for (const key of HOME_COST_RULE_KEYS) {
+    if (Array.isArray(raw[key])) out[key] = cloneHomeCostRules(raw[key]);
+  }
+  const min = Number(raw.bigMin);
+  if (Number.isFinite(min) && min > 0) out.bigMin = min;
+  if (Array.isArray(raw.bigExclude)) out.bigExclude = cloneHomeCostRules(raw.bigExclude);
+  return out;
+}
+
+const HOME_COST_META = {
+  housing: { label: '住房成本', icon: 'ti-home', iconCls: 'lav', emojiIcon: iconRef('1F3E0') },
+  car: { label: '用车成本', icon: 'ti-car', iconCls: 'blue', emojiIcon: iconRef('1F697') },
+  medical: { label: '医疗支出', icon: 'ti-heartbeat', iconCls: 'pink', emojiIcon: iconRef('1F3E5') },
+  big: { label: '大额支出', icon: 'ti-cash', iconCls: 'amber', emojiIcon: iconRef('1F4B0') },
+  son: { label: '为儿子存款', icon: 'ti-pig', iconCls: 'green', emojiIcon: iconRef('1F476') },
+  company: { label: '公司成本', icon: 'ti-building', iconCls: 'blue', emojiIcon: iconRef('1F3E2') }
+};
+
+function homeBigExpenseMin() {
+  const n = Number(homeCostGroups?.bigMin);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_HOME_BIG_EXPENSE_MIN;
+}
+
+function homeBigExcludeRules() {
+  return homeCostGroups?.bigExclude || [];
+}
+
+function homeCostRulesFor(group) {
+  if (group === 'big') return [];
+  return homeCostGroups[group] || [];
+}
+
+function rowMatchesHomeCostRules(r, rules) {
+  if (r['收支'] !== '支出') return false;
+  return rules.some(rule => {
+    if (r['分类'] !== rule.cat) return false;
+    if (rule.subs == null) return true;
+    return rule.subs.includes(r['子分类'] || '');
+  });
+}
+
+function homeCostYearFromYm(ym) {
+  return String(ym || getHomeYm()).slice(0, 4);
+}
+
+function homeCostTxnRows(yearOrYm, group) {
+  const year = String(yearOrYm).slice(0, 4);
+  // 使用 statsExpanded，避免冲抵分类在 statsData 中被折成月净额后丢失子分类/金额
+  if (group === 'big') {
+    const min = homeBigExpenseMin();
+    const exclude = homeBigExcludeRules();
+    return statsExpanded().filter(r =>
+      r['收支'] === '支出'
+      && String(r['日期'] || '').startsWith(year)
+      && Number(r['金额']) >= min
+      && !rowMatchesHomeCostRules(r, exclude)
+    );
+  }
+  const rules = homeCostRulesFor(group);
+  if (!rules.length) return [];
+  return statsExpanded().filter(r =>
+    String(r['日期'] || '').startsWith(year) && rowMatchesHomeCostRules(r, rules)
+  );
+}
+
+function homeCostYearTotal(yearOrYm, group) {
+  return homeCostTxnRows(yearOrYm, group).reduce((s, r) => s + r['金额'], 0);
+}
+
+function homeCostYearMonthCount(yearOrYm, group) {
+  const months = new Set(homeCostTxnRows(yearOrYm, group).map(r => r['日期'].slice(0, 7)));
+  return months.size;
+}
+
+function formatHomeCostRulesBrief(rules) {
+  if (!rules.length) return '';
+  return rules.map(r => {
+    if (r.subs == null) return r.cat;
+    if (!r.subs.length) return `${r.cat}（无子类）`;
+    return `${r.cat}·${r.subs.join('/')}`;
+  }).join(' · ');
+}
+
+function homeCostRulesSummary(groupOrRules) {
+  if (groupOrRules === 'big' || (groupOrRules && groupOrRules.group === 'big')) {
+    const parts = [`单笔 ≥ ${fmtCount(homeBigExpenseMin())} 元`];
+    const exclude = homeBigExcludeRules();
+    if (exclude.length) parts.push(`排除 ${formatHomeCostRulesBrief(exclude)}`);
+    return parts.join(' · ');
+  }
+  const rules = Array.isArray(groupOrRules) ? groupOrRules : homeCostRulesFor(groupOrRules);
+  if (!rules.length) return '未选择分类';
+  return formatHomeCostRulesBrief(rules);
+}
+
+function homeCostAvailableSubs(cat, rule) {
+  const fromCfg = subcatsFor(cat) || [];
+  const fromRule = Array.isArray(rule?.subs) ? rule.subs : [];
+  const set = new Set([...fromCfg, ...fromRule].filter(Boolean));
+  return [...set];
+}
+
+function homeCostCardSub(year, group) {
+  const months = homeCostYearMonthCount(year, group);
+  const summary = homeCostRulesSummary(group);
+  return months ? `${months}个月 · ${summary}` : summary;
 }
 
 function getLastMonthYm() {
@@ -1034,6 +1726,197 @@ function closeHomeCatSettings(type) {
 function closeHomeExpCatSettings() { closeHomeCatSettings('支出'); }
 function closeHomeIncCatSettings() { closeHomeCatSettings('收入'); }
 
+function openHomeCostSettings(group) {
+  if (!HOME_COST_META[group]) return;
+  const hint = document.getElementById('homeCostSettingsHint');
+  const addWrap = document.getElementById('homeCostAddWrap');
+  if (group === 'big') {
+    homeCostSettingsDraft = {
+      group: 'big',
+      bigMin: homeBigExpenseMin(),
+      rules: cloneHomeCostRules(homeBigExcludeRules())
+    };
+    if (hint) hint.textContent = '设置单笔金额下限，并添加要从大额支出中排除的分类/子分类（例如房贷）。';
+    if (addWrap) addWrap.classList.remove('hide');
+    renderHomeCostSettingsList();
+    const title = document.getElementById('homeCostSettingsTitle');
+    if (title) title.textContent = `${HOME_COST_META.big.label} · 门槛与排除`;
+    document.getElementById('moHomeCost')?.classList.remove('hide');
+    return;
+  }
+  homeCostSettingsDraft = {
+    group,
+    rules: cloneHomeCostRules(homeCostRulesFor(group))
+  };
+  if (hint) hint.textContent = '勾选要计入的分类；可进一步勾选子分类。全部子分类勾选等同于整类计入。';
+  if (addWrap) addWrap.classList.remove('hide');
+  renderHomeCostSettingsList();
+  const title = document.getElementById('homeCostSettingsTitle');
+  if (title) title.textContent = `${HOME_COST_META[group].label} · 计入分类`;
+  document.getElementById('moHomeCost')?.classList.remove('hide');
+}
+
+function closeHomeCostSettings() {
+  document.getElementById('moHomeCost')?.classList.add('hide');
+  homeCostSettingsDraft = null;
+}
+
+function findHomeCostDraftRule(cat) {
+  return homeCostSettingsDraft?.rules?.find(r => r.cat === cat) || null;
+}
+
+function renderHomeCostRuleBlocks(rules, emptyText) {
+  if (!rules.length) return `<p class="home-cat-empty">${emptyText}</p>`;
+  return rules.map(rule => {
+    const subs = homeCostAvailableSubs(rule.cat, rule);
+    const allOn = rule.subs == null;
+    const subHtml = subs.length
+      ? `<div class="home-cost-subs">${subs.map(sub => {
+        const on = allOn || rule.subs.includes(sub);
+        return `<label class="home-cost-sub-item"><input type="checkbox" data-cat="${encodeURIComponent(rule.cat)}" data-sub="${encodeURIComponent(sub)}" ${on ? 'checked' : ''} onchange="toggleHomeCostSubSetting(this)"><span>${sub}</span></label>`;
+      }).join('')}</div>`
+      : `<p class="home-cost-subs-empty">该分类暂无子分类，整类生效</p>`;
+    return `<div class="home-cost-cat-block">
+      <div class="home-cost-cat-head">
+        <label class="home-exp-cat-setting-item"><input type="checkbox" checked data-cat="${encodeURIComponent(rule.cat)}" onchange="toggleHomeCostCatSetting(this)"><span>${catLabel(rule.cat)}</span></label>
+        <button type="button" class="btn btn-sm home-cost-remove" onclick="removeHomeCostCat('${encodeURIComponent(rule.cat)}')" title="移除">移除</button>
+      </div>
+      ${subHtml}
+    </div>`;
+  }).join('');
+}
+
+function fillHomeCostAddCatSelect(rules, { allowIncome = false } = {}) {
+  const addSel = document.getElementById('homeCostAddCat');
+  if (!addSel) return;
+  const used = new Set(rules.map(r => r.cat));
+  const available = CATS.filter(c => !used.has(c) && (allowIncome || !INCOME_CATS_SET.has(c)));
+  const label = allowIncome ? '添加排除分类…' : '添加分类…';
+  addSel.innerHTML = available.length
+    ? `<option value="">${label}</option>${available.map(c => `<option value="${encodeURIComponent(c)}">${catLabel(c)}</option>`).join('')}`
+    : '<option value="">无可添加分类</option>';
+}
+
+function renderHomeCostSettingsList() {
+  const list = document.getElementById('homeCostSettingsList');
+  if (!list || !homeCostSettingsDraft) return;
+
+  if (homeCostSettingsDraft.group === 'big') {
+    const min = homeCostSettingsDraft.bigMin;
+    const rules = homeCostSettingsDraft.rules || [];
+    list.innerHTML = `<div class="home-cost-cat-block">
+      <label class="home-cost-big-label">单笔金额 ≥
+        <input type="number" id="homeCostBigMinInput" class="home-cost-big-input" min="1" step="1" value="${min}" onchange="onHomeBigMinDraftChange(this)" oninput="onHomeBigMinDraftChange(this)">
+        元
+      </label>
+      <p class="home-cost-subs-empty" style="margin-left:0">计入当年所有达到该金额的支出明细（不含已排除统计的分类）。</p>
+    </div>
+    <div class="home-cost-exclude-head">排除分类</div>
+    ${renderHomeCostRuleBlocks(rules, '尚未排除分类，可从下方添加（如房贷、乐极客）')}`;
+    fillHomeCostAddCatSelect(rules, { allowIncome: true });
+    return;
+  }
+
+  const rules = homeCostSettingsDraft.rules || [];
+  list.innerHTML = renderHomeCostRuleBlocks(rules, '尚未选择分类，请从下方添加');
+  fillHomeCostAddCatSelect(rules, { allowIncome: true });
+}
+
+function onHomeBigMinDraftChange(inp) {
+  if (!homeCostSettingsDraft || homeCostSettingsDraft.group !== 'big') return;
+  const n = Math.round(Number(inp.value));
+  homeCostSettingsDraft.bigMin = Number.isFinite(n) && n > 0 ? n : DEFAULT_HOME_BIG_EXPENSE_MIN;
+}
+
+function toggleHomeCostCatSetting(inp) {
+  if (!homeCostSettingsDraft?.rules) return;
+  const cat = decodeURIComponent(inp.dataset.cat);
+  if (inp.checked) {
+    if (!findHomeCostDraftRule(cat)) {
+      homeCostSettingsDraft.rules.push({ cat, subs: null });
+    }
+  } else {
+    homeCostSettingsDraft.rules = homeCostSettingsDraft.rules.filter(r => r.cat !== cat);
+  }
+  renderHomeCostSettingsList();
+}
+
+function removeHomeCostCat(encCat) {
+  if (!homeCostSettingsDraft?.rules) return;
+  const cat = decodeURIComponent(encCat);
+  homeCostSettingsDraft.rules = homeCostSettingsDraft.rules.filter(r => r.cat !== cat);
+  renderHomeCostSettingsList();
+}
+
+function addHomeCostCat() {
+  const sel = document.getElementById('homeCostAddCat');
+  if (!sel || !homeCostSettingsDraft?.rules || !sel.value) return;
+  const cat = decodeURIComponent(sel.value);
+  if (!findHomeCostDraftRule(cat)) {
+    homeCostSettingsDraft.rules.push({ cat, subs: null });
+  }
+  renderHomeCostSettingsList();
+}
+
+function toggleHomeCostSubSetting(inp) {
+  if (!homeCostSettingsDraft?.rules) return;
+  const cat = decodeURIComponent(inp.dataset.cat);
+  const sub = decodeURIComponent(inp.dataset.sub);
+  const rule = findHomeCostDraftRule(cat);
+  if (!rule) return;
+  const allSubs = homeCostAvailableSubs(cat, rule);
+  let selected;
+  if (rule.subs == null) {
+    selected = new Set(allSubs);
+  } else {
+    selected = new Set(rule.subs);
+  }
+  if (inp.checked) selected.add(sub);
+  else selected.delete(sub);
+  if (selected.size === 0) {
+    rule.subs = [];
+  } else if (allSubs.length && allSubs.every(s => selected.has(s))) {
+    rule.subs = null;
+  } else {
+    rule.subs = [...selected];
+  }
+  renderHomeCostSettingsList();
+}
+
+function resetHomeCostSettings() {
+  if (!homeCostSettingsDraft) return;
+  const group = homeCostSettingsDraft.group;
+  if (group === 'big') {
+    homeCostSettingsDraft.bigMin = DEFAULT_HOME_BIG_EXPENSE_MIN;
+    homeCostSettingsDraft.rules = cloneHomeCostRules(DEFAULT_HOME_BIG_EXCLUDE);
+  } else {
+    homeCostSettingsDraft.rules = cloneHomeCostRules(DEFAULT_HOME_COST_GROUPS[group] || []);
+  }
+  renderHomeCostSettingsList();
+}
+
+function saveHomeCostSettings() {
+  if (!homeCostSettingsDraft) return;
+  const { group } = homeCostSettingsDraft;
+  if (group === 'big') {
+    const inp = document.getElementById('homeCostBigMinInput');
+    if (inp) onHomeBigMinDraftChange(inp);
+    homeCostGroups = {
+      ...homeCostGroups,
+      bigMin: homeCostSettingsDraft.bigMin || DEFAULT_HOME_BIG_EXPENSE_MIN,
+      bigExclude: cloneHomeCostRules(homeCostSettingsDraft.rules || [])
+    };
+  } else {
+    homeCostGroups = {
+      ...homeCostGroups,
+      [group]: cloneHomeCostRules(homeCostSettingsDraft.rules || [])
+    };
+  }
+  closeHomeCostSettings();
+  persist();
+  renderHome();
+}
+
 function renderHomeCatGrid(el, entries, prevMap, type, ym, hiddenCats, openSettingsFn) {
   const visible = entries.filter(([cat]) => !hiddenCats.has(cat));
   if (visible.length) {
@@ -1151,6 +2034,27 @@ function openHomeSummaryDetail(kind) {
   detFilterUnsetSubOnly = false;
   detSelectedIds.clear();
 
+  if (HOME_COST_CARD_KEYS.includes(kind)) {
+    const meta = HOME_COST_META[kind];
+    const year = homeCostYearFromYm(ym);
+    const rows = homeCostTxnRows(year, kind);
+    const total = rows.reduce((s, r) => s + r['金额'], 0);
+    const monthCount = homeCostYearMonthCount(year, kind);
+    const summary = homeCostRulesSummary(kind);
+    detIsIncome = false;
+    detContext = { type: 'home-cost', year, group: kind };
+    document.getElementById('detTitle').textContent = `${year}年${meta.label}`;
+    document.getElementById('detSummary').textContent = `共 ${fmtCount(rows.length)} 笔 · ${monthCount} 个月 · ${summary}`;
+    document.getElementById('detTotal').textContent = fmtMoney(total);
+    document.getElementById('detTotal').style.color = 'var(--red-t)';
+    renderDetailBody(rows);
+    updateDetBulkBar();
+    syncDetModalLayout();
+    syncDetFilterBar();
+    document.getElementById('moDet').classList.remove('hide');
+    return;
+  }
+
   if (kind === 'est') {
     detIsIncome = false;
     detContext = { type: 'home-est', month: ym };
@@ -1236,21 +2140,24 @@ function renderHomeEstDetailBody(list, monthCount) {
 }
 
 function ensureHomeSummaryClicks() {
-  const el = document.getElementById('homeSummary');
-  if (!el || el._homeKpiClick) return;
-  el._homeKpiClick = true;
-  el.addEventListener('click', (e) => {
-    const card = e.target.closest('[data-home-kpi]');
-    if (!card) return;
-    openHomeSummaryDetail(card.dataset.homeKpi);
-  });
-  el.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' && e.key !== ' ') return;
-    const card = e.target.closest('[data-home-kpi]');
-    if (!card) return;
-    e.preventDefault();
-    openHomeSummaryDetail(card.dataset.homeKpi);
-  });
+  for (const id of ['homeSummary', 'homeCostSummary']) {
+    const el = document.getElementById(id);
+    if (!el || el._homeKpiClick) continue;
+    el._homeKpiClick = true;
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.kpi-settings-btn')) return;
+      const card = e.target.closest('[data-home-kpi]');
+      if (!card) return;
+      openHomeSummaryDetail(card.dataset.homeKpi);
+    });
+    el.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const card = e.target.closest('[data-home-kpi]');
+      if (!card || e.target.closest('.kpi-settings-btn')) return;
+      e.preventDefault();
+      openHomeSummaryDetail(card.dataset.homeKpi);
+    });
+  }
 }
 
 function renderHome() {
@@ -1278,6 +2185,22 @@ function renderHome() {
       kpiCard(`${monthLbl}收入`, fmtMoney(totalInc), `${incEntries.length} 个分类`, 'ti-arrow-up-right', 'green', 'c-grn', { kind: 'inc' }),
       kpiCard(`${monthLbl}结余`, fmtMoneySigned(net), net >= 0 ? '盈余' : '超支', 'ti-scale', 'blue', net >= 0 ? 'c-blu' : 'c-red', { kind: 'net' }),
     ].join('');
+  }
+  const costEl = document.getElementById('homeCostSummary');
+  if (costEl) {
+    const year = homeCostYearFromYm(ym);
+    costEl.innerHTML = HOME_COST_CARD_KEYS.map(group => {
+      const meta = HOME_COST_META[group];
+      return kpiCard(
+        `${year}年${meta.label}`,
+        fmtMoney(homeCostYearTotal(year, group)),
+        homeCostCardSub(year, group),
+        meta.icon,
+        meta.iconCls,
+        'c-red',
+        { kind: group, settingsFn: `openHomeCostSettings('${group}')`, emojiIcon: meta.emojiIcon }
+      );
+    }).join('');
   }
   ensureHomeSummaryClicks();
 
@@ -1683,6 +2606,12 @@ function applyF() {
   const d2 = document.getElementById('d2').value;
 
   filteredData = allData.filter(r => {
+    if (activeEventTagId) {
+      if (!eventTagIds(r).includes(activeEventTagId)) return false;
+      if (hideRf && r['退款状态'] === 'refunded') return false;
+      if (q && !rowMatchesSearch(r, q)) return false;
+      return true;
+    }
     if (activeTxnMergeId) {
       const merge = findMergeById(activeTxnMergeId);
       if (!merge || !rowInMerge(r, merge)) return false;
@@ -1832,12 +2761,130 @@ function resetF() {
   document.getElementById('rfHide').checked = true;
   filterUnsetSubOnly = false;
   syncUnsetSubFilterUI();
+  activeEventTagId = null;
+  syncEventTagFilterOptions();
   document.getElementById('sf').value = 'd-';
   activeSrc = 'all';
   activeTxnLinkId = null;
   activeTxnMergeId = null;
   buildSrcChips();
   applyF();
+}
+
+function syncEventTagFilterOptions() {
+  const sel = document.getElementById('eventTagFilter');
+  if (!sel) return;
+  const cur = activeEventTagId || '';
+  const list = getEventTags();
+  sel.innerHTML = `<option value="">全部事件</option>${list.map(tag => `<option value="${escHtml(tag.id)}">${escHtml(tag.name)}</option>`).join('')}`;
+  const keep = list.some(tag => tag.id === cur);
+  sel.value = keep ? cur : '';
+  if (!keep) activeEventTagId = null;
+  sel.classList.toggle('on', !!sel.value);
+}
+
+function onEventTagsChanged(info) {
+  if (info?.deletedId) {
+    if (activeEventTagId === info.deletedId) activeEventTagId = null;
+    if (activeTradeLinkId === info.deletedId) activeTradeLinkId = null;
+    if (activeTradeNameEditId === info.deletedId) activeTradeNameEditId = null;
+  }
+  syncEventTagFilterOptions();
+  if (info?.saveNow) persistNow();
+  else persist();
+  if (activeEventTagId) applyF();
+  else {
+    renderTable();
+    updateTxnLinkFilterBar();
+  }
+  if (document.getElementById('view-trades')?.classList.contains('on')) renderTradesPage();
+  refreshDetailModal();
+}
+
+function onEventTagFilterChange(value) {
+  if (!value) clearEventTagFilter();
+  else filterEventTag(value);
+}
+
+function filterEventTag(id) {
+  activeEventTagId = id || null;
+  activeTxnLinkId = null;
+  activeTxnMergeId = null;
+  syncEventTagFilterOptions();
+  const modal = document.getElementById('moDet');
+  if (modal && !modal.classList.contains('hide')) closeDetModal();
+  const view = document.getElementById('view-ledger');
+  if (view && !view.classList.contains('on')) {
+    const btn = document.getElementById('nav-ledger') || document.querySelector(`button.ni[onclick="sw('ledger',this)"]`);
+    sw('ledger', btn);
+  }
+  applyF();
+}
+
+function clearEventTagFilter() {
+  activeEventTagId = null;
+  syncEventTagFilterOptions();
+  applyF();
+}
+
+function applyBulkEventTag() {
+  if (!selectedIds.size) return;
+  const name = window.prompt('事件标签名称');
+  if (name == null) return;
+  const tag = createEventTag(name);
+  if (!tag) {
+    alert('请填写事件标签名称');
+    return;
+  }
+  let count = 0;
+  selectedIds.forEach(id => {
+    const row = allData.find(r => r.id === id);
+    if (!row) return;
+    addRowTag(row, tag.id);
+    count += 1;
+  });
+  onEventTagsChanged();
+  alert(`已给 ${count} 笔账目贴上「${tag.name}」`);
+}
+
+function convertSubcatToEventTag(index) {
+  const item = document.querySelector(`.cat-edit-item[data-i="${index}"]`);
+  const nameInput = item?.querySelector('.ni2');
+  const subInput = item?.querySelector('.subcat-inp');
+  if (!nameInput || !subInput) return;
+  const cat = CATS[index];
+  if (nameInput.value.trim() !== cat) {
+    alert('分类名称有未保存的修改，请先点保存');
+    return;
+  }
+  const subs = subInput.value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+  if (!subs.length) {
+    alert('这个分类还没有子分类');
+    return;
+  }
+  const picked = window.prompt(`要转成事件标签的子分类名称：\n${subs.join('、')}`);
+  if (picked == null) return;
+  const subName = picked.trim();
+  if (!subs.includes(subName)) {
+    alert('子分类列表里没有这个名称');
+    return;
+  }
+  const rest = subs.filter(s => s !== subName);
+  const repl = window.prompt(
+    `这些账目的子分类改成哪一项？留空表示清空。\n可选：${rest.join('、') || '（无）'}`,
+    rest.includes('其他') ? '其他' : (rest[0] || '')
+  );
+  if (repl == null) return;
+  const replacement = repl.trim();
+  const { count, tag } = convertSubcategoryToEventTag(allData, cat, subName, replacement);
+  const nextSubs = replacement && !rest.includes(replacement) ? [...rest, replacement] : rest;
+  if (nextSubs.length) SUBCATS[cat] = nextSubs;
+  else delete SUBCATS[cat];
+  subInput.value = nextSubs.join(', ');
+  onEventTagsChanged();
+  alert(count
+    ? `已将 ${count} 笔账目贴上「${tag.name}」`
+    : `没有账目使用「${subName}」，已新建事件标签并从子分类移出`);
 }
 
 function srcBadge(s) {
@@ -1929,6 +2976,7 @@ function renderTable() {
     </section>`;
   }).join('');
   ensureDayNoteEvents();
+  ensureTxnNoteEvents();
   renderPager();
 }
 
@@ -2111,33 +3159,48 @@ function linkCatBrowsePair() {
     alert(err);
     return;
   }
-  addTxnPair(keys[0], keys[1]);
-  persist();
+  const name = suggestTxnLinkName(rows);
+  const tag = createEventTag(name);
+  if (!tag) return;
+  rows.forEach(row => {
+    const parentId = row._splitOf != null ? row._splitOf : row.id;
+    const parent = allData.find(item => item.id === parentId);
+    if (parent) addRowTag(parent, tag.id);
+  });
+  onEventTagsChanged();
   clearCatBrowseSelection();
   renderCatBrowse();
 }
 
 function unlinkCatBrowsePair() {
   const keys = [...getCatBrowseSelectedKeys()];
-  if (keys.length === 1) {
-    if (!findPairForKey(keys[0])) {
-      alert('该账目未配对');
-      return;
-    }
-    removeTxnPairByKey(keys[0]);
-  } else if (keys.length === 2) {
-    const linkA = findLinkForKey(keys[0]);
-    const linkB = findLinkForKey(keys[1]);
-    if (!linkA || linkA !== linkB) {
-      alert('两条账目不在同一关联中');
-      return;
-    }
-    removeTxnLinkById(linkA.id);
-  } else {
-    alert('请选择已配对的账目');
+  const parents = [];
+  const seen = new Set();
+  keys.forEach(key => {
+    const sep = String(key).indexOf(':');
+    const id = Number(sep < 0 ? key : String(key).slice(0, sep));
+    const row = allData.find(item => item.id === id);
+    if (!row || seen.has(row.id)) return;
+    seen.add(row.id);
+    parents.push(row);
+  });
+  if (!parents.length) {
+    alert('请选择已贴事件标签的账目');
     return;
   }
-  persist();
+  let shared = eventTagIds(parents[0]);
+  parents.slice(1).forEach(row => {
+    const ids = new Set(eventTagIds(row));
+    shared = shared.filter(id => ids.has(id));
+  });
+  if (shared.length !== 1) {
+    alert(shared.length ? '选中账目有多个共同事件标签，请到事件页处理' : '选中账目没有共同的事件标签');
+    return;
+  }
+  const tag = eventTagById(shared[0]);
+  if (!confirm(`从这些账目去掉事件「${tag?.name || ''}」？`)) return;
+  parents.forEach(row => removeRowTag(row, shared[0]));
+  onEventTagsChanged();
   clearCatBrowseSelection();
   renderCatBrowse();
 }
@@ -2174,7 +3237,7 @@ function renderRfView() {
     <div class="tr rf-row ledger-row refunded">
       ${dateTimeCell(row['日期'], row['时间'])}
       <div class="td no-strike src-cell">${srcBadge(row['来源'])}</div>
-      ${peerDescCell(row)}
+      ${peerDescCell(row, { editableNote: true })}
       <div class="td no-strike type-cell">${typeBadge(row['收支'], 'normal', row['分类'])}</div>
       ${amtCellHtml(row, true)}
       <div class="td no-strike td-actions">
@@ -2310,6 +3373,9 @@ function getDetailRows() {
     const flow = detContext.flow === 'exp' ? '支出' : detContext.flow === 'inc' ? '收入' : 'all';
     return homeMonthTxnRows(detContext.month, flow);
   }
+  if (detContext.type === 'home-cost') {
+    return homeCostTxnRows(detContext.year || detContext.month, detContext.group);
+  }
   const ad = statsExpanded();
   if (detContext.type === 'catreport') {
     const { month, cat, sub } = detContext;
@@ -2369,6 +3435,14 @@ function refreshDetailModal() {
       document.getElementById('detTotal').textContent = fmtMoneySigned(net);
       document.getElementById('detTotal').style.color = net >= 0 ? 'var(--grn-t)' : 'var(--red-t)';
     }
+  } else if (detContext.type === 'home-cost') {
+    const total = rows.reduce((s, r) => s + r['金额'], 0);
+    const year = detContext.year || homeCostYearFromYm(detContext.month);
+    const monthCount = homeCostYearMonthCount(year, detContext.group);
+    const summary = homeCostRulesSummary(detContext.group);
+    document.getElementById('detSummary').textContent = `共 ${fmtCount(rows.length)} 笔 · ${monthCount} 个月 · ${summary}`;
+    document.getElementById('detTotal').textContent = fmtMoney(total);
+    document.getElementById('detTotal').style.color = 'var(--red-t)';
   } else if (detContext.type === 'catreport') {
     const exp = rows.filter(r => r['收支'] === '支出').reduce((s, r) => s + r['金额'], 0);
     const inc = rows.filter(r => r['收支'] === '收入').reduce((s, r) => s + r['金额'], 0);
@@ -2460,6 +3534,8 @@ function renderDetailBody(rows) {
         ? `${isInc ? '+' : '-'}¥${r['金额'].toFixed(2)}`
         : `¥${r['金额'].toFixed(2)}`;
       const mergeTag = isMerge ? '<span class="ledger-merge-tag" title="合并统计净额">合并净额</span>' : '';
+      const invoiceTag = isMerge ? '' : invoiceMatchTagHtml(r.id);
+      const noteHtml = isMerge ? '' : txnNoteInlineHtml(r);
       const checkCell = isMerge
         ? '<div class="det-check"></div>'
         : `<div class="det-check"><input type="checkbox" class="cb" ${isSel ? 'checked' : ''} onchange="toggleDetSelect(${r.id},this)"></div>`;
@@ -2475,7 +3551,7 @@ function renderDetailBody(rows) {
         ${checkCell}
         <div class="det-dt">${formatDateLabel(r['日期'])}<span>${formatTimeShort(r['时间'])}</span></div>
         <div class="det-src">${srcBadge(r['来源'])}</div>
-        <div class="det-peer"><div class="det-peer-main">${p}${mergeTag}</div>${showDesc ? `<div class="det-peer-sub">${d}</div>` : ''}</div>
+        <div class="det-peer"><div class="det-peer-main"><span class="peer-name">${escHtml(p)}</span>${invoiceTag}${noteHtml}${mergeTag}</div>${showDesc ? `<div class="det-peer-sub">${escHtml(d)}</div>` : ''}</div>
         ${catCell}
         ${typeCell}
         <div class="det-amt${amtCls}">${amtTxt}</div>
@@ -3822,11 +4898,40 @@ function renderIncomeData() {
 }
 
 function sw(name, el) {
+  const view = document.getElementById('view-' + name);
+  if (!view) return;
   document.querySelectorAll('.view').forEach(v => v.classList.remove('on'));
   document.querySelectorAll('.ni').forEach(n => n.classList.remove('on'));
-  document.getElementById('view-' + name).classList.add('on');
-  el.classList.add('on');
-  document.getElementById('vt').textContent = { home: '首页', ledger: '明细列表', trades: '事件', catbrowse: '分类检索', catreport: '分类报表', renqing: '人情往来', accounts: '信用账户', charts: '统计图表', monitor: '统计监控', gear: '装备库', family: '家庭', report: '收支报告', income: '收入数据', company: '公司成本', refunds: '退款管理', import: '导入预览' }[name];
+  document.querySelectorAll('.nav-dd').forEach(g => {
+    g.classList.remove('is-active');
+    g.classList.remove('is-open');
+    g.querySelector('.nav-dd-trigger')?.setAttribute('aria-expanded', 'false');
+  });
+  view.classList.add('on');
+  if (el) {
+    el.classList.add('on');
+    const group = el.closest('.nav-dd');
+    if (group) {
+      group.classList.add('is-active');
+      const trigger = group.querySelector('.nav-dd-trigger');
+      if (trigger) trigger.classList.add('on');
+    }
+  } else {
+    document.querySelectorAll('.nav-dd[data-pages]').forEach(g => {
+      const pages = (g.dataset.pages || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (!pages.includes(name)) return;
+      g.classList.add('is-active');
+      g.querySelector('.nav-dd-trigger')?.classList.add('on');
+      const child = g.querySelector(`.nav-dd-item[onclick*="sw('${name}'"]`);
+      child?.classList.add('on');
+    });
+  }
+  const active = document.activeElement;
+  if (active && active !== document.body && !view.contains(active) && !active.closest('.topbar, #appChrome')) active.blur();
+  try { sessionStorage.setItem('ledger_page', name); } catch { /* ignore */ }
+  document.getElementById('vt').textContent = pageLabel();
+  syncPresence();
+  if (typeof window.closeMobileSidebar === 'function') window.closeMobileSidebar();
   if (name === 'home') setTimeout(renderHome, 60);
   if (name === 'trades') setTimeout(renderTradesPage, 60);
   if (name === 'charts') setTimeout(renderCharts, 60);
@@ -3835,13 +4940,30 @@ function sw(name, el) {
   if (name === 'catreport') setTimeout(renderCatReport, 60);
   if (name === 'renqing') setTimeout(renderRenqingPage, 60);
   if (name === 'accounts') setTimeout(renderAccountsPage, 60);
+  if (name === 'reminders') setTimeout(renderRemindersPage, 60);
   if (name === 'refunds') renderRfView();
   if (name === 'monitor') renderMonitor();
   if (name === 'gear') renderGearPage();
   if (name === 'family') setTimeout(() => { loadFamilyEvents().catch(err => alert(err.message || '加载失败')); }, 60);
+  if (name === 'travel') setTimeout(() => { loadTravel().catch(err => alert(err.message || '加载行程失败')); }, 60);
   if (name === 'company') renderCompanyCostPage();
   if (name === 'import') renderImportPage();
   if (name === 'catbrowse') setTimeout(renderCatBrowse, 60);
+}
+
+function restorePage() {
+  let name = '';
+  try { name = sessionStorage.getItem('ledger_page') || ''; } catch { return; }
+  if (!name || name === 'home') return;
+  if (!document.getElementById('view-' + name)) return;
+  let btn = document.querySelector(`button.ni[onclick="sw('${name}',this)"]`);
+  if (!btn && name === 'ledger') btn = document.getElementById('nav-ledger');
+  if (!btn && name === 'family') btn = document.getElementById('nav-family');
+  if (!btn) {
+    sw(name, null);
+    return;
+  }
+  sw(name, btn);
 }
 
 function setQuick(type) {
@@ -4132,7 +5254,7 @@ async function handleImportFile(file) {
   }
 }
 
-function confirmImport() {
+async function confirmImport() {
   if (!pendingImport) return;
   refreshImportRecords();
   if (!pendingImport.records.length) {
@@ -4175,13 +5297,15 @@ function confirmImport() {
 
   const count = pendingImport.records.length;
   resetImportPreview();
-  persist();
+  clearTimeout(persistTimer);
+  const ok = await persistNow();
   buildSrcChips();
   applyF();
   renderKPI();
   renderMonitor();
+  renderImportTimelineView();
   renderImportHistoryUI();
-  alert(`成功导入 ${count} 笔记录`);
+  if (ok) alert(`成功导入 ${count} 笔记录`);
 }
 
 async function deleteImportBatch(encodedId) {
@@ -4336,6 +5460,7 @@ let editRowId = null;
 
 const ADD_TITLE_HTML = '<i class="ti ti-plus" style="color:var(--primary);margin-right:6px"></i>手动新增';
 const EDIT_TITLE_HTML = '<i class="ti ti-edit" style="color:var(--primary);margin-right:6px"></i>编辑账目';
+const MANUAL_ENTRY_SOURCES = ['现金', '银行卡'];
 
 function setAddModalMode(edit) {
   const h3 = document.querySelector('#moAdd .mh h3');
@@ -4343,11 +5468,16 @@ function setAddModalMode(edit) {
 }
 
 function fillAddForm(row) {
-  document.getElementById('f-src').innerHTML = SOURCES.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+  const currentSource = String(row['来源'] || '').trim();
+  const sourceNames = [...MANUAL_ENTRY_SOURCES];
+  if (editRowId != null && currentSource && !sourceNames.includes(currentSource)) sourceNames.unshift(currentSource);
+  document.getElementById('f-src').innerHTML = sourceNames
+    .map(name => `<option value="${escHtml(name)}">${escHtml(name)}</option>`)
+    .join('');
   buildCatFilter();
   document.getElementById('f-date').value = row['日期'] || '';
   document.getElementById('f-time').value = row['时间'] || '12:00';
-  document.getElementById('f-src').value = row['来源'] || '';
+  document.getElementById('f-src').value = currentSource || sourceNames[0] || '';
   document.getElementById('f-type').value = row['收支'] || '支出';
   document.getElementById('f-amt').value = row['金额'] ?? '';
   document.getElementById('f-cat').value = row['分类'] || '';
@@ -4355,6 +5485,10 @@ function fillAddForm(row) {
   document.getElementById('f-sub').value = row['子分类'] || '';
   document.getElementById('f-peer').value = row['交易对方'] || '';
   document.getElementById('f-pay').value = row['支付方式'] || '';
+  document.getElementById('f-event-tags').value = eventTagIds(row)
+    .map(id => eventTagById(id)?.name || '')
+    .filter(Boolean)
+    .join(', ');
   document.getElementById('f-desc').value = row['商品说明'] || '';
   document.getElementById('f-note').value = row['备注'] || '';
 }
@@ -4371,6 +5505,7 @@ function openAdd() {
   document.getElementById('f-amt').value = '';
   document.getElementById('f-peer').value = '';
   document.getElementById('f-pay').value = '';
+  document.getElementById('f-event-tags').value = '';
   document.getElementById('f-desc').value = '';
   document.getElementById('f-note').value = '';
   document.getElementById('moAdd').classList.remove('hide');
@@ -4403,6 +5538,15 @@ function syncAddSubcats() {
   sel.innerHTML = '<option value="">无</option>' + subs.map(s => `<option value="${s}">${s}</option>`).join('');
   sel.disabled = !subs.length;
 }
+function applyAddEventTags(row) {
+  const names = document.getElementById('f-event-tags').value
+    .split(/[,，]/)
+    .map(name => name.trim())
+    .filter(Boolean);
+  const ids = [...new Set(names.map(name => createEventTag(name)?.id).filter(Boolean))];
+  if (ids.length) row['事件标签'] = ids;
+  else delete row['事件标签'];
+}
 function saveAdd() {
   const dt = document.getElementById('f-date').value;
   const tm = document.getElementById('f-time').value || '00:00';
@@ -4416,6 +5560,10 @@ function saveAdd() {
   const desc = document.getElementById('f-desc').value.trim() || '手动录入';
   const note = document.getElementById('f-note').value.trim() || '';
   if (!dt || !src || !tp || isNaN(amt) || amt <= 0 || !cat) { alert('请填写必填项'); return; }
+  if (editRowId == null && !MANUAL_ENTRY_SOURCES.includes(src)) {
+    alert('手动添加账目的来源只能选择现金或银行卡');
+    return;
+  }
   if (editRowId != null) {
     const row = allData.find(r => r.id === editRowId);
     if (!row) { closeAdd(); return; }
@@ -4423,15 +5571,18 @@ function saveAdd() {
       日期: dt, 时间: tm, 来源: src, 交易对方: peer, 商品说明: desc,
       分类: cat, 子分类: sub, 收支: tp, 金额: amt, 支付方式: pay, 备注: note
     });
+    applyAddEventTags(row);
     row._hash = Parsers.txnHash(row);
   } else {
     const row = { id: nextId++, 日期: dt, 时间: tm, 来源: src, 交易对方: peer, 商品说明: desc, 分类: cat, 子分类: sub, 收支: tp, 金额: amt, 支付方式: pay, 备注: note, 退款状态: 'normal', 统计状态: 'normal', _autoCat: false, _catConf: 'manual', _hash: '' };
+    applyAddEventTags(row);
     row._hash = Parsers.txnHash(row);
     allData.push(row);
   }
   allData.sort((a, b) => (b['日期'] + b['时间']).localeCompare(a['日期'] + a['时间']));
   persist();
   buildSrcChips();
+  syncEventTagFilterOptions();
   applyF();
   renderKPI();
   refreshActiveViews();
@@ -4508,6 +5659,18 @@ function applyLoadedCategories(categories) {
     if (babySubs.length && !babySubs.includes('母婴装备')) {
       SUBCATS['母婴亲子'] = [...babySubs, '母婴装备'];
     }
+  }
+  for (const [cat, extras] of Object.entries({
+    '交通出行': ['维修'],
+    '房产交易': ['房贷'],
+    '保险': ['车险'],
+    '红包奖励': ['胡锦弦存款', '胡锦弦红包'],
+    '工商税务': ['会计记账', '银行管理费']
+  })) {
+    if (!CATS.includes(cat)) continue;
+    const cur = SUBCATS[cat] || [];
+    const missing = extras.filter(s => !cur.includes(s));
+    if (missing.length) SUBCATS[cat] = [...cur, ...missing];
   }
   if (Array.isArray(categories.statsExclude)) {
     CAT_STATS_EXCLUDE = new Set(categories.statsExclude.filter(c => CATS.includes(c)));
@@ -4598,6 +5761,7 @@ function collectCatListFromDom() {
     return {
       origIdx,
       oldName,
+      oldSubs: [...(SUBCATS[oldName] || [])],
       name: item.querySelector('.ni2')?.value.trim() || oldName,
       emoji: pickedEmoji || catIconValue(oldName),
       statsExclude: !!item.querySelector('.cat-stats-exclude-cb')?.checked,
@@ -4709,6 +5873,7 @@ function renderCatList() {
       </div>
       <div class="cat-sub-panel${open ? ' open' : ''}">
         <input class="subcat-inp" data-i="${i}" placeholder="子分类（逗号分隔，如：地铁, 停车）" value="${subs.join(', ')}">
+        <button type="button" class="btn btn-sm cat-sub-to-tag" onclick="convertSubcatToEventTag(${i})">子分类转事件标签</button>
       </div>
     </div>`;
   }).join('');
@@ -4742,23 +5907,7 @@ function addCat() {
 }
 function renameCategoryInTransactions(oldName, newName) {
   if (!oldName || !newName || oldName === newName) return 0;
-  let count = 0;
-  allData.forEach(r => {
-    let touched = false;
-    if (r['分类'] === oldName) {
-      r['分类'] = newName;
-      touched = true;
-    }
-    if (hasSplits(r)) {
-      r.splits.forEach(sp => {
-        if (sp.category === oldName) {
-          sp.category = newName;
-          touched = true;
-        }
-      });
-    }
-    if (touched) count++;
-  });
+  const count = renameCategoriesInTransactions(allData, new Map([[oldName, newName]]));
   Categorizer.renameCategory(oldName, newName);
   return count;
 }
@@ -4830,6 +5979,8 @@ function saveCat() {
     const icon = normalizeIconRef(row.emoji) || row.emoji || EMOJIS[row.name] || iconRef('1F4CC');
     EMOJIS[row.name] = icon;
     const subs = row.subsRaw.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+    const subcategoryRenames = inferSubcategoryRenames(row.oldSubs, subs);
+    renameSubcategoriesInTransactions(allData, row.name, subcategoryRenames);
     if (subs.length) SUBCATS[row.name] = subs;
     else delete SUBCATS[row.name];
     allData.filter(r => r['分类'] === row.name && r['子分类'] && !subs.includes(r['子分类']))
@@ -5241,98 +6392,68 @@ function tradeCatCellHtml(row) {
   </div>`;
 }
 
-function tradeRowHtml(row) {
+function tradeRowHtml(row, tagId) {
   const isInc = row['收支'] === '收入';
   const peer = (row['交易对方'] || row['产品名称'] || '—').trim();
+  const remove = tagId
+    ? `<button type="button" class="trade-row-remove" onclick="removeTxnFromEventTag(${row.id},'${escHtml(tagId)}')" title="从事件去掉" aria-label="从事件去掉"><i class="ti ti-x"></i></button>`
+    : '';
+  const amt = fmtMoney(row['金额']);
   return `<div class="trade-row">
-    <div class="trade-row-dt">${formatDateLabel(row['日期'])}<span>${formatTimeShort(row['时间'])}</span></div>
-    <div class="trade-row-peer">${escHtml(peer)}</div>
-    ${tradeCatCellHtml(row)}
-    <div class="trade-row-fin">
+    <div class="trade-row-gutter"></div>
+    <div class="trade-row-main">
+      <div class="trade-row-dt">${formatDateWithYearLabel(row['日期'])} ${formatTimeShort(row['时间'])}</div>
+      <div class="trade-row-peer">${escHtml(peer)}</div>
+      ${tradeCatCellHtml(row)}
       <div class="trade-row-type">${typeBadge(row['收支'], row['退款状态'], row['分类'])}</div>
-      <div class="trade-row-amt ${isInc ? 'inc' : 'exp'}">${isInc ? '+' : '-'}${fmtMoney(row['金额'])}</div>
     </div>
+    <div class="trade-row-amt exp">${isInc ? '' : amt}</div>
+    <div class="trade-row-amt inc">${isInc ? amt : ''}</div>
+    <div class="trade-row-net"></div>
+    <div class="trade-row-ops">${remove}</div>
   </div>`;
 }
 
-function tradeLinkSortKey(link) {
-  const rows = rowsForLinkKeys(link.keys, allData);
+function rowsForTag(tag) {
+  if (!tag) return [];
+  return allData.filter(row => eventTagIds(row).includes(tag.id));
+}
+
+function tagStats(tag) {
+  const totals = eventTagTotals(rowsForTag(tag));
+  return {
+    exp: totals.expense,
+    inc: totals.income,
+    net: totals.net,
+    count: totals.count,
+    balanced: Math.abs(totals.net) < 0.01
+  };
+}
+
+function tradeLinkSortKey(tag) {
+  const rows = rowsForTag(tag);
   if (!rows.length) return '';
-  return rows.map(r => r['日期'] + r['时间']).sort().pop();
+  return rows.map(row => row['日期'] + row['时间']).sort().pop();
 }
 
-function tradeLinkPrimaryCat(link) {
-  const rows = rowsForLinkKeys(link.keys, allData);
-  if (!rows.length) return '未分类';
-  const earliest = [...rows].sort((a, b) =>
-    (a['日期'] + a['时间']).localeCompare(b['日期'] + b['时间']))[0];
-  return (earliest['分类'] || '').trim() || '未分类';
-}
-
-function tradeCatSortIndex(cat) {
-  const idx = CATS.indexOf(cat);
-  return idx >= 0 ? idx : CATS.length + 1;
-}
-
-function tradeCategoriesFromLinks(links) {
-  const map = new Map();
-  for (const link of links) {
-    const cat = tradeLinkPrimaryCat(link);
-    map.set(cat, (map.get(cat) || 0) + 1);
-  }
-  return [...map.entries()]
-    .sort((a, b) => {
-      const d = tradeCatSortIndex(a[0]) - tradeCatSortIndex(b[0]);
-      return d !== 0 ? d : a[0].localeCompare(b[0], 'zh-CN');
-    });
-}
-
-function renderTradesCatChips(categories, totalCount) {
-  const el = document.getElementById('tradesCatChips');
-  if (!el) return;
-  if (!categories.length) {
-    el.classList.add('hide');
-    el.innerHTML = '';
-    return;
-  }
-  el.classList.remove('hide');
-  const allOn = !activeTradeCatFilter;
-  let html = `<button type="button" class="trades-cat-chip${allOn ? ' on' : ''}" onclick="filterTradeCat('')">
-    <span class="trades-cat-chip-label">全部</span>
-    <span class="trades-cat-chip-cnt">${totalCount}</span>
-  </button>`;
-  for (const [cat, count] of categories) {
-    const on = activeTradeCatFilter === cat;
-    html += `<button type="button" class="trades-cat-chip${on ? ' on' : ''}" onclick="filterTradeCat('${encodeURIComponent(cat)}')" title="${escHtml(catLabel(cat))}">
-      <span class="trades-cat-chip-icon">${catIconHtml(cat, { size: 14, wrapClass: 'cat-pick-emoji-wrap' })}</span>
-      <span class="trades-cat-chip-label">${escHtml(catLabel(cat))}</span>
-      <span class="trades-cat-chip-cnt">${count}</span>
-    </button>`;
-  }
-  el.innerHTML = html;
-}
-
-function filterTradeCat(catEnc) {
-  activeTradeCatFilter = catEnc ? decodeURIComponent(catEnc) : '';
-  renderTradesPage();
-}
-
-function groupTradesByCategory(links) {
-  const map = new Map();
-  for (const link of links) {
-    const cat = tradeLinkPrimaryCat(link);
-    if (!map.has(cat)) map.set(cat, []);
-    map.get(cat).push(link);
-  }
-  return [...map.entries()]
-    .sort((a, b) => {
-      const d = tradeCatSortIndex(a[0]) - tradeCatSortIndex(b[0]);
-      return d !== 0 ? d : a[0].localeCompare(b[0], 'zh-CN');
-    })
-    .map(([cat, items]) => ({
-      cat,
-      items: items.sort((a, b) => tradeLinkSortKey(b).localeCompare(tradeLinkSortKey(a)))
-    }));
+function tradeGroupsForPage() {
+  const visibleTags = getEventTags().filter(tag => !tradeHideHidden || !tag.hidden);
+  const byId = new Map(visibleTags.map(tag => [tag.id, tag]));
+  const used = new Set();
+  const sections = getEventTagGroups().map(group => {
+    const items = [];
+    for (const id of group.tagIds) {
+      const tag = byId.get(id);
+      if (!tag) continue;
+      used.add(id);
+      items.push(tag);
+    }
+    return { id: group.id, name: group.name, custom: true, items };
+  });
+  const loose = [...byId.values()].filter(tag => !used.has(tag.id))
+    .sort((a, b) => tradeLinkSortKey(b).localeCompare(tradeLinkSortKey(a)));
+  sections.push({ id: '', name: '未分组', custom: false, items: loose });
+  return sections;
 }
 
 function renderTradeLinkName(link) {
@@ -5345,23 +6466,42 @@ function renderTradeLinkName(link) {
     </span>`;
   }
   return `<span class="trade-card-name">
-    <i class="ti ti-link"></i>
+    <i class="ti ti-tag"></i>
     <span class="trade-card-name-text">${escHtml(link.name)}</span>
     <button type="button" class="trade-card-name-edit" onclick="event.stopPropagation();startTradeNameEdit('${escHtml(link.id)}')" title="编辑名称"><i class="ti ti-pencil"></i></button>
   </span>`;
 }
 
-function computeAllTradesStats(links) {
+function computeAllTradesStats(tags) {
   const seen = new Set();
   const rows = [];
-  for (const link of links || []) {
-    for (const row of rowsForLinkKeys(link.keys, allData)) {
+  for (const tag of tags || []) {
+    for (const row of rowsForTag(tag)) {
       if (seen.has(row.id)) continue;
       seen.add(row.id);
       rows.push(row);
     }
   }
-  return computeLinkStats(rows);
+  const totals = eventTagTotals(rows);
+  return {
+    exp: totals.expense,
+    inc: totals.income,
+    net: totals.net,
+    balanced: Math.abs(totals.net) < 0.01
+  };
+}
+
+function eventBalanceLabel(stats) {
+  if (!stats) return { label: '—', cls: 'flat' };
+  if (stats.balanced) return { label: '已相抵', cls: 'ok' };
+  if (stats.net < 0) return { label: '净支出', cls: 'loss' };
+  return { label: '净收入', cls: 'profit' };
+}
+
+function tradeNetHtml(stats) {
+  const meta = eventBalanceLabel(stats);
+  if (stats.balanced) return `<span class="txn-link-balance ok">${meta.label}</span>`;
+  return `<span class="trade-col-net trade-card-pl--${meta.cls}"><span class="trade-col-label">${meta.label}</span><span class="trade-col-amt">${fmtMoney(Math.abs(stats.net))}</span></span>`;
 }
 
 function renderTradesTotal(links) {
@@ -5373,119 +6513,178 @@ function renderTradesTotal(links) {
     return;
   }
   const stats = computeAllTradesStats(links);
-  const meta = linkBalanceMeta(stats);
-  const plHtml = stats.balanced
-    ? `<span class="txn-link-balance ok">${meta.label}</span>`
-    : `<span class="trade-card-pl trade-card-pl--${meta.cls}">
-        <span class="trade-card-pl-label">${meta.label}</span>
-        <span class="trade-card-pl-amt">${fmtMoney(Math.abs(stats.net))}</span>
-      </span>`;
   el.hidden = false;
-  el.innerHTML = `<div class="trades-total-meta">${links.length} 个事件</div>
-    <div class="trades-total-stats">支出 ${fmtMoney(stats.exp)} · 收入 ${fmtMoney(stats.inc)}</div>
-    <div class="trades-total-pl">${plHtml}</div>`;
+  el.innerHTML = `<div></div>
+    <div class="trades-total-meta">${links.length} 个事件</div>
+    <div class="trade-col trade-col-exp"><span class="trade-col-label">支出</span><span class="trade-col-amt">${fmtMoney(stats.exp)}</span></div>
+    <div class="trade-col trade-col-inc"><span class="trade-col-label">收入</span><span class="trade-col-amt">${fmtMoney(stats.inc)}</span></div>
+    <div class="trade-col trade-col-balance">${tradeNetHtml(stats)}</div>
+    <div></div>`;
 }
 
-function renderTradeLinkSummary(link, stats) {
-  const meta = linkBalanceMeta(stats);
-  const plHtml = stats.balanced
-    ? `<span class="txn-link-balance ok">${meta.label}</span>`
-    : `<span class="trade-card-pl trade-card-pl--${meta.cls}">
-        <span class="trade-card-pl-label">${meta.label}</span>
-        <span class="trade-card-pl-amt">${fmtMoney(Math.abs(stats.net))}</span>
-      </span>`;
-  return `${renderTradeLinkName(link)}
-    <span class="trade-card-stats">
-      支出 ${fmtMoney(stats.exp)} · 收入 ${fmtMoney(stats.inc)}
-      ${plHtml}
-    </span>`;
+function renderTradeSheetCols() {
+  return `<div class="trades-sheet-cols">
+    <span></span>
+    <span>事件</span>
+    <span>支出</span>
+    <span>收入</span>
+    <span>净额</span>
+    <span></span>
+  </div>`;
 }
 
-function renderTradeCardHtml(link) {
-  const rows = rowsForLinkKeys(link.keys, allData);
-  const stats = computeLinkStats(rows);
-  const expanded = activeTradeLinkId === link.id;
+function renderTradeCardHtml(tag) {
+  const rows = rowsForTag(tag);
+  const stats = tagStats(tag);
+  const expanded = activeTradeLinkId === tag.id;
   const rowHtml = rows
     .sort((a, b) => (a['日期'] + a['时间']).localeCompare(b['日期'] + b['时间']))
-    .map(tradeRowHtml)
+    .map(row => tradeRowHtml(row, tag.id))
     .join('');
-  return `<article class="trade-card${expanded ? ' is-open' : ''}" data-link-id="${escHtml(link.id)}">
+  const nameToggle = activeTradeNameEditId === tag.id ? '' : ` onclick="toggleTradeCard('${escHtml(tag.id)}')"`;
+  const hidden = tag.hidden === true;
+  return `<article class="trade-card${expanded ? ' is-open' : ''}${hidden ? ' is-hidden-event' : ''}" data-link-id="${escHtml(tag.id)}">
     <div class="trade-card-head">
-      <button type="button" class="trade-card-toggle" onclick="toggleTradeCard('${escHtml(link.id)}')">
-        <span class="trade-card-summary">${renderTradeLinkSummary(link, stats)}</span>
+      <span class="trade-card-drag" data-trade-drag title="拖到分组"><i class="ti ti-grip-vertical"></i></span>
+      <div class="trade-col-name"${nameToggle}>
+        ${renderTradeLinkName(tag)}
         <i class="ti ti-chevron-down trade-card-chevron"></i>
-      </button>
+      </div>
+      <div class="trade-col trade-col-exp" onclick="toggleTradeCard('${escHtml(tag.id)}')">${fmtMoney(stats.exp)}</div>
+      <div class="trade-col trade-col-inc" onclick="toggleTradeCard('${escHtml(tag.id)}')">${fmtMoney(stats.inc)}</div>
+      <div class="trade-col trade-col-balance" onclick="toggleTradeCard('${escHtml(tag.id)}')">${tradeNetHtml(stats)}</div>
       <span class="trade-card-actions">
-        <button type="button" class="btn btn-sm btn-p" onclick="openTradeAddModal('${escHtml(link.id)}')" title="加入交易账目"><i class="ti ti-plus"></i> 加入交易账目</button>
-        <button type="button" class="btn btn-sm" onclick="viewTradeInLedger('${escHtml(link.id)}')" title="在明细中查看"><i class="ti ti-list-details"></i></button>
-        <button type="button" class="btn btn-sm btn-a" onclick="unlinkTradeGroup('${escHtml(link.id)}')" title="取消关联"><i class="ti ti-unlink"></i></button>
+        <button type="button" class="btn btn-sm btn-p" onclick="openTradeAddModal('${escHtml(tag.id)}')" title="加入账目"><i class="ti ti-plus"></i> 加入账目</button>
+        <button type="button" class="btn btn-sm" onclick="openTradeMoveModal('${escHtml(tag.id)}')" title="移动到事件分组"><i class="ti ti-folder-share"></i> 移动到</button>
+        <button type="button" class="btn btn-sm" onclick="toggleTradeHidden('${escHtml(tag.id)}')" title="${hidden ? '取消隐藏事件' : '隐藏事件'}"><i class="ti ti-${hidden ? 'eye' : 'eye-off'}"></i> ${hidden ? '取消隐藏' : '隐藏'}</button>
+        <button type="button" class="btn btn-sm" onclick="viewTradeInLedger('${escHtml(tag.id)}')" title="展开账目明细"><i class="ti ti-list-details"></i></button>
+        <button type="button" class="btn btn-sm" onclick="unlinkTradeGroup('${escHtml(tag.id)}')" title="删除事件标签"><i class="ti ti-trash"></i></button>
       </span>
     </div>
-    <div class="trade-card-body">${rowHtml}</div>
+    <div class="trade-card-body">${rowHtml || '<div class="trade-add-empty">还没有账目</div>'}</div>
   </article>`;
+}
+
+function renderTradeGroupHead(section) {
+  if (section.custom && activeTradeGroupEditId === section.id) {
+    return `<header class="trades-group-head">
+      <input type="text" class="trade-card-name-inp trades-group-name-inp" id="tradeGroupInp-${escHtml(section.id)}" maxlength="40" value="${escHtml(section.name)}"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();saveTradeGroupEdit('${escHtml(section.id)}');} if(event.key==='Escape'){event.preventDefault();cancelTradeGroupEdit();}">
+      <button type="button" class="btn btn-sm btn-p" onclick="saveTradeGroupEdit('${escHtml(section.id)}')"><i class="ti ti-check"></i></button>
+      <button type="button" class="btn btn-sm" onclick="cancelTradeGroupEdit()"><i class="ti ti-x"></i></button>
+      <span class="trades-group-meta">${section.items.length} 个事件</span>
+    </header>`;
+  }
+  const actions = section.custom
+    ? `<button type="button" class="trade-card-name-edit" onclick="startTradeGroupEdit('${escHtml(section.id)}')" title="改名"><i class="ti ti-pencil"></i></button>
+       <button type="button" class="trade-card-name-edit" onclick="deleteTradeGroup('${escHtml(section.id)}')" title="删除分组"><i class="ti ti-trash"></i></button>`
+    : '';
+  return `<header class="trades-group-head">
+    <h3 class="trades-group-title">${escHtml(section.name)}</h3>
+    ${actions}
+    <span class="trades-group-meta">${section.items.length} 个事件</span>
+  </header>`;
 }
 
 function renderTradesPage() {
   const el = document.getElementById('tradesList');
   if (!el) return;
-  const allLinks = getTxnPairs().slice().sort((a, b) => tradeLinkSortKey(b).localeCompare(tradeLinkSortKey(a)));
-  const categories = tradeCategoriesFromLinks(allLinks);
+  const hiddenToggle = document.getElementById('tradesHideHidden');
+  if (hiddenToggle) hiddenToggle.checked = tradeHideHidden;
+  const allTags = getEventTags().filter(tag => !tradeHideHidden || !tag.hidden);
+  const sections = tradeGroupsForPage();
+  const customCount = sections.filter(section => section.custom).length;
 
-  if (activeTradeCatFilter && !categories.some(([cat]) => cat === activeTradeCatFilter)) {
-    activeTradeCatFilter = '';
-  }
-
-  if (!allLinks.length) {
-    renderTradesCatChips([], 0);
+  if (!allTags.length && !customCount) {
     renderTradesTotal([]);
     el.innerHTML = `<div class="trades-empty">
-      <i class="ti ti-link-off"></i>
-      <p>暂无关联交易事件</p>
-      <span>在明细列表勾选多笔账目后，点击「关联」即可创建</span>
+      <i class="ti ti-tag"></i>
+      <p>还没有事件标签</p>
+      <span>在明细里给账目加上标签，或点「新建事件」</span>
     </div>`;
     return;
   }
 
-  renderTradesCatChips(categories, allLinks.length);
-
-  const links = activeTradeCatFilter
-    ? allLinks.filter(link => tradeLinkPrimaryCat(link) === activeTradeCatFilter)
-    : allLinks;
-
-  renderTradesTotal(links);
-
-  if (!links.length) {
-    el.innerHTML = `<div class="trades-empty">
-      <i class="ti ti-filter-off"></i>
-      <p>该分类下暂无事件</p>
-      <span>点击「全部」查看所有关联交易</span>
-    </div>`;
-    return;
-  }
-
-  if (activeTradeCatFilter) {
-    el.innerHTML = `<div class="trades-filtered-list">${links.map(renderTradeCardHtml).join('')}</div>`;
-  } else {
-    const groups = groupTradesByCategory(links);
-    el.innerHTML = groups.map(({ cat, items }) => `<section class="trades-group">
-      <header class="trades-group-head">
-        <span class="trades-group-icon">${catIconHtml(cat, { size: 18, wrapClass: 'cat-pick-emoji-wrap' })}</span>
-        <h3 class="trades-group-title">${escHtml(catLabel(cat))}</h3>
-        <span class="trades-group-meta">${items.length} 个事件</span>
-      </header>
-      <div class="trades-group-list">${items.map(renderTradeCardHtml).join('')}</div>
-    </section>`).join('');
-  }
+  renderTradesTotal(allTags);
+  el.innerHTML = sections.map(section => {
+    const cards = section.items.map(renderTradeCardHtml).join('');
+    const empty = cards ? '' : '<div class="trades-group-empty">把事件拖到这里</div>';
+    return `<section class="trades-group${section.custom ? '' : ' trades-group--loose'}" data-drop-group="${escHtml(section.id)}">
+      ${renderTradeGroupHead(section)}
+      <div class="trades-group-list">${renderTradeSheetCols()}${cards}${empty}</div>
+    </section>`;
+  }).join('');
 
   if (activeTradeNameEditId) {
     const inp = document.getElementById(`tradeNameInp-${activeTradeNameEditId}`);
     inp?.focus();
     inp?.select();
   }
+  if (activeTradeGroupEditId) {
+    const inp = document.getElementById(`tradeGroupInp-${activeTradeGroupEditId}`);
+    inp?.focus();
+    inp?.select();
+  }
+}
+
+function toggleTradesHidden(checked) {
+  tradeHideHidden = checked !== false;
+  renderTradesPage();
+}
+
+function eventTagGroupId(tagId) {
+  return getEventTagGroups().find(group => group.tagIds.includes(tagId))?.id || '';
+}
+
+function openTradeMoveModal(id) {
+  const tag = eventTagById(id);
+  if (!tag) return;
+  tradeMoveTagId = id;
+  const nameEl = document.getElementById('tradeMoveEventName');
+  if (nameEl) nameEl.textContent = `事件：${tag.name}`;
+  const select = document.getElementById('tradeMoveGroupSel');
+  if (select) {
+    const groups = getEventTagGroups();
+    select.innerHTML = [
+      '<option value="">未分组</option>',
+      ...groups.map(group => `<option value="${escHtml(group.id)}">${escHtml(group.name)}</option>`),
+    ].join('');
+    select.value = eventTagGroupId(id);
+  }
+  document.getElementById('moTradeMove')?.classList.remove('hide');
+}
+
+function closeTradeMoveModal() {
+  tradeMoveTagId = null;
+  document.getElementById('moTradeMove')?.classList.add('hide');
+}
+
+function confirmTradeMove() {
+  const id = tradeMoveTagId;
+  if (!id || !eventTagById(id)) {
+    closeTradeMoveModal();
+    return;
+  }
+  const groupId = document.getElementById('tradeMoveGroupSel')?.value || '';
+  const currentGroupId = eventTagGroupId(id);
+  closeTradeMoveModal();
+  if (groupId === currentGroupId) return;
+  if (!moveEventTagToGroup(id, groupId)) return;
+  onEventTagsChanged();
+}
+
+function toggleTradeHidden(id) {
+  const tag = eventTagById(id);
+  if (!tag || !setEventTagHidden(id, !tag.hidden)) return;
+  if (tag.hidden && tradeHideHidden) {
+    if (activeTradeLinkId === id) activeTradeLinkId = null;
+    if (activeTradeNameEditId === id) activeTradeNameEditId = null;
+  }
+  onEventTagsChanged({ saveNow: true });
 }
 
 function startTradeNameEdit(id) {
-  if (!findLinkById(id)) return;
+  if (!eventTagById(id)) return;
   activeTradeNameEditId = id;
   renderTradesPage();
 }
@@ -5496,25 +6695,22 @@ function cancelTradeNameEdit() {
 }
 
 function saveTradeNameEdit(id) {
-  const link = findLinkById(id);
-  if (!link) return;
+  const tag = eventTagById(id);
+  if (!tag) return;
   const inp = document.getElementById(`tradeNameInp-${id}`);
   const trimmed = inp?.value?.trim() || '';
   if (!trimmed) {
-    alert('关联名称不能为空');
+    alert('事件名称不能为空');
     inp?.focus();
     return;
   }
-  try {
-    renameTxnLink(id, trimmed);
-  } catch (e) {
-    alert(e.message || '保存失败');
+  if (!renameEventTag(id, trimmed)) {
+    alert('已有同名事件标签');
     return;
   }
   activeTradeNameEditId = null;
-  persist();
+  onEventTagsChanged();
   renderTradesPage();
-  applyF();
 }
 
 function toggleTradeCard(id) {
@@ -5523,32 +6719,172 @@ function toggleTradeCard(id) {
 }
 
 function openTradeLink(id) {
-  if (!findLinkById(id)) return;
+  if (!eventTagById(id)) return;
   activeTradeLinkId = id;
-  const nav = document.getElementById('nav-trades') || document.querySelector('.ni[title="关联交易事件"]');
+  const nav = document.getElementById('nav-trades');
   if (nav) sw('trades', nav);
   else renderTradesPage();
 }
 
 function viewTradeInLedger(id) {
-  if (!findLinkById(id)) return;
-  activeTxnLinkId = id;
-  const nav = document.querySelector('.ni[title="明细列表"]');
-  if (nav) sw('ledger', nav);
-  applyF();
+  if (!eventTagById(id)) return;
+  const opening = activeTradeLinkId !== id;
+  activeTradeLinkId = opening ? id : null;
+  renderTradesPage();
+  if (!opening) return;
+  const card = [...document.querySelectorAll('#tradesList [data-link-id]')]
+    .find(el => el.dataset.linkId === id);
+  card?.scrollIntoView({ block: 'nearest' });
 }
 
 function unlinkTradeGroup(id) {
-  const link = findLinkById(id);
-  if (!link) return;
-  if (!confirm(`确定取消关联「${link.name}」？`)) return;
-  removeTxnLinkById(id);
-  if (activeTxnLinkId === id) activeTxnLinkId = null;
+  const tag = eventTagById(id);
+  if (!tag) return;
+  if (!confirm(`删除事件标签「${tag.name}」？已贴上的账目会去掉这个标签。`)) return;
+  deleteEventTag(id, allData);
+  if (activeEventTagId === id) activeEventTagId = null;
   if (activeTradeLinkId === id) activeTradeLinkId = null;
   if (activeTradeNameEditId === id) activeTradeNameEditId = null;
-  persist();
+  onEventTagsChanged();
   renderTradesPage();
-  applyF();
+}
+
+function removeTxnFromEventTag(rowId, tagId) {
+  const row = allData.find(item => item.id === rowId);
+  removeRowTag(row, tagId);
+  onEventTagsChanged();
+  renderTradesPage();
+}
+
+function createTradeEvent() {
+  const name = window.prompt('事件名称');
+  if (name == null) return;
+  const tag = createEventTag(name);
+  if (!tag) {
+    alert('请填写事件名称');
+    return;
+  }
+  activeTradeLinkId = tag.id;
+  onEventTagsChanged();
+  renderTradesPage();
+}
+
+function createTradeGroup() {
+  const name = window.prompt('分组名称');
+  if (name == null) return;
+  if (!String(name).trim()) {
+    alert('请填写分组名称');
+    return;
+  }
+  const group = createEventTagGroup(name);
+  if (!group) {
+    alert('已有同名分组');
+    return;
+  }
+  onEventTagsChanged();
+  renderTradesPage();
+}
+
+function startTradeGroupEdit(id) {
+  if (!getEventTagGroups().some(group => group.id === id)) return;
+  activeTradeGroupEditId = id;
+  renderTradesPage();
+}
+
+function cancelTradeGroupEdit() {
+  activeTradeGroupEditId = null;
+  renderTradesPage();
+}
+
+function saveTradeGroupEdit(id) {
+  const inp = document.getElementById(`tradeGroupInp-${id}`);
+  const trimmed = inp?.value?.trim() || '';
+  if (!trimmed) {
+    alert('分组名称不能为空');
+    inp?.focus();
+    return;
+  }
+  if (!renameEventTagGroup(id, trimmed)) {
+    alert('已有同名分组');
+    return;
+  }
+  activeTradeGroupEditId = null;
+  onEventTagsChanged();
+  renderTradesPage();
+}
+
+function deleteTradeGroup(id) {
+  const group = getEventTagGroups().find(item => item.id === id);
+  if (!group) return;
+  if (!confirm(`删除分组「${group.name}」？组内的事件会回到未分组。`)) return;
+  deleteEventTagGroup(id);
+  if (activeTradeGroupEditId === id) activeTradeGroupEditId = null;
+  onEventTagsChanged();
+  renderTradesPage();
+}
+
+function tradeDropBeforeId(zone, clientY, tagId) {
+  const cards = [...zone.querySelectorAll('.trade-card')].filter(card => card.dataset.linkId !== tagId);
+  for (const card of cards) {
+    const rect = card.getBoundingClientRect();
+    if (clientY < rect.top + rect.height / 2) return card.dataset.linkId;
+  }
+  return null;
+}
+
+function setupTradeGroupDrag() {
+  const root = document.getElementById('view-trades');
+  if (!root || root.dataset.groupDrag) return;
+  root.dataset.groupDrag = '1';
+  let drag = null;
+
+  const clearDrop = () => {
+    root.querySelectorAll('.is-drop').forEach(node => node.classList.remove('is-drop'));
+  };
+
+  root.addEventListener('pointerdown', e => {
+    const handle = e.target.closest('[data-trade-drag]');
+    if (!handle || e.button > 0) return;
+    const card = handle.closest('[data-link-id]');
+    if (!card) return;
+    drag = { id: card.dataset.linkId, x: e.clientX, y: e.clientY, active: false, pointerId: e.pointerId, card };
+    handle.setPointerCapture?.(e.pointerId);
+  });
+
+  root.addEventListener('pointermove', e => {
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    if (!drag.active) {
+      if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 4) return;
+      drag.active = true;
+      drag.card.classList.add('is-dragging');
+    }
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    const zone = under?.closest('[data-drop-group]') || null;
+    clearDrop();
+    zone?.classList.add('is-drop');
+    drag.zone = zone;
+    drag.yNow = e.clientY;
+  }, { passive: true });
+
+  root.addEventListener('pointerup', e => {
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    const current = drag;
+    drag = null;
+    current.card.classList.remove('is-dragging');
+    clearDrop();
+    if (!current.active || !current.zone) return;
+    const groupId = current.zone.dataset.dropGroup || '';
+    const beforeId = tradeDropBeforeId(current.zone, current.yNow, current.id);
+    if (!moveEventTagToGroup(current.id, groupId, beforeId)) return;
+    onEventTagsChanged();
+  });
+
+  root.addEventListener('pointercancel', e => {
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    drag.card.classList.remove('is-dragging');
+    clearDrop();
+    drag = null;
+  });
 }
 
 function tradeAddRowTitle(row) {
@@ -5566,18 +6902,19 @@ function tradeEventDateRange(link) {
 }
 
 function openTradeAddModal(id) {
-  const link = findLinkById(id);
-  if (!link) return;
+  const tag = eventTagById(id);
+  if (!tag) return;
   tradeAddLinkId = id;
   activeTradeLinkId = id;
   const nameEl = document.getElementById('tradeAddEventName');
-  if (nameEl) nameEl.textContent = `事件：${link.name}`;
-  const range = tradeEventDateRange(link);
+  if (nameEl) nameEl.textContent = `事件：${tag.name}`;
+  const rows = rowsForTag(tag);
+  const dates = rows.map(row => row['日期']).filter(Boolean).sort();
   const d1 = document.getElementById('tradeAddD1');
   const d2 = document.getElementById('tradeAddD2');
   const q = document.getElementById('tradeAddQ');
-  if (d1) d1.value = range.d1;
-  if (d2) d2.value = range.d2;
+  if (d1) d1.value = dates[0] || '';
+  if (d2) d2.value = dates[dates.length - 1] || '';
   if (q) q.value = '';
   renderTradeAddResults();
   document.getElementById('moTradeAdd')?.classList.remove('hide');
@@ -5593,15 +6930,14 @@ function onTradeAddFilterChange() {
   renderTradeAddResults();
 }
 
-function tradeAddCandidateRows(link, limit = 80) {
-  const owned = new Set(link.keys.map(String));
+function tradeAddCandidateRows(tag, limit = 80) {
+  const owned = new Set(rowsForTag(tag).map(row => row.id));
   const d1 = document.getElementById('tradeAddD1')?.value || '';
   const d2 = document.getElementById('tradeAddD2')?.value || '';
   const q = (document.getElementById('tradeAddQ')?.value || '').trim().toLowerCase();
   const matched = allData
     .filter(row => {
-      const key = String(row.id);
-      if (owned.has(key)) return false;
+      if (owned.has(row.id)) return false;
       if (d1 && row['日期'] < d1) return false;
       if (d2 && row['日期'] > d2) return false;
       if (q && !`${rowSearchHaystack(row)} ${row['日期'] || ''}`.includes(q)) return false;
@@ -5614,9 +6950,9 @@ function tradeAddCandidateRows(link, limit = 80) {
 function renderTradeAddResults() {
   const wrap = document.getElementById('tradeAddResults');
   const countEl = document.getElementById('tradeAddCount');
-  const link = findLinkById(tradeAddLinkId);
-  if (!wrap || !link) return;
-  const { rows, total, limit } = tradeAddCandidateRows(link);
+  const tag = eventTagById(tradeAddLinkId);
+  if (!wrap || !tag) return;
+  const { rows, total, limit } = tradeAddCandidateRows(tag);
   if (countEl) {
     if (!total) countEl.textContent = '没有符合条件的账目';
     else if (total > limit) countEl.textContent = `找到 ${total} 笔，显示前 ${limit} 笔，点击加入本事件`;
@@ -5627,21 +6963,10 @@ function renderTradeAddResults() {
     return;
   }
   wrap.innerHTML = rows.map(row => {
-    const other = findLinkForKey(String(row.id));
-    const blocked = other && other.id !== link.id;
     const isInc = row['收支'] === '收入';
     const sub = (row['子分类'] || '').trim();
     const catTxt = sub ? `${row['分类']} · ${sub}` : (row['分类'] || '—');
     const meta = `${formatDateLabel(row['日期'])}${row['时间'] ? ` ${formatTimeShort(row['时间'])}` : ''} · ${catTxt} · ${row['来源'] || ''}`;
-    if (blocked) {
-      return `<div class="trade-add-item is-blocked" title="已属于事件「${escHtml(other.name)}」">
-        <div class="trade-add-main">
-          <div class="trade-add-title">${escHtml(tradeAddRowTitle(row))}</div>
-          <div class="trade-add-meta">${escHtml(meta)} · 已在「${escHtml(other.name)}」</div>
-        </div>
-        <div class="trade-add-amt ${isInc ? 'inc' : 'exp'}">${isInc ? '+' : '-'}${fmtMoney(row['金额'])}</div>
-      </div>`;
-    }
     return `<button type="button" class="trade-add-item" onclick="addTxnToTradeEvent(${row.id})">
       <div class="trade-add-main">
         <div class="trade-add-title">${escHtml(tradeAddRowTitle(row))}</div>
@@ -5653,17 +6978,12 @@ function renderTradeAddResults() {
 }
 
 function addTxnToTradeEvent(id) {
-  const linkId = tradeAddLinkId;
-  if (!linkId) return;
-  try {
-    appendTxnLinkKeys(linkId, [String(id)]);
-  } catch (e) {
-    alert(e.message || '加入失败');
-    return;
-  }
-  persist();
+  const tag = eventTagById(tradeAddLinkId);
+  const row = allData.find(item => item.id === id);
+  if (!tag || !row) return;
+  addRowTag(row, tag.id);
+  onEventTagsChanged();
   renderTradesPage();
-  applyF();
   renderTradeAddResults();
 }
 
@@ -5679,6 +6999,25 @@ function clearTxnLinkFilter() {
 function updateTxnLinkFilterBar() {
   const bar = document.getElementById('txnLinkFilterBar');
   if (!bar) return;
+  if (activeEventTagId) {
+    const tag = eventTagById(activeEventTagId);
+    if (!tag) {
+      activeEventTagId = null;
+      syncEventTagFilterOptions();
+    } else {
+      const rows = allData.filter(r => eventTagIds(r).includes(tag.id));
+      const stats = eventTagTotals(rows);
+      const netCls = stats.net < -0.009 ? 'loss' : 'ok';
+      const netLabel = stats.net < -0.009 ? '净支出' : stats.net > 0.009 ? '净收入' : '已相抵';
+      bar.classList.remove('hide');
+      bar.innerHTML = `
+        <span class="txn-link-filter-name"><i class="ti ti-tag"></i> ${escHtml(tag.name)}</span>
+        <span class="txn-link-filter-stats">${stats.count} 笔 · 支出 ${fmtMoney(stats.expense)} · 收入 ${fmtMoney(stats.income)}</span>
+        <span class="txn-link-balance ${netCls}">${netLabel} ${fmtMoney(Math.abs(stats.net))}</span>
+        <button type="button" class="btn btn-sm txn-link-filter-close" onclick="clearEventTagFilter()" title="退出事件"><i class="ti ti-x"></i></button>`;
+      return;
+    }
+  }
   if (activeTxnMergeId) {
     const merge = findMergeById(activeTxnMergeId);
     if (!merge) {
@@ -5833,11 +7172,37 @@ function detBulkToggleRefund(markAsRefund) {
 }
 
 export function syncSearch(v) {
-  document.getElementById('qi').value = v;
+  const q = String(v ?? '');
+  const qi = document.getElementById('qi');
+  if (qi) qi.value = q;
   const top = document.getElementById('topSearch');
-  if (top && top.value !== v) top.value = v;
+  if (top && top.value !== q) top.value = q;
   updateSearchClear();
-  applyF();
+
+  // Top search filters the ledger — switch there so results are visible.
+  if (q.trim()) {
+    const ledgerView = document.getElementById('view-ledger');
+    if (ledgerView && !ledgerView.classList.contains('on')) {
+      const nav = document.getElementById('nav-ledger') || document.querySelector('.ni[title="交易明细"], .ni[title="明细列表"], button.ni[onclick="sw(\'ledger\',this)"]');
+      if (nav) sw('ledger', nav);
+    }
+  }
+
+  try {
+    applyF();
+  } catch (err) {
+    console.error('search applyF failed', err);
+  }
+
+  // Keep typing focus in the top search after view switch.
+  if (top && document.activeElement !== top) {
+    const start = top.selectionStart;
+    const end = top.selectionEnd;
+    top.focus({ preventScroll: true });
+    if (typeof start === 'number' && typeof end === 'number') {
+      try { top.setSelectionRange(start, end); } catch { /* ignore */ }
+    }
+  }
 }
 
 function updateSearchClear() {
@@ -5935,6 +7300,7 @@ async function initAppInner() {
   const nnEmoji = document.getElementById('nnEmoji');
   if (nnEmoji) setCatIconBtn(nnEmoji, nnEmoji.dataset.emoji || iconRef('1F4CC'));
   Categorizer.onRulesChange(() => persist());
+  setupSubCatPop();
   initCatPicker({
     getCats: () => CATS,
     getEmoji: c => catIconValue(c),
@@ -5951,6 +7317,7 @@ async function initAppInner() {
   });
   syncUnsetSubFilterUI();
   ensureNavScrollReveal();
+  ensureTxnNoteEvents();
   initCatBrowse({
     getCats: () => CATS,
     getEmoji: c => catIconHtml(c, { size: 20, wrapClass: 'catbrowse-tab-emoji-wrap' }),
@@ -6007,15 +7374,31 @@ async function initAppInner() {
     onPersist: persist
   });
   setupGearUpload();
-  setupCompanyCost();
+  setupCompanyCost({
+    getTransactions: () => allData,
+    onLinksChanged: () => {
+      renderTable();
+      refreshDetailModal();
+    }
+  });
   setupFamilyEvents();
+  setupTravel();
   ensureHomeMonthDropEvents();
   setupDropZone();
   setupImportHistoryActions();
   setupLedgerHeadScrollSync();
+  setupEventTags({
+    getRow: id => allData.find(r => String(r.id) === String(id)),
+    getRows: () => allData,
+    onChange: onEventTagsChanged,
+    onFilter: filterEventTag
+  });
+  setupTradeGroupDrag();
   initLedgerDateInputs();
   await loadData();
   appReady = true;
+  restorePage();
+  bindLiveSync();
 }
 
 export function refreshForTheme() {
@@ -6033,12 +7416,15 @@ Object.assign(window, {
   openAdd, closeAdd, saveAdd, openEditRow, openSrc, closeSrc, addSrc, saveSrc,
   openCat, closeCat, addCat, saveCat, delCat, toggleCatSub, pickCatEmoji, pickNewCatEmoji,
   setQuick, resetF, applyF, changePgSize, filterSrc, filterLedgerDay, filterLedgerMonth, setTypeFilter, onSubFilterChange, toggleSortCol, toggleDateSort,
+  filterEventTag, clearEventTagFilter, onEventTagFilterChange, applyBulkEventTag, convertSubcatToEventTag,
+  createTradeEvent, createTradeGroup, removeTxnFromEventTag, toggleTradesHidden, openTradeMoveModal, closeTradeMoveModal, confirmTradeMove, toggleTradeHidden,
   toggleSelect, toggleSelectAll, clearSelection, applyBulkCat, applyBulkSubCat, bulkToggleRefund,
   linkLedgerGroup, unlinkLedgerGroup, closeTxnLinkModal, confirmTxnLinkModal,
   openTxnMergeModal, closeTxnMergeModal, confirmTxnMergeModal, onTxnMergeCatChange, unmergeLedgerGroup,
   filterTxnMerge, clearTxnMergeFilter,
   filterTxnLink, clearTxnLinkFilter, toggleTradeCard, openTradeLink, viewTradeInLedger, unlinkTradeGroup,
-  startTradeNameEdit, saveTradeNameEdit, cancelTradeNameEdit, filterTradeCat,
+  startTradeNameEdit, saveTradeNameEdit, cancelTradeNameEdit,
+  startTradeGroupEdit, saveTradeGroupEdit, cancelTradeGroupEdit, deleteTradeGroup,
   openTradeAddModal, closeTradeAddModal, onTradeAddFilterChange, addTxnToTradeEvent,
   resetImportPreview, confirmImport, onImportSrcChange, toggleDupImport, toggleAllDupImport,
   toggleImportRecordType, updateImportRecordAmount, resetAllLedger,
@@ -6050,14 +7436,19 @@ Object.assign(window, {
   toggleCashAccountEditMode, addCashAccountRow, deleteCashAccount,
   toggleBudgetEditMode, addBudgetRow, deleteBudget,
   toggleLifeAccountEditMode, addLifeAccountRow, deleteLifeAccount,
-  toggleLongReminderEditMode, addLongReminderRow, deleteLongReminder, addLongReminderToCalendar,
+  addLifeGroup, deleteLifeGroup,
+  toggleLongReminderEditMode, addLongReminderRow, deleteLongReminder, toggleLongReminderDone,
   toggleTopbarReminders, closeTopbarReminders,
-  toggleWebAccountEditMode, addWebAccountRow, addWebAccountColumn, deleteWebAccountRow, deleteWebAccountColumn,
+  toggleWebAccountEditMode, addWebAccountPlatform, addWebAccountEntry, addWebAccountRow, addWebAccountColumn,
+  deleteWebAccountEntry, deleteWebAccountRow, deleteWebAccountPlatform, deleteWebAccountColumn, toggleWebPasswordReveal,
   bindSelectedCreditCards, unbindCreditCardFromPool, dissolveCreditPoolById,
   selectAccountsTab,
-  goP, toggleRf, toggleExclude, updCat, updSubCat, updCatDet, showAllDetail, showDetail, showIncomeDetail, showCatReportDetail, closeDetModal, toggleDetSort, toggleDetUnsetSubFilter,
+  goP, toggleRf, toggleExclude, updCat, updSubCat, updCatDet, updTxnNote, startTxnNoteEdit, showAllDetail, showDetail, showIncomeDetail, showCatReportDetail, closeDetModal, toggleDetSort, toggleDetUnsetSubFilter,
   openHomeExpCatSettings, closeHomeExpCatSettings, saveHomeExpCatSettings, toggleHomeExpCatSetting,
   openHomeIncCatSettings, closeHomeIncCatSettings, saveHomeIncCatSettings, toggleHomeIncCatSetting,
+  openHomeCostSettings, closeHomeCostSettings, saveHomeCostSettings, resetHomeCostSettings,
+  toggleHomeCostCatSetting, toggleHomeCostSubSetting, addHomeCostCat, removeHomeCostCat,
+  onHomeBigMinDraftChange,
   onHomeMonthChange,
   toggleHomeMonthDrop, selectHomeMonth,
   toggleDetSelect, toggleDetSelectAll, clearDetSelection, applyDetBulkCat, applyDetBulkSubCat, detBulkToggleRefund,
@@ -6067,8 +7458,11 @@ Object.assign(window, {
   onGearSectionCatChange, onGearSectionSubChange, removeGearSection,
   addIncomeMonitorCat, addIncomeMonitorCatFromSel, removeIncomeMonitorCat, onIncomeYearChange,
   openInvoiceEdit, closeInvoiceEdit, saveInvoiceEdit, removeInvoice, triggerInvoiceUpload, triggerManualInvoiceUpload,
-  toggleInvoicePrinted, downloadInvoiceFile, printInvoiceFile, openAppConfig,
+  toggleInvoicePrinted, openInvoiceFile, downloadInvoiceFile, downloadFilteredInvoices, printInvoiceFile, openAppConfig,
+  openInvoiceMatch, closeInvoiceMatch, searchInvoiceMatch, selectInvoiceMatch,
   openFamilyCreate, openFamilyEdit, closeFamilyEdit, saveFamilyEdit, removeFamilyEvent, triggerFamilyUpload,
+  setFamilyPageFileCat, setFamilyModalFileCat, setFamilyPageFileStar, setFamilyModalFileStar,
+  assignSelectedFamilyFiles, clearSelectedFamilyFileCat,
   onFamilySearch, clearFamilySearch, setFamilyViewMode,
   openFamilyTxnSearch, closeFamilyTxnSearch, onFamilyTxnSearch, pickFamilyLinkedTxn, removeFamilyLinkedTxn,
   openSplitEditor, closeSplitEditor, addSplitLine, saveSplitEdit: handleSaveSplit,

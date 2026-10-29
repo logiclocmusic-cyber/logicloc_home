@@ -1,7 +1,8 @@
 import { fmtMoney } from './format.js';
 import { assetUrl } from './apiBase.js';
 import {
-  fetchInvoices, fetchInvoiceAiStatus, scanInvoice, createInvoice, updateInvoice, deleteInvoice
+  fetchInvoices, fetchInvoiceAiStatus, scanInvoice, createInvoice, updateInvoice, deleteInvoice,
+  downloadInvoiceArchive
 } from './api.js';
 
 const CATEGORIES = ['办公用品', '差旅', '餐饮', '设备', '服务', '租金', '其他'];
@@ -9,6 +10,30 @@ const COMPANY_BUYERS = [
   '成都小河帮电子商务有限公司',
   '成都乐极客科技有限公司'
 ];
+
+/** 工商公开信息（常量；乐极客信用代码来自本机发票 PDF 购买方纳税人识别号） */
+const COMPANY_PROFILES = {
+  '成都小河帮电子商务有限公司': {
+    creditCode: '91510108MA61XDF265',
+    legalRep: '胡晗',
+    founded: '2016-08-29',
+    status: '存续',
+    capital: '5万',
+    companyType: '有限责任公司（自然人投资或控股）',
+    address: '成都市成华区崔家店路52号（宗地B）蓝光东方天地7栋4层426号',
+    scope: '销售（含网上销售）预包装食品兼散装食品（取得相关行政许可后方可开展经营活动）'
+  },
+  '成都乐极客科技有限公司': {
+    creditCode: '91510108MA61XE1W5L',
+    legalRep: '胡晗',
+    founded: '2016-08-30',
+    status: '存续',
+    capital: '5万元',
+    companyType: '有限责任公司（自然人独资）',
+    address: '成都市成华区崔家店路52号（宗地B）蓝光东方天地第7栋4层426号',
+    icp: '蜀ICP备19021758号'
+  }
+};
 const BUYER_DOT_COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899'];
 const BUYER_ROW_BG = [
   'rgba(239,68,68,.06)', 'rgba(59,130,246,.06)', 'rgba(34,197,94,.06)',
@@ -26,9 +51,16 @@ function currentQuarter() {
 let invoices = [];
 let openId = null;
 let pendingFile = null;
+let pendingRawAi = null;
 let uploadMode = 'ai';
 let buyerColorMap = new Map();
 let filters = { buyer: '', search: '', year: currentYear(), quarter: currentQuarter(), status: '' };
+let matchInvoiceId = null;
+let matchSearch = '';
+let companyHooks = {
+  getTransactions: () => [],
+  onLinksChanged: () => {},
+};
 
 function invoiceNoFromFilename(fileName) {
   const m = String(fileName || '').match(/(\d{18,22})/);
@@ -139,6 +171,25 @@ function filteredInvoices() {
   });
 }
 
+export async function preloadCompanyInvoices() {
+  const data = await fetchInvoices();
+  invoices = data.invoices || [];
+  rebuildBuyerColors(invoices);
+  return invoices;
+}
+
+export function matchedInvoicesForTransaction(txnId) {
+  const id = Number(txnId);
+  return invoices.filter(inv => Number(inv.linkedTxnId) === id);
+}
+
+export function invoiceMatchTagHtml(txnId) {
+  const matches = matchedInvoicesForTransaction(txnId);
+  if (!matches.length) return '';
+  const detail = matches.map(inv => inv.invoiceNo || inv.fileName || `发票 ${inv.id}`).join('、');
+  return `<span class="ledger-invoice-tag" title="已匹配发票：${esc(detail)}"><i class="ti ti-receipt"></i>已开票</span>`;
+}
+
 function resolveFormBuyer(buyer) {
   const b = String(buyer || '').trim();
   if (COMPANY_BUYERS.includes(b)) return b;
@@ -155,7 +206,12 @@ function formFieldsHtml(data = {}) {
   const buyerOpts = COMPANY_BUYERS.map(b =>
     `<option value="${esc(b)}"${buyerVal === b ? ' selected' : ''}>${esc(b)}</option>`
   ).join('');
+  const warnings = Array.isArray(data.warnings) ? data.warnings.filter(Boolean) : [];
+  const warningHtml = warnings.length
+    ? `<div class="inv-scan-warning"><i class="ti ti-alert-triangle"></i><span>请重点核对：${warnings.map(esc).join('；')}</span></div>`
+    : '';
   return `
+    ${warningHtml}
     <div class="inv-form-grid">
       <div class="inv-form-row inv-form-row--1">
         <div class="fg fg-vendor"><label>销售方</label><input id="invVendor" value="${esc(data.vendor)}" title="${esc(data.vendor)}"></div>
@@ -200,6 +256,104 @@ function yearCompanyStats(year) {
   });
 }
 
+function bizCopySpan(value, extraClass = '', display = null) {
+  const raw = String(value ?? '');
+  if (!raw) return '';
+  const shown = display == null ? raw : display;
+  const cls = `inv-biz-v${extraClass ? ` ${extraClass}` : ''} inv-biz-copy`;
+  return `<span class="${cls}" data-copy="${esc(raw)}" title="点击复制：${esc(raw)}">${esc(shown)}</span>`;
+}
+
+function showInvCopyTip(msg = '已复制') {
+  let tip = document.getElementById('invCopyTip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.id = 'invCopyTip';
+    tip.className = 'inv-copy-tip';
+    tip.setAttribute('role', 'status');
+    document.body.appendChild(tip);
+  }
+  tip.textContent = msg;
+  tip.classList.add('on');
+  clearTimeout(tip._t);
+  tip._t = setTimeout(() => tip.classList.remove('on'), 1400);
+}
+
+async function copyBizText(text) {
+  const value = String(text || '').trim();
+  if (!value) return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = value;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    showInvCopyTip('已复制');
+    return true;
+  } catch {
+    showInvCopyTip('复制失败');
+    return false;
+  }
+}
+
+function companyBizHtml(company) {
+  const p = COMPANY_PROFILES[company];
+  if (!p) return '';
+  const code = p.creditCode
+    ? `<div class="inv-biz-row"><span class="inv-biz-k">信用代码</span>${bizCopySpan(p.creditCode, 'inv-biz-mono')}</div>`
+    : '';
+  const type = p.companyType
+    ? `<div class="inv-biz-row"><span class="inv-biz-k">类型</span>${bizCopySpan(p.companyType, '', trunc(p.companyType, 22))}</div>`
+    : '';
+  const addr = p.address
+    ? `<div class="inv-biz-row"><span class="inv-biz-k">地址</span>${bizCopySpan(p.address, 'inv-biz-addr')}</div>`
+    : '';
+  const icp = p.icp
+    ? `<div class="inv-biz-row"><span class="inv-biz-k">ICP</span>${bizCopySpan(p.icp)}</div>`
+    : '';
+  const scope = p.scope
+    ? `<details class="inv-biz-scope"><summary>经营范围</summary><p class="inv-biz-copy" data-copy="${esc(p.scope)}" title="点击复制经营范围">${esc(p.scope)}</p></details>`
+    : '';
+  return `<div class="inv-year-card-biz">
+      ${code}
+      <div class="inv-biz-grid">
+        <div class="inv-biz-cell"><span class="inv-biz-k">法人</span>${bizCopySpan(p.legalRep || '')}</div>
+        <div class="inv-biz-cell"><span class="inv-biz-k">成立</span>${bizCopySpan(p.founded || '')}</div>
+        <div class="inv-biz-cell"><span class="inv-biz-k">注册资本</span>${bizCopySpan(p.capital || '')}</div>
+        <div class="inv-biz-cell"><span class="inv-biz-k">状态</span>${bizCopySpan(p.status || '')}</div>
+      </div>
+      ${type}
+      ${addr}
+      ${icp}
+      ${scope}
+    </div>`;
+}
+
+function toggleYearCardFilter(card) {
+  const buyer = card.dataset.buyer || '';
+  const yearVal = card.dataset.year || '';
+  const same = filters.buyer === buyer && filters.year === yearVal;
+  filters.buyer = same ? '' : buyer;
+  filters.year = same ? '' : yearVal;
+  const yearSel = document.getElementById('invFilterYear');
+  if (yearSel) yearSel.value = filters.year;
+  renderAll();
+}
+
+function selectionInside(el) {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !String(sel).trim()) return false;
+  const node = sel.anchorNode;
+  return Boolean(node && el.contains(node.nodeType === 1 ? node : node.parentElement));
+}
+
 function renderYearCards() {
   const el = document.getElementById('invYearCards');
   if (!el) return;
@@ -208,26 +362,39 @@ function renderYearCards() {
   el.innerHTML = stats.map(s => {
     const active = filters.buyer === s.company && filters.year === String(year) ? ' on' : '';
     const short = s.company.replace(/^成都/, '');
-    return `<button type="button" class="inv-year-card${active}" data-buyer="${esc(s.company)}" data-year="${year}" style="--inv-card-accent:${s.color};--inv-card-bg:${s.bg}">
+    return `<div role="button" tabindex="0" class="inv-year-card${active}" data-buyer="${esc(s.company)}" data-year="${year}" style="--inv-card-accent:${s.color};--inv-card-bg:${s.bg}">
       <div class="inv-year-card-top">
         <i class="inv-company-dot" style="background:${s.color}"></i>
-        <span class="inv-year-card-name" title="${esc(s.company)}">${esc(short)}</span>
+        <span class="inv-year-card-name" data-copy="${esc(s.company)}" title="${esc(s.company)}（可选中复制）">${esc(short)}</span>
         <span class="inv-year-card-year">${year} 年</span>
       </div>
       <div class="inv-year-card-amt">${fmtMoney(s.total)}</div>
       <div class="inv-year-card-meta">${s.count} 张成本发票</div>
-    </button>`;
+      ${companyBizHtml(s.company)}
+    </div>`;
   }).join('');
+  el.querySelectorAll('.inv-year-card-biz').forEach(biz => {
+    biz.addEventListener('click', e => {
+      e.stopPropagation();
+      const details = e.target.closest('details');
+      if (details && e.target.closest('summary')) return;
+      if (selectionInside(biz)) return;
+      const copyEl = e.target.closest('[data-copy]');
+      if (!copyEl || !biz.contains(copyEl)) return;
+      copyBizText(copyEl.getAttribute('data-copy') || copyEl.textContent);
+    });
+  });
   el.querySelectorAll('.inv-year-card').forEach(card => {
-    card.addEventListener('click', () => {
-      const buyer = card.dataset.buyer || '';
-      const yearVal = card.dataset.year || '';
-      const same = filters.buyer === buyer && filters.year === yearVal;
-      filters.buyer = same ? '' : buyer;
-      filters.year = same ? '' : yearVal;
-      const yearSel = document.getElementById('invFilterYear');
-      if (yearSel) yearSel.value = filters.year;
-      renderAll();
+    card.addEventListener('click', e => {
+      if (e.target.closest('.inv-year-card-biz')) return;
+      if (selectionInside(card)) return;
+      toggleYearCardFilter(card);
+    });
+    card.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (e.target !== card) return;
+      e.preventDefault();
+      toggleYearCardFilter(card);
     });
   });
 }
@@ -262,6 +429,12 @@ function renderYearFilter() {
 
 function renderSummary(list) {
   const summary = document.getElementById('invSummary');
+  const downloadBtn = document.getElementById('invBatchDownload');
+  const downloadable = list.filter(inv => inv.fileUrl).length;
+  if (downloadBtn) {
+    downloadBtn.disabled = downloadable === 0;
+    downloadBtn.title = downloadable ? `下载当前筛选中的 ${downloadable} 个发票文件` : '当前筛选中没有可下载的发票文件';
+  }
   if (!summary) return;
   const printed = list.filter(inv => inv.printed).length;
   const total = list.reduce((s, inv) => s + (Number(inv.total) || 0), 0);
@@ -303,7 +476,8 @@ function renderTable() {
         <button type="button" class="inv-icon-btn" onclick="toggleInvoicePrinted(${inv.id})" title="${inv.printed ? '已打印' : '标记已打印'}">${printIcon}</button>
       </td>
       <td class="c inv-actions" onclick="event.stopPropagation()">
-        <button type="button" class="inv-icon-btn" onclick="openInvoiceEdit(${inv.id})" title="查看/编辑"><i class="ti ti-eye"></i></button>
+        <button type="button" class="inv-icon-btn" onclick="openInvoiceFile(${inv.id})" title="打开发票文件"${fileUrl ? '' : ' disabled'}><i class="ti ti-eye"></i></button>
+        <button type="button" class="inv-icon-btn${inv.linkedTxnId ? ' is-linked' : ''}" onclick="openInvoiceMatch(${inv.id})" title="${inv.linkedTxnId ? '更改匹配账目' : '匹配账目'}"><i class="ti ti-link"></i></button>
         <button type="button" class="inv-icon-btn" onclick="printInvoiceFile(${inv.id})" title="打印"${fileUrl ? '' : ' disabled'}><i class="ti ti-printer"></i></button>
         <button type="button" class="inv-icon-btn" onclick="downloadInvoiceFile(${inv.id})" title="下载"${fileUrl ? '' : ' disabled'}><i class="ti ti-download"></i></button>
         <button type="button" class="inv-icon-btn inv-icon-btn--danger" onclick="removeInvoice(${inv.id})" title="删除"><i class="ti ti-trash"></i></button>
@@ -329,9 +503,7 @@ function renderAll() {
 }
 
 async function loadInvoices() {
-  const data = await fetchInvoices();
-  invoices = data.invoices || [];
-  rebuildBuyerColors(invoices);
+  await preloadCompanyInvoices();
   renderAll();
 }
 
@@ -351,10 +523,12 @@ async function updateAiStatusBanner() {
     const configBtn = window.electronAPI?.openAppConfig
       ? ' <button type="button" class="btn btn-sm inv-config-btn" onclick="openAppConfig()"><i class="ti ti-folder-open"></i> 打开配置文件</button>'
       : '';
-    if (!st.configured) {
+    if (st.mode === 'ocr') {
+      intro.textContent = '按公司分别查看、打印、下载发票。上传后由本地 OCR 提取文字，识别结果可手动校对保存。';
+    } else if (!st.configured) {
       const hint = st.configHint
         ? `<span class="inv-ai-warn">${esc(st.configHint)}</span>`
-        : '<span class="inv-ai-warn">AI 识别未启用：请在 config.env 中配置 <code>GEMINI_API_KEY</code>（行首不要加 #）。</span>';
+        : '<span class="inv-ai-warn">AI 识别未启用：请配置硅基流动 <code>DEEPSEEK_VISION_API_KEY</code>（NAS 见 NAS.md，Mac 应用见 config.env）。</span>';
       intro.innerHTML = `按公司分别查看、打印、下载发票。${hint}${configBtn}`;
     } else if (st.provider === 'gemini' || st.mode === 'gemini') {
       intro.textContent = `按公司分别查看、打印、下载发票。上传后由 Gemini（${st.model || 'gemini'}）自动识别，可手动校对保存。`;
@@ -388,6 +562,7 @@ async function processManualUpload(file) {
   try {
     const dataUrl = await readFileAsDataUrl(file);
     pendingFile = { dataUrl, file };
+    pendingRawAi = null;
     openId = null;
     const invoiceNo = invoiceNoFromFilename(file.name);
     const dup = invoiceNo ? findLocalDuplicate(invoiceNo) : null;
@@ -422,13 +597,16 @@ async function processUpload(file) {
   try {
     const dataUrl = await readFileAsDataUrl(file);
     pendingFile = { dataUrl, file };
+    pendingRawAi = null;
     openId = null;
     const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
     const scanned = await scanInvoice(dataUrl, file.type || (isPdf ? 'application/pdf' : ''), file.name);
+    pendingRawAi = scanned.rawAi || null;
     const dup = findLocalDuplicate(scanned.invoiceNo);
     if (dup) {
       alert(duplicateInvoiceMessage(dup));
       pendingFile = null;
+      pendingRawAi = null;
       return;
     }
     openInvoiceModal({ ...scanned, fileName: file.name, mimeType: file.type }, dataUrl);
@@ -464,12 +642,14 @@ export function openInvoiceEdit(id) {
   if (!inv) return;
   openId = id;
   pendingFile = null;
+  pendingRawAi = null;
   openInvoiceModal(inv, inv.fileUrl ? assetUrl(inv.fileUrl) : null);
 }
 
 export function closeInvoiceEdit() {
   openId = null;
   pendingFile = null;
+  pendingRawAi = null;
   document.getElementById('moInvoice')?.classList.add('hide');
 }
 
@@ -485,6 +665,7 @@ export async function saveInvoiceEdit() {
       await updateInvoice(openId, fields);
     } else {
       const payload = { ...fields };
+      if (pendingRawAi) payload.rawAi = pendingRawAi;
       if (pendingFile) {
         payload.data = pendingFile.dataUrl;
         payload.mime = pendingFile.file.type;
@@ -521,6 +702,12 @@ export async function toggleInvoicePrinted(id) {
   }
 }
 
+export function openInvoiceFile(id) {
+  const inv = invoices.find(i => i.id === id);
+  if (!inv?.fileUrl) return;
+  window.open(assetUrl(inv.fileUrl), '_blank', 'noopener');
+}
+
 export function downloadInvoiceFile(id) {
   const inv = invoices.find(i => i.id === id);
   if (!inv?.fileUrl) return;
@@ -532,6 +719,50 @@ export function downloadInvoiceFile(id) {
   document.body.appendChild(a);
   a.click();
   a.remove();
+}
+
+function filteredArchiveName() {
+  const parts = ['发票'];
+  if (filters.year) parts.push(filters.year);
+  if (filters.quarter) parts.push(`Q${filters.quarter}`);
+  if (filters.buyer) parts.push(filters.buyer.replace(/^成都/, '').replace(/有限公司$/, ''));
+  if (filters.status === 'printed') parts.push('已打印');
+  if (filters.status === 'unprinted') parts.push('未打印');
+  if (filters.search.trim()) parts.push('搜索结果');
+  return `${parts.join('-')}.zip`;
+}
+
+export async function downloadFilteredInvoices() {
+  const list = filteredInvoices().filter(inv => inv.fileUrl);
+  if (!list.length) {
+    alert('当前筛选结果中没有可下载的发票文件');
+    return;
+  }
+  const btn = document.getElementById('invBatchDownload');
+  const oldHtml = btn?.innerHTML;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ti ti-loader-2 inv-spin"></i> 打包中';
+  }
+  try {
+    const fileName = filteredArchiveName();
+    const blob = await downloadInvoiceArchive(list.map(inv => inv.id), fileName);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  } catch (err) {
+    alert('批量下载失败：' + err.message);
+  } finally {
+    if (btn) {
+      btn.innerHTML = oldHtml;
+      btn.disabled = filteredInvoices().every(inv => !inv.fileUrl);
+    }
+  }
 }
 
 export function printInvoiceFile(id) {
@@ -552,7 +783,99 @@ export function triggerManualInvoiceUpload() {
   document.getElementById('invFileInp')?.click();
 }
 
-export function setupCompanyCost() {
+function invoiceMatchRows() {
+  const inv = invoices.find(item => item.id === matchInvoiceId);
+  if (!inv) return [];
+  const q = matchSearch.trim().toLowerCase();
+  const targetAmount = Number(inv.total) || 0;
+  const targetDate = new Date(`${inv.invoiceDate || '1970-01-01'}T12:00:00`).getTime();
+  return companyHooks.getTransactions()
+    .filter(row => {
+      if (!q) return true;
+      return [
+        row['日期'], row['时间'], row['来源'], row['交易对方'],
+        row['商品说明'], row['备注'], row['金额']
+      ].join(' ').toLowerCase().includes(q);
+    })
+    .map(row => {
+      const amountDiff = Math.abs((Number(row['金额']) || 0) - targetAmount);
+      const rowDate = new Date(`${row['日期'] || '1970-01-01'}T12:00:00`).getTime();
+      const dateDiff = Math.abs(rowDate - targetDate);
+      return { row, amountDiff, dateDiff };
+    })
+    .sort((a, b) => a.amountDiff - b.amountDiff || a.dateDiff - b.dateDiff
+      || String(b.row['日期'] + b.row['时间']).localeCompare(String(a.row['日期'] + a.row['时间'])))
+    .slice(0, 100)
+    .map(item => item.row);
+}
+
+function renderInvoiceMatchCandidates() {
+  const box = document.getElementById('invMatchResults');
+  const current = document.getElementById('invMatchCurrent');
+  const inv = invoices.find(item => item.id === matchInvoiceId);
+  if (!box || !inv) return;
+  if (current) {
+    current.textContent = `${inv.invoiceDate || '日期未知'} · ${inv.vendor || '销售方未知'} · ${fmtMoney(inv.total || 0)}`;
+  }
+  const rows = invoiceMatchRows();
+  if (!rows.length) {
+    box.innerHTML = '<p class="inv-match-empty">没有找到匹配的账目</p>';
+    return;
+  }
+  box.innerHTML = rows.map(row => {
+    const linked = Number(inv.linkedTxnId) === Number(row.id);
+    const isIncome = row['收支'] === '收入';
+    return `<button type="button" class="inv-match-row${linked ? ' on' : ''}" onclick="selectInvoiceMatch(${Number(row.id)})">
+      <span class="inv-match-date">${esc(row['日期'] || '—')} ${esc(String(row['时间'] || '').slice(0, 5))}</span>
+      <span class="inv-match-main"><strong>${esc(row['交易对方'] || row['产品名称'] || '—')}</strong><small>${esc(row['商品说明'] || row['来源'] || '')}</small></span>
+      <span class="inv-match-source">${esc(row['来源'] || '')}</span>
+      <span class="inv-match-amount ${isIncome ? 'inc' : 'exp'}">${isIncome ? '+' : '-'}${fmtMoney(row['金额'] || 0)}</span>
+      ${linked ? '<i class="ti ti-circle-check-filled"></i>' : ''}
+    </button>`;
+  }).join('');
+}
+
+export function openInvoiceMatch(id) {
+  const inv = invoices.find(item => item.id === Number(id));
+  if (!inv) return;
+  matchInvoiceId = inv.id;
+  matchSearch = '';
+  const input = document.getElementById('invMatchSearch');
+  if (input) input.value = '';
+  renderInvoiceMatchCandidates();
+  document.getElementById('moInvoiceMatch')?.classList.remove('hide');
+  setTimeout(() => input?.focus(), 50);
+}
+
+export function closeInvoiceMatch() {
+  matchInvoiceId = null;
+  matchSearch = '';
+  document.getElementById('moInvoiceMatch')?.classList.add('hide');
+}
+
+export function searchInvoiceMatch(value) {
+  matchSearch = String(value || '');
+  renderInvoiceMatchCandidates();
+}
+
+export async function selectInvoiceMatch(txnId) {
+  const inv = invoices.find(item => item.id === matchInvoiceId);
+  if (!inv) return;
+  const id = Number(txnId);
+  try {
+    const updated = await updateInvoice(inv.id, { linkedTxnId: Number.isInteger(id) && id > 0 ? id : null });
+    const at = invoices.findIndex(item => item.id === inv.id);
+    if (at >= 0) invoices[at] = updated;
+    closeInvoiceMatch();
+    renderTable();
+    companyHooks.onLinksChanged();
+  } catch (err) {
+    alert('匹配失败：' + err.message);
+  }
+}
+
+export function setupCompanyCost(hooks = {}) {
+  companyHooks = { ...companyHooks, ...hooks };
   const inp = document.getElementById('invFileInp');
   inp?.addEventListener('change', e => {
     const file = e.target.files?.[0];

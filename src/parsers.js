@@ -231,11 +231,13 @@ export const Parsers = (() => {
       };
     }
     const s = String(raw).replace(/\//g, '-').trim();
-    const compact = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+    const compact = s.match(/^(\d{4})(\d{2})(\d{2})(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?$/);
     if (compact) {
+      let time = compact[4] || '00:00';
+      if (time.length === 5) time += ':00';
       return {
         date: `${compact[1]}-${compact[2]}-${compact[3]}`,
-        time: '00:00'
+        time: time.slice(0, 8)
       };
     }
     const m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?/);
@@ -760,7 +762,8 @@ export const Parsers = (() => {
     const s = cleanField(status);
     if (!s) return false;
     if (/退款成功|交易关闭|待付款|等待付款/.test(s)) return false;
-    return /^(交易成功|转账成功|等待确认收货|等待对方确认收货|收款成功|还款成功)$/.test(s);
+    if (/^(等待确认收货|等待对方确认收货)$/.test(s)) return true;
+    return /(交易|转账|收款|还款|支付|付款|代付|缴费)成功$/.test(s);
   }
 
   function alipayBaseOrderId(orderId) {
@@ -865,11 +868,19 @@ export const Parsers = (() => {
   }
 
   function parseBank(rows, sourceName) {
-    const hi = findHeaderRow(rows, ['交易日期']) >= 0
-      ? findHeaderRow(rows, ['交易日期'])
-      : findHeaderRow(rows, ['记账日期', '摘要']) >= 0
-        ? findHeaderRow(rows, ['记账日期', '摘要'])
-        : findHeaderRow(rows, ['交易时间']);
+    const dateHeaders = new Set(['交易日期', '记账日期', '交易时间']);
+    const amountHeaders = new Set([
+      '收入', '支出', '贷方发生额', '贷方金额', '借方发生额', '借方金额',
+      '交易金额', '金额', '发生额'
+    ]);
+    let hi = -1;
+    for (let i = 0; i < Math.min(rows.length, 80); i++) {
+      const cells = rows[i].map(cell => cleanField(cell).replace(/\s/g, ''));
+      if (cells.some(cell => dateHeaders.has(cell)) && cells.some(cell => amountHeaders.has(cell))) {
+        hi = i;
+        break;
+      }
+    }
 
     if (hi < 0) throw new Error('未识别到银行流水表头，请确认 CSV 包含日期、金额等列');
 
@@ -902,7 +913,7 @@ export const Parsers = (() => {
       }
 
       const peer = pick(map, row, '对方户名', '对方名称', '交易对方', '对方账号与户名', '对方账号');
-      const summary = pick(map, row, '摘要', '交易类型', '业务类型');
+      const summary = pick(map, row, '摘要', '交易描述', '交易类型', '业务类型');
       const noteExtra = pick(map, row, '备注', '备注信息', '附言', '交易地点/附言');
       if (isBankRefundRow(summary, noteExtra)) continue;
       const genericSummary = /^(转账|转账转入|转账转出)$/;
@@ -917,7 +928,7 @@ export const Parsers = (() => {
       out.push(makeRow({
         date: dt.date, time: dt.time, source: sourceName,
         peer, desc, type, amount, pay, note, orderId,
-        rawCategory: pick(map, row, '交易类型', '业务类型')
+        rawCategory: pick(map, row, '交易描述', '交易类型', '业务类型')
       }));
     }
     return out;

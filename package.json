@@ -23,6 +23,7 @@
     "preview": "npm run build && npm run start",
     "electron": "npm run build && electron .",
     "build:icon": "node scripts/build-icon.mjs",
+    "build:favicon": "node scripts/build-favicon.mjs",
     "pack:mac": "npm run build && npm run build:icon && node scripts/prepare-mac-seed.mjs && node scripts/pack-mac-chrome-app.mjs",
     "pack:mac:electron": "npm run build && npm run build:icon && node scripts/prepare-mac-seed.mjs && electron-builder --mac dmg --arm64",
     "pack:mac:chrome": "npm run build && npm run build:icon && node scripts/prepare-mac-seed.mjs && node scripts/pack-mac-chrome-app.mjs",
@@ -34,8 +35,10 @@
     "reset-admin-password": "node scripts/reset-admin-password.mjs"
   },
   "dependencies": {
+    "archiver": "^8.0.0",
     "cors": "^2.8.5",
     "express": "^4.21.2",
+    "leaflet": "^1.9.4",
     "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^5.7.284",
     "tesseract.js": "^7.0.0",
@@ -73,13 +76,17 @@
       {
         "from": "electron/seed",
         "to": "seed",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "mac": {
       "category": "public.app-category.finance",
       "icon": "build/icon.icns",
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "identity": null
     }
   }

@@ -44,7 +44,7 @@ function userDataRoot() {
 
 function ensureDataDirs() {
   const root = userDataRoot();
-  for (const sub of ['gear-images', 'invoices', 'family-events', 'tesseract-cache']) {
+  for (const sub of ['gear-images', 'travel-images', 'travel-files', 'invoices', 'family-events', 'tesseract-cache']) {
     fs.mkdirSync(path.join(root, sub), { recursive: true });
   }
 
@@ -152,6 +152,8 @@ function startServer(port, dataRoot) {
       DIST_DIR: distDir,
       DB_PATH: path.join(dataRoot, 'ledger.db'),
       GEAR_IMG_DIR: path.join(dataRoot, 'gear-images'),
+      TRAVEL_IMG_DIR: path.join(dataRoot, 'travel-images'),
+      TRAVEL_FILE_DIR: path.join(dataRoot, 'travel-files'),
       INVOICE_DIR: path.join(dataRoot, 'invoices'),
       FAMILY_EVENT_DIR: path.join(dataRoot, 'family-events'),
       TESSERACT_CACHE: path.join(dataRoot, 'tesseract-cache'),

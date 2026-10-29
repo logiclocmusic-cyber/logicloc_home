@@ -162,6 +162,10 @@ export function addTxnPair(keyA, keyB) {
   addTxnLink('已完成配对', [keyA, keyB]);
 }
 
+export function clearTxnPairs() {
+  links = [];
+}
+
 export function removeTxnLinkById(id) {
   links = links.filter(l => l.id !== id);
 }

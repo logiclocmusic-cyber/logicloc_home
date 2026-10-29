@@ -14,25 +14,48 @@ export function fmtCount(n) {
   return String(num);
 }
 
-export function fmtMoney(n, { decimals = 2, integer = false } = {}) {
+/** 1 港币兑人民币默认中间价（与出行模块一致；账户登记可覆盖 hkdRate） */
+export const DEFAULT_HKD_CNY = 0.8527;
+
+export function normalizeCurrency(c) {
+  return String(c || '').toUpperCase() === 'HKD' ? 'HKD' : 'CNY';
+}
+
+export function currencyPrefix(c) {
+  return normalizeCurrency(c) === 'HKD' ? 'HK$' : '¥';
+}
+
+/** 将金额折合人民币；CNY 原样返回 */
+export function amountInCny(n, currency = 'CNY', rate = DEFAULT_HKD_CNY) {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return 0;
+  if (normalizeCurrency(currency) !== 'HKD') return num;
+  const r = Number(rate);
+  const fx = Number.isFinite(r) && r > 0 ? r : DEFAULT_HKD_CNY;
+  return Math.round(num * fx * 100) / 100;
+}
+
+export function fmtMoney(n, { decimals = 2, integer = false, currency = 'CNY' } = {}) {
   const num = Number(n);
   if (!Number.isFinite(num)) return String(n);
   const abs = Math.abs(num);
   const sign = num < 0 ? '-' : '';
-  if (abs >= 10000) return `${sign}¥${toWan(abs)}万`;
-  if (integer) return `${sign}¥${abs.toFixed(0)}`;
-  return `${sign}¥${abs.toFixed(decimals)}`;
+  const sym = currencyPrefix(currency);
+  if (abs >= 10000) return `${sign}${sym}${toWan(abs)}万`;
+  if (integer) return `${sign}${sym}${abs.toFixed(0)}`;
+  return `${sign}${sym}${abs.toFixed(decimals)}`;
 }
 
-export function fmtMoneySigned(n) {
+export function fmtMoneySigned(n, { currency = 'CNY' } = {}) {
   const num = Number(n);
   if (!Number.isFinite(num)) return String(n);
   const abs = Math.abs(num);
+  const sym = currencyPrefix(currency);
   if (abs >= 10000) {
     const prefix = num >= 0 ? '+' : '-';
-    return `${prefix}¥${toWan(abs)}万`;
+    return `${prefix}${sym}${toWan(abs)}万`;
   }
-  return `${num >= 0 ? '+' : ''}¥${abs.toFixed(2)}`;
+  return `${num >= 0 ? '+' : ''}${sym}${abs.toFixed(2)}`;
 }
 
 /** Chart.js 坐标轴 */

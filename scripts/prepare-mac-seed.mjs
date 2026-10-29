@@ -118,16 +118,48 @@ function mergeAccountRegistry(a = {}, b = {}) {
 }
 
 function mergeWebAccounts(a, b) {
-  const cols = mergeById(a?.columns, b?.columns);
-  const colIds = new Set(cols.map(c => c.id));
-  const rows = mergeById(a?.rows, b?.rows).map(row => {
-    const cells = { ...(row.cells || {}) };
-    for (const id of Object.keys(cells)) {
-      if (!colIds.has(id)) delete cells[id];
+  const left = Array.isArray(a?.platforms) ? a.platforms : migrateLegacyWebPlatforms(a);
+  const right = Array.isArray(b?.platforms) ? b.platforms : migrateLegacyWebPlatforms(b);
+  const byId = new Map();
+  for (const p of [...left, ...right]) {
+    if (!p?.id) continue;
+    const prev = byId.get(p.id);
+    if (!prev) {
+      byId.set(p.id, {
+        id: p.id,
+        title: String(p.title || ''),
+        entries: Array.isArray(p.entries) ? [...p.entries] : []
+      });
+      continue;
     }
-    return { ...row, cells };
-  });
-  return { columns: cols, rows };
+    byId.set(p.id, {
+      id: p.id,
+      title: prev.title || String(p.title || ''),
+      entries: mergeById(prev.entries, p.entries || [])
+    });
+  }
+  return { platforms: [...byId.values()] };
+}
+
+function migrateLegacyWebPlatforms(raw) {
+  const columns = Array.isArray(raw?.columns) ? raw.columns : [];
+  const rows = Array.isArray(raw?.rows) ? raw.rows : [];
+  if (!columns.length) return [];
+  return columns.map(col => {
+    const colId = String(col?.id || '');
+    const entries = rows.map(row => {
+      const phone = String(row?.phone || '').trim();
+      const value = String(row?.cells?.[colId] || '').trim();
+      if (!phone && !value) return null;
+      return {
+        id: `webentry-${colId}-${row?.id || Math.random().toString(36).slice(2, 7)}`,
+        account: phone,
+        username: value,
+        password: ''
+      };
+    }).filter(Boolean);
+    return { id: colId, title: String(col?.title || ''), entries };
+  }).filter(p => p.id);
 }
 
 function pickPrimaryDb(snapshots) {

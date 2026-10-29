@@ -26,6 +26,10 @@ function guessMime(fileName = '') {
   if (ext === 'webp') return 'image/webp';
   if (ext === 'gif') return 'image/gif';
   if (ext === 'heic' || ext === 'heif') return 'image/heic';
+  if (ext === 'pdf') return 'application/pdf';
+  if (ext === 'csv') return 'text/csv';
+  if (ext === 'xls') return 'application/vnd.ms-excel';
+  if (ext === 'xlsx') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   return 'image/jpeg';
 }
 
@@ -111,7 +115,14 @@ for (const ev of localEvents) {
     const uploadRes = await fetch(`${API_BASE}/api/family-events/${cloudEv.id}/images`, {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data, mime, fileName: img.name }),
+      body: JSON.stringify({
+        data,
+        mime,
+        fileName: img.fileName || img.name,
+        category: img.category || '',
+        note: img.note || '',
+        starred: !!img.starred,
+      }),
     });
     if (!uploadRes.ok) {
       console.error(`  图片上传失败 ${img.name}:`, await uploadRes.text());

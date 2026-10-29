@@ -14,6 +14,14 @@ export default defineConfig({
         target: 'http://localhost:3001',
         changeOrigin: true
       },
+      '/travel-images': {
+        target: 'http://localhost:3001',
+        changeOrigin: true
+      },
+      '/travel-files': {
+        target: 'http://localhost:3001',
+        changeOrigin: true
+      },
       '/invoice-files': {
         target: 'http://localhost:3001',
         changeOrigin: true

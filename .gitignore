@@ -19,3 +19,10 @@ dist-electron/
 .env
 .env.local
 .env.*.local
+
+# Local secrets / deploy temp / DB dumps (never commit)
+.nas_pass_xfer
+data/*.db.bak*
+data/*.db.*
+*.db
+旧版数据备份.json

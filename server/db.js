@@ -24,7 +24,7 @@ db.exec(`
   );
 `);
 
-const META_KEYS = ['refunded', 'excluded', 'categories', 'sources', 'rules', 'importHistory', 'nextId', 'gearLibrary', 'nextGearId', 'gearSections', 'hiddenGearSectionIds', 'renqingAvatars', 'accountCardFaces', 'accountLogos', 'accountRegistry', 'txnPairs', 'txnMerges', 'dayNotes', 'stateVersion'];
+const META_KEYS = ['refunded', 'excluded', 'categories', 'sources', 'rules', 'importHistory', 'nextId', 'gearLibrary', 'nextGearId', 'gearSections', 'hiddenGearSectionIds', 'renqingAvatars', 'accountCardFaces', 'accountLogos', 'accountRegistry', 'txnPairs', 'txnMerges', 'dayNotes', 'homeCostGroups', 'eventTags', 'eventTagGroups', 'stateVersion'];
 
 function txnRowKey(row) {
   const oid = String(row['交易单号'] || '').trim();
@@ -66,8 +66,36 @@ export function readState() {
     txnPairs: meta.txnPairs || [],
     txnMerges: meta.txnMerges || [],
     dayNotes: meta.dayNotes || {},
+    homeCostGroups: meta.homeCostGroups || null,
+    eventTags: Array.isArray(meta.eventTags) ? meta.eventTags : [],
+    eventTagGroups: Array.isArray(meta.eventTagGroups) ? meta.eventTagGroups : [],
     stateVersion: meta.stateVersion || 0
   };
+}
+
+
+function mergeAccountRegistryReminders(existing, incoming) {
+  if (!incoming || typeof incoming !== 'object') return existing || { overrides: {}, hidden: [], manual: [], merges: {}, creditHidden: [] };
+  const out = { ...incoming };
+  const exRem = Array.isArray(existing?.longReminders) ? existing.longReminders : [];
+  const inRem = Array.isArray(incoming?.longReminders) ? incoming.longReminders : [];
+  const tomb = new Set([
+    ...(Array.isArray(existing?.longReminderTombstones) ? existing.longReminderTombstones : []),
+    ...(Array.isArray(incoming?.longReminderTombstones) ? incoming.longReminderTombstones : [])
+  ]);
+  const map = new Map();
+  for (const item of exRem) {
+    if (!item?.id || tomb.has(item.id)) continue;
+    map.set(item.id, item);
+  }
+  for (const item of inRem) {
+    if (!item?.id) continue;
+    if (tomb.has(item.id)) { map.delete(item.id); continue; }
+    map.set(item.id, item);
+  }
+  out.longReminders = [...map.values()];
+  if (tomb.size) out.longReminderTombstones = [...tomb];
+  return out;
 }
 
 export function writeState(state, opts = {}) {
@@ -92,6 +120,11 @@ export function writeState(state, opts = {}) {
     const upsert = db.prepare(
       'INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
     );
+    const readMetaJson = (key, fallback) => {
+      const row = db.prepare('SELECT value FROM meta WHERE key = ?').get(key);
+      if (!row) return fallback;
+      try { return JSON.parse(row.value); } catch { return fallback; }
+    };
     const values = {
       refunded: state.refunded || [],
       excluded: state.excluded || [],
@@ -107,10 +140,24 @@ export function writeState(state, opts = {}) {
       renqingAvatars: state.renqingAvatars || {},
       accountCardFaces: state.accountCardFaces || {},
       accountLogos: state.accountLogos || {},
-      accountRegistry: state.accountRegistry || { overrides: {}, hidden: [], manual: [], merges: {}, creditHidden: [] },
+      accountRegistry: (() => {
+        const row = db.prepare("SELECT value FROM meta WHERE key = ?").get('accountRegistry');
+        let existing = {};
+        if (row) { try { existing = JSON.parse(row.value); } catch { existing = {}; } }
+        return mergeAccountRegistryReminders(existing, state.accountRegistry || {});
+      })(),
       txnPairs: state.txnPairs || [],
       txnMerges: state.txnMerges || [],
       dayNotes: state.dayNotes || {},
+      homeCostGroups: state.homeCostGroups || null,
+      eventTags: Array.isArray(state.eventTags) ? state.eventTags : readMetaJson('eventTags', []),
+      eventTagGroups: (() => {
+        const incoming = Array.isArray(state.eventTagGroups) ? state.eventTagGroups : null;
+        const existing = readMetaJson('eventTagGroups', []);
+        if (!incoming) return existing;
+        if (opts.keepGroupsWhenEmpty && incoming.length === 0 && existing.length) return existing;
+        return incoming;
+      })(),
       stateVersion: curVer + 1
     };
     for (const key of META_KEYS) {
@@ -219,6 +266,19 @@ export function resetLedger() {
 export function getStats() {
   const count = db.prepare('SELECT COUNT(*) AS n FROM transactions').get().n;
   return { count, dbPath: DB_PATH };
+}
+
+export function readMeta(key) {
+  const row = db.prepare('SELECT value FROM meta WHERE key = ?').get(key);
+  if (!row) return null;
+  try { return JSON.parse(row.value); } catch { return null; }
+}
+
+export function writeMeta(key, value) {
+  db.prepare(
+    'INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+  ).run(key, JSON.stringify(value));
+  return value;
 }
 
 export { db, DB_PATH };

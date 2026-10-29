@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" role="img" aria-label="小红书">
+  <rect width="108" height="108" rx="24" fill="#FF2442"/>
+  <!-- classic open notebook mark -->
+  <path fill="#FFFFFF" d="M28 26h52c4.4 0 8 3.6 8 8v40c0 4.4-3.6 8-8 8H28c-4.4 0-8-3.6-8-8V34c0-4.4 3.6-8 8-8z"/>
+  <path fill="#FF2442" d="M52 26h4v56h-4z"/>
+  <path fill="#FF2442" d="M28 30c-2.2 0-4 1.8-4 4v40c0 2.2 1.8 4 4 4h24V30H28zm28 0v48h24c2.2 0 4-1.8 4-4V34c0-2.2-1.8-4-4-4H56z" opacity="0"/>
+  <!-- page lines left -->
+  <rect x="34" y="42" width="14" height="3.2" rx="1.6" fill="#FF2442"/>
+  <rect x="34" y="50" width="14" height="3.2" rx="1.6" fill="#FF2442"/>
+  <rect x="34" y="58" width="10" height="3.2" rx="1.6" fill="#FF2442"/>
+  <!-- page lines right -->
+  <rect x="60" y="42" width="14" height="3.2" rx="1.6" fill="#FF2442"/>
+  <rect x="60" y="50" width="14" height="3.2" rx="1.6" fill="#FF2442"/>
+  <rect x="60" y="58" width="10" height="3.2" rx="1.6" fill="#FF2442"/>
+  <!-- spine highlight -->
+  <rect x="51.5" y="30" width="5" height="48" rx="1" fill="#FF2442"/>
+</svg>

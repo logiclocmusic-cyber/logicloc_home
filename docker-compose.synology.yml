@@ -1,0 +1,26 @@
+# NAS 部署：Mac 上 npm run build 后 rsync，再 docker compose -f docker-compose.synology.yml up -d --build
+services:
+  ledger:
+    build:
+      context: .
+      dockerfile: Dockerfile.synology
+    image: family-ledger:latest
+    container_name: family-ledger
+    restart: unless-stopped
+    ports:
+      - "3080:3080"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 3080
+      LISTEN_HOST: 0.0.0.0
+      DB_PATH: /data/ledger.db
+      GEAR_IMG_DIR: /data/gear-images
+      TRAVEL_IMG_DIR: /data/travel-images
+      TRAVEL_FILE_DIR: /data/travel-files
+      INVOICE_DIR: /data/invoices
+      FAMILY_EVENT_DIR: /data/family-events
+      TESSERACT_CACHE: /data/tesseract-cache
+    volumes:
+      - ./data:/data

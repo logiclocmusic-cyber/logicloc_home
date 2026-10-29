@@ -13,6 +13,12 @@ import {
 let events = [];
 let editingId = null;
 let pendingFiles = [];
+let pageFileCat = '';
+let modalFileCat = '';
+let pageFileStar = false;
+let modalFileStar = false;
+let fileNoteEdit = null;
+const selectedFileKeys = new Set();
 let familySearchQuery = '';
 let storageStats = null;
 let linkedTxnIds = [];
@@ -386,25 +392,159 @@ function syncFamilySearchClear() {
   btn.classList.toggle('hide', !familySearchQuery.trim());
 }
 
-function renderFamilyImages(imgs, { compact = false } = {}) {
-  if (!imgs?.length) return '';
-  const cells = imgs.map(img => `
-    <a class="family-feed-img${compact ? ' family-feed-img--thumb' : ''}" href="${esc(assetUrl(img.url))}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
-      <img src="${esc(assetUrl(img.url))}" alt="">
-    </a>
-  `).join('');
-  if (compact) {
-    return `<div class="family-feed-media family-feed-media--thumbs">${cells}</div>`;
+function familyAttachmentKind(fileOrName, kind) {
+  if (kind === 'pdf' || kind === 'spreadsheet') return kind;
+  const name = typeof fileOrName === 'string' ? fileOrName : fileOrName?.name || '';
+  const mime = typeof fileOrName === 'string' ? '' : String(fileOrName?.type || '').toLowerCase();
+  if (mime === 'application/pdf' || /\.pdf$/i.test(name)) return 'pdf';
+  if (
+    ['text/csv', 'application/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'].includes(mime)
+    || /\.(csv|xls|xlsx)$/i.test(name)
+  ) return 'spreadsheet';
+  return 'image';
+}
+
+function familyAttachmentIcon(fileOrName, kind) {
+  if (familyAttachmentKind(fileOrName, kind) === 'pdf') return 'ti-file-type-pdf';
+  return /\.csv$/i.test(typeof fileOrName === 'string' ? fileOrName : fileOrName?.name || '')
+    ? 'ti-file-type-csv'
+    : 'ti-file-spreadsheet';
+}
+
+function attachmentDisplayName(img) {
+  if (img?.fileName) return img.fileName;
+  return familyAttachmentKind(img?.name, img?.kind) === 'pdf' ? 'PDF' : '表格文件';
+}
+
+function fileCategory(img) {
+  return String(img?.category || '').trim();
+}
+
+function fileMatchesFilter(img, category, starredOnly) {
+  if (starredOnly && !img?.starred) return false;
+  if (!category) return true;
+  if (category === '__none__') return !fileCategory(img);
+  return fileCategory(img) === category;
+}
+
+function filesForCategory(imgs, category, starredOnly = false) {
+  return (imgs || []).filter(img => fileMatchesFilter(img, category, starredOnly));
+}
+
+function countStarred(list = events) {
+  let n = 0;
+  for (const ev of list) {
+    for (const img of ev.images || []) if (img.starred) n += 1;
   }
-  const cls = imgs.length === 1 ? 'family-feed-media--1'
-    : imgs.length === 2 ? 'family-feed-media--2'
-      : imgs.length === 4 ? 'family-feed-media--4'
+  return n;
+}
+
+function collectFileCategories(list = events) {
+  const counts = new Map();
+  let uncategorized = 0;
+  for (const ev of list) {
+    for (const img of ev.images || []) {
+      const cat = fileCategory(img);
+      if (!cat) uncategorized += 1;
+      else counts.set(cat, (counts.get(cat) || 0) + 1);
+    }
+  }
+  return { counts, uncategorized };
+}
+
+function renderFileCatChips(targetId, active, { counts, uncategorized }, onClickName, star = null) {
+  const el = document.getElementById(targetId);
+  if (!el) return;
+  const cats = [...counts.keys()];
+  const showStar = !!(star && (star.count || star.active));
+  if (!cats.length && !uncategorized && !showStar) {
+    el.hidden = true;
+    el.innerHTML = '';
+    return;
+  }
+  if (active && active !== '__none__' && !counts.has(active)) active = '';
+  const chips = [
+    `<button type="button" class="family-file-cat${active ? '' : ' on'}" onclick="${onClickName}('')">全部</button>`,
+    ...cats.map(cat => `<button type="button" class="family-file-cat${active === cat ? ' on' : ''}" onclick="${onClickName}('${esc(encodeURIComponent(cat))}')">${esc(cat)}<span>${counts.get(cat)}</span></button>`),
+  ];
+  if (uncategorized) {
+    chips.push(`<button type="button" class="family-file-cat${active === '__none__' ? ' on' : ''}" onclick="${onClickName}('__none__')">未分类<span>${uncategorized}</span></button>`);
+  }
+  if (showStar) {
+    chips.push(`<button type="button" class="family-file-cat family-file-star-chip${star.active ? ' on' : ''}" onclick="${star.onClick}(${star.active ? 'false' : 'true'})"><i class="ti ti-star${star.active ? '-filled' : ''}"></i>星标<span>${star.count}</span></button>`);
+  }
+  el.hidden = false;
+  el.innerHTML = chips.join('');
+}
+
+function feedFileNoteHtml(ev, img) {
+  const modalOpen = !document.getElementById('moFamily')?.classList.contains('hide');
+  const editing = !modalOpen && fileNoteEdit?.pendingIndex == null && fileNoteEdit?.eventId === ev.id && fileNoteEdit?.name === img.name;
+  if (editing) {
+    return `<div class="family-file-note-edit" onclick="event.stopPropagation()">
+      <input type="text" maxlength="40" data-file-note-input value="${esc(fileNoteEdit.draft || '')}" placeholder="如：重要文件">
+      <button type="button" data-file-note-save="1">完成</button>
+    </div>`;
+  }
+  return img.note ? `<p class="family-file-note">${esc(img.note)}</p>` : '';
+}
+
+function renderImageGrid(ev, images, compact) {
+  if (!images.length) return '';
+  const cells = images.map(img => {
+    const cat = fileCategory(img);
+    const badge = cat ? `<span class="family-file-cat-badge">${esc(cat)}</span>` : '';
+    return `<div class="family-feed-file">
+      <div class="family-feed-img-wrap">
+        <a class="family-feed-img${compact ? ' family-feed-img--thumb' : ''}" href="${esc(assetUrl(img.url))}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><img src="${esc(assetUrl(img.url))}" alt="">${badge}</a>
+        <button type="button" class="family-file-star${img.starred ? ' on' : ''}" data-feed-star="${esc(img.name)}" data-event-id="${ev.id}" title="${img.starred ? '取消星标' : '星标'}" aria-pressed="${img.starred ? 'true' : 'false'}"><i class="ti ti-star${img.starred ? '-filled' : ''}"></i></button>
+        <button type="button" class="family-file-pencil" data-feed-note="${esc(img.name)}" data-event-id="${ev.id}" title="备注"><i class="ti ti-pencil"></i></button>
+      </div>
+      ${feedFileNoteHtml(ev, img)}
+    </div>`;
+  }).join('');
+  if (compact) return `<div class="family-feed-media family-feed-media--thumbs">${cells}</div>`;
+  const cls = images.length === 1 ? 'family-feed-media--1'
+    : images.length === 2 ? 'family-feed-media--2'
+      : images.length === 4 ? 'family-feed-media--4'
         : 'family-feed-media--n';
   return `<div class="family-feed-media ${cls}">${cells}</div>`;
 }
 
+function renderAttachmentList(ev, attachments) {
+  if (!attachments.length) return '';
+  const rows = attachments.map(img => {
+    const cat = fileCategory(img);
+    const name = attachmentDisplayName(img);
+    const icon = familyAttachmentIcon(name, img.kind);
+    return `<div class="family-pdf-row">
+      <div class="family-pdf-row-main">
+        <a class="family-pdf-row-link" href="${esc(assetUrl(img.url))}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${esc(name)}">
+          <i class="ti ${icon}"></i>
+          <span class="family-pdf-row-text">
+            <span class="family-pdf-row-name">${esc(name)}</span>
+            ${cat ? `<span class="family-pdf-row-cat">${esc(cat)}</span>` : ''}
+          </span>
+        </a>
+        <button type="button" class="family-file-star${img.starred ? ' on' : ''}" data-feed-star="${esc(img.name)}" data-event-id="${ev.id}" title="${img.starred ? '取消星标' : '星标'}" aria-pressed="${img.starred ? 'true' : 'false'}"><i class="ti ti-star${img.starred ? '-filled' : ''}"></i></button>
+        <button type="button" class="family-file-pencil" data-feed-note="${esc(img.name)}" data-event-id="${ev.id}" title="备注"><i class="ti ti-pencil"></i></button>
+      </div>
+      ${feedFileNoteHtml(ev, img)}
+    </div>`;
+  }).join('');
+  return `<div class="family-pdf-list">${rows}</div>`;
+}
+
+function renderFamilyImages(ev, { compact = false, category = '', starredOnly = false } = {}) {
+  const list = filesForCategory(ev?.images || [], category, starredOnly);
+  if (!list.length) return '';
+  const images = list.filter(img => familyAttachmentKind(img.name, img.kind) === 'image');
+  const attachments = list.filter(img => familyAttachmentKind(img.name, img.kind) !== 'image');
+  return `${renderImageGrid(ev, images, compact)}${renderAttachmentList(ev, attachments)}`;
+}
+
 function renderFamilyEventMain(ev, { compactImages = false } = {}) {
-  const mediaHtml = renderFamilyImages(ev.images || [], { compact: compactImages });
+  const mediaHtml = renderFamilyImages(ev, { compact: compactImages, category: pageFileCat, starredOnly: pageFileStar });
   const txnSuffixHtml = renderLinkedTxnTitleSuffixHtml(ev.linkedTxnIds || []);
   return `<div class="family-milestone-head">
       <h3 class="family-milestone-title">${esc(ev.title)}${txnSuffixHtml}</h3>
@@ -529,7 +669,7 @@ function renderFamilyStorage() {
   wrap.hidden = false;
   wrap.dataset.level = level;
   if (meta) {
-    meta.textContent = `${formatStorageBytes(totalBytes)} / ${formatStorageBytes(limitBytes)} · ${fileCount} 张`;
+    meta.textContent = `${formatStorageBytes(totalBytes)} / ${formatStorageBytes(limitBytes)} · ${fileCount} 个文件`;
   }
   if (fill) fill.style.width = `${pct}%`;
   if (bar) {
@@ -551,6 +691,77 @@ async function refreshFamilyStorage() {
   }
 }
 
+function fileMatchesModalCat(file) {
+  return fileMatchesFilter(file, modalFileCat, modalFileStar);
+}
+
+function fileNoteDraft() {
+  return String(fileNoteEdit?.draft || '');
+}
+
+function isEditingNote(eventId, name, pendingIndex = null) {
+  if (!fileNoteEdit) return false;
+  if (pendingIndex != null) return fileNoteEdit.pendingIndex === pendingIndex;
+  return fileNoteEdit.eventId === eventId && fileNoteEdit.name === name;
+}
+
+function fileToolsHtml(key, { starred = false } = {}) {
+  return `${filePickHtml(key)}
+    <button type="button" class="family-file-star${starred ? ' on' : ''}" data-file-star="${esc(key)}" title="${starred ? '取消星标' : '星标'}" aria-pressed="${starred ? 'true' : 'false'}"><i class="ti ti-star${starred ? '-filled' : ''}"></i></button>
+    <button type="button" class="family-file-pencil" data-file-note="${esc(key)}" title="备注"><i class="ti ti-pencil"></i></button>`;
+}
+
+function fileCaptionHtml(editing, note) {
+  if (editing) {
+    return `<div class="family-file-note-edit">
+      <input type="text" maxlength="40" data-file-note-input value="${esc(fileNoteDraft())}" placeholder="如：重要文件">
+      <button type="button" data-file-note-save="1">完成</button>
+    </div>`;
+  }
+  return note ? `<p class="family-file-note">${esc(note)}</p>` : '';
+}
+
+function focusFileNoteInput() {
+  const inp = document.querySelector('#moFamily [data-file-note-input], #familyList [data-file-note-input]');
+  if (!inp) return;
+  inp.focus();
+  const end = inp.value.length;
+  try { inp.setSelectionRange(end, end); } catch { /* ignore */ }
+}
+
+function filePickHtml(key) {
+  const on = selectedFileKeys.has(key);
+  return `<button type="button" class="family-file-pick${on ? ' on' : ''}" data-file-pick="${esc(key)}" title="${on ? '取消选择' : '选择'}" aria-pressed="${on ? 'true' : 'false'}"><i class="ti ti-check"></i></button>`;
+}
+
+function fileCatBadge(category) {
+  const cat = String(category || '').trim();
+  return cat ? `<span class="family-file-cat-badge">${esc(cat)}</span>` : '';
+}
+
+function renderModalFileCats(ev) {
+  const counts = new Map();
+  let uncategorized = 0;
+  const add = (category) => {
+    const cat = String(category || '').trim();
+    if (!cat) uncategorized += 1;
+    else counts.set(cat, (counts.get(cat) || 0) + 1);
+  };
+  for (const img of ev?.images || []) add(img.category);
+  for (const item of pendingFiles) add(item.category);
+  if (modalFileCat && modalFileCat !== '__none__' && !counts.has(modalFileCat)) modalFileCat = '';
+  if (modalFileCat === '__none__' && !uncategorized) modalFileCat = '';
+  let starred = 0;
+  for (const img of ev?.images || []) if (img.starred) starred += 1;
+  for (const item of pendingFiles) if (item.starred) starred += 1;
+  if (modalFileStar && !starred) modalFileStar = false;
+  renderFileCatChips('familyModalFileCats', modalFileCat, { counts, uncategorized }, 'setFamilyModalFileCat', {
+    count: starred,
+    active: modalFileStar,
+    onClick: 'setFamilyModalFileStar',
+  });
+}
+
 function renderPendingPreviews() {
   const wrap = document.getElementById('familyPendingImgs');
   if (!wrap) return;
@@ -560,13 +771,45 @@ function renderPendingPreviews() {
     return;
   }
   wrap.hidden = false;
-  wrap.innerHTML = pendingFiles.map((file, i) => {
-    const url = URL.createObjectURL(file);
-    return `<div class="family-pending-item" data-i="${i}">
-      <img src="${url}" alt="">
-      <button type="button" class="family-img-del" data-pending="${i}" title="移除"><i class="ti ti-x"></i></button>
-    </div>`;
-  }).join('');
+  const imageCells = [];
+  const pdfRows = [];
+  pendingFiles.forEach((item, i) => {
+    const file = item.file;
+    const visible = fileMatchesModalCat(item);
+    const key = `p:${i}`;
+    const filtered = visible ? '' : ' is-filtered';
+    const caption = fileCaptionHtml(isEditingNote(null, null, i), item.note);
+    if (familyAttachmentKind(file) !== 'image') {
+      const icon = familyAttachmentIcon(file);
+      pdfRows.push(`<div class="family-pdf-row${selectedFileKeys.has(key) ? ' is-selected' : ''}${filtered}">
+        <div class="family-pdf-row-main">
+          ${filePickHtml(key)}
+          <span class="family-pdf-row-link" title="${esc(file.name || '附件')}">
+            <i class="ti ${icon}"></i>
+            <span class="family-pdf-row-text">
+              <span class="family-pdf-row-name">${esc(file.name || '附件')}</span>
+              ${item.category ? `<span class="family-pdf-row-cat">${esc(item.category)}</span>` : ''}
+            </span>
+          </span>
+          <button type="button" class="family-file-star${item.starred ? ' on' : ''}" data-file-star="${esc(key)}" title="${item.starred ? '取消星标' : '星标'}"><i class="ti ti-star${item.starred ? '-filled' : ''}"></i></button>
+          <button type="button" class="family-file-pencil" data-file-note="${esc(key)}" title="备注"><i class="ti ti-pencil"></i></button>
+          <button type="button" class="family-img-del" data-pending="${i}" title="移除"><i class="ti ti-x"></i></button>
+        </div>
+        ${caption}
+      </div>`);
+      return;
+    }
+    imageCells.push(`<div class="family-file-cell${filtered}">
+      <div class="family-pending-item${selectedFileKeys.has(key) ? ' is-selected' : ''}" data-i="${i}">
+        <img src="${URL.createObjectURL(file)}" alt="">
+        ${fileCatBadge(item.category)}
+        ${fileToolsHtml(key, { starred: item.starred })}
+        <button type="button" class="family-img-del" data-pending="${i}" title="移除"><i class="ti ti-x"></i></button>
+      </div>
+      ${caption}
+    </div>`);
+  });
+  wrap.innerHTML = `${imageCells.length ? `<div class="family-img-grid">${imageCells.join('')}</div>` : ''}${pdfRows.length ? `<div class="family-pdf-list">${pdfRows.join('')}</div>` : ''}`;
 }
 
 function renderSavedImages(ev) {
@@ -579,29 +822,72 @@ function renderSavedImages(ev) {
     return;
   }
   wrap.hidden = false;
-  wrap.innerHTML = imgs.map(img => `
-    <div class="family-saved-item">
-      <a href="${esc(assetUrl(img.url))}" target="_blank" rel="noopener">
-        <img src="${esc(assetUrl(img.url))}" alt="">
-      </a>
-      <button type="button" class="family-img-del" data-remove="${esc(img.name)}" title="删除图片"><i class="ti ti-x"></i></button>
-    </div>
-  `).join('');
+  const imageCells = [];
+  const pdfRows = [];
+  imgs.forEach(img => {
+    const visible = fileMatchesModalCat(img);
+    const key = `s:${img.name}`;
+    const filtered = visible ? '' : ' is-filtered';
+    const caption = fileCaptionHtml(isEditingNote(editingId, img.name), img.note);
+    if (familyAttachmentKind(img.name, img.kind) !== 'image') {
+      const name = attachmentDisplayName(img);
+      const icon = familyAttachmentIcon(name, img.kind);
+      pdfRows.push(`<div class="family-pdf-row${selectedFileKeys.has(key) ? ' is-selected' : ''}${filtered}">
+        <div class="family-pdf-row-main">
+          ${filePickHtml(key)}
+          <a class="family-pdf-row-link" href="${esc(assetUrl(img.url))}" target="_blank" rel="noopener" title="${esc(name)}">
+            <i class="ti ${icon}"></i>
+            <span class="family-pdf-row-text">
+              <span class="family-pdf-row-name">${esc(name)}</span>
+              ${img.category ? `<span class="family-pdf-row-cat">${esc(img.category)}</span>` : ''}
+            </span>
+          </a>
+          <button type="button" class="family-file-star${img.starred ? ' on' : ''}" data-file-star="${esc(key)}" title="${img.starred ? '取消星标' : '星标'}"><i class="ti ti-star${img.starred ? '-filled' : ''}"></i></button>
+          <button type="button" class="family-file-pencil" data-file-note="${esc(key)}" title="备注"><i class="ti ti-pencil"></i></button>
+          <button type="button" class="family-img-del" data-remove="${esc(img.name)}" title="删除文件"><i class="ti ti-x"></i></button>
+        </div>
+        ${caption}
+      </div>`);
+      return;
+    }
+    imageCells.push(`<div class="family-file-cell${filtered}">
+      <div class="family-saved-item${selectedFileKeys.has(key) ? ' is-selected' : ''}">
+        <a href="${esc(assetUrl(img.url))}" target="_blank" rel="noopener"><img src="${esc(assetUrl(img.url))}" alt=""></a>
+        ${fileCatBadge(img.category)}
+        ${fileToolsHtml(key, { starred: img.starred })}
+        <button type="button" class="family-img-del" data-remove="${esc(img.name)}" title="删除文件"><i class="ti ti-x"></i></button>
+      </div>
+      ${caption}
+    </div>`);
+  });
+  wrap.innerHTML = `${imageCells.length ? `<div class="family-img-grid">${imageCells.join('')}</div>` : ''}${pdfRows.length ? `<div class="family-pdf-list">${pdfRows.join('')}</div>` : ''}`;
 }
 
-function fillForm(ev) {
+function renderFileEditors(ev) {
+  renderModalFileCats(ev);
+  renderPendingPreviews();
+  renderSavedImages(ev);
+  focusFileNoteInput();
+}
+
+function fillForm(ev, { resetPending = true } = {}) {
   document.getElementById('familyTitleInp').value = ev?.title || '';
   document.getElementById('familyDateInp').value = ev?.eventDate || todayYmd();
   document.getElementById('familyNotesInp').value = ev?.notes || '';
   linkedTxnIds = [...(ev?.linkedTxnIds || [])];
-  pendingFiles = [];
+  if (resetPending) {
+    pendingFiles = [];
+    selectedFileKeys.clear();
+    modalFileCat = '';
+    modalFileStar = false;
+    fileNoteEdit = null;
+  }
   const dateInp = document.getElementById('familyDateInp');
   if (dateInp && !dateInp.dataset.familyTxnBound) {
     dateInp.dataset.familyTxnBound = '1';
     dateInp.addEventListener('change', onFamilyEventDateChange);
   }
-  renderPendingPreviews();
-  renderSavedImages(ev);
+  renderFileEditors(ev);
   renderFamilyLinkedTxns();
   renderFamilyTxnDayPick();
   const delBtn = document.getElementById('familyDeleteBtn');
@@ -614,10 +900,39 @@ function fillForm(ev) {
   }
 }
 
+function renderPageFileCats() {
+  const stats = collectFileCategories(events);
+  if (pageFileCat && pageFileCat !== '__none__' && !stats.counts.has(pageFileCat)) pageFileCat = '';
+  if (pageFileCat === '__none__' && !stats.uncategorized) pageFileCat = '';
+  const starred = countStarred(events);
+  if (pageFileStar && !starred) pageFileStar = false;
+  renderFileCatChips('familyPageFileCats', pageFileCat, stats, 'setFamilyPageFileCat', {
+    count: starred,
+    active: pageFileStar,
+    onClick: 'setFamilyPageFileStar',
+  });
+}
+
+export function setFamilyPageFileCat(encoded) {
+  pageFileCat = encoded ? decodeURIComponent(encoded) : '';
+  renderFamilyPage();
+}
+
+export function setFamilyPageFileStar(on) {
+  pageFileStar = on === true || on === 'true';
+  renderFamilyPage();
+}
+
+export function setFamilyModalFileStar(on) {
+  modalFileStar = on === true || on === 'true';
+  renderFileEditors(events.find(e => e.id === editingId) || null);
+}
+
 export function renderFamilyPage() {
   const listEl = document.getElementById('familyList');
   if (!listEl) return;
   syncFamilyViewToggle();
+  renderPageFileCats();
 
   if (!events.length) {
     listEl.innerHTML = `<div class="family-empty">
@@ -628,12 +943,18 @@ export function renderFamilyPage() {
     return;
   }
 
-  const items = filteredFamilyEvents();
+  const items = filteredFamilyEvents().filter(ev => {
+    if (!pageFileCat && !pageFileStar) return true;
+    return filesForCategory(ev.images || [], pageFileCat, pageFileStar).length > 0;
+  });
   if (!items.length) {
+    const clearBtn = (pageFileCat || pageFileStar)
+      ? `<button type="button" class="btn btn-sm" onclick="setFamilyPageFileCat('');setFamilyPageFileStar(false);clearFamilySearch()">清除筛选</button>`
+      : `<button type="button" class="btn btn-sm" onclick="clearFamilySearch()">清除搜索</button>`;
     listEl.innerHTML = `<div class="family-empty">
       <i class="ti ti-search"></i>
       <p>没有匹配的事件</p>
-      <button type="button" class="btn btn-sm" onclick="clearFamilySearch()">清除搜索</button>
+      ${clearBtn}
     </div>`;
     return;
   }
@@ -688,11 +1009,216 @@ export function openFamilyEdit(id) {
 }
 
 export function closeFamilyEdit() {
+  hideFileCatSuggest();
   document.getElementById('moFamily')?.classList.add('hide');
   closeFamilyTxnSearch();
   editingId = null;
   pendingFiles = [];
+  selectedFileKeys.clear();
+  modalFileStar = false;
+  fileNoteEdit = null;
   linkedTxnIds = [];
+}
+
+export function setFamilyModalFileCat(encoded) {
+  modalFileCat = encoded ? decodeURIComponent(encoded) : '';
+  renderFileEditors(events.find(e => e.id === editingId) || null);
+}
+
+async function applyFileCategory(category) {
+  if (!selectedFileKeys.size) {
+    alert('请先勾选要编组的文件');
+    return;
+  }
+  pendingFiles.forEach((item, i) => {
+    if (selectedFileKeys.has(`p:${i}`)) item.category = category;
+  });
+  const savedNames = [...selectedFileKeys].filter(key => key.startsWith('s:')).map(key => key.slice(2));
+  selectedFileKeys.clear();
+  if (!savedNames.length) {
+    renderFileEditors(events.find(e => e.id === editingId) || null);
+    return;
+  }
+  if (!editingId) return;
+  const ev = events.find(e => e.id === editingId);
+  const images = (ev?.images || []).map(img => ({
+    name: img.name,
+    category: savedNames.includes(img.name) ? category : (img.category || ''),
+    note: img.note || '',
+    starred: !!img.starred,
+    fileName: img.fileName || '',
+  }));
+  const updated = await updateFamilyEvent(editingId, { images });
+  await refreshAfterMutation(updated);
+}
+
+function knownFileCategories() {
+  const { counts } = collectFileCategories(events);
+  for (const item of pendingFiles) {
+    const cat = fileCategory(item);
+    if (cat) counts.set(cat, (counts.get(cat) || 0) + 1);
+  }
+  return [...counts.keys()];
+}
+
+function placeFileCatSuggest() {
+  const box = document.getElementById('familyFileCatSuggest');
+  const inp = document.getElementById('familyFileCatInp');
+  if (!box || box.hidden || !inp) return;
+  const rect = inp.getBoundingClientRect();
+  box.style.top = `${rect.bottom + 4}px`;
+  box.style.left = `${rect.left}px`;
+  box.style.width = `${rect.width}px`;
+}
+
+function hideFileCatSuggest() {
+  const box = document.getElementById('familyFileCatSuggest');
+  if (!box) return;
+  box.hidden = true;
+  box.innerHTML = '';
+}
+
+function showFileCatSuggest() {
+  const box = document.getElementById('familyFileCatSuggest');
+  const inp = document.getElementById('familyFileCatInp');
+  if (!box || !inp) return;
+  const q = inp.value.trim().toLowerCase();
+  const cats = knownFileCategories().filter(cat => !q || cat.toLowerCase().includes(q));
+  if (!cats.length) {
+    hideFileCatSuggest();
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = cats.map(cat => `<button type="button" data-file-cat-pick="${esc(cat)}">${esc(cat)}</button>`).join('');
+  placeFileCatSuggest();
+}
+
+export async function assignSelectedFamilyFiles() {
+  const category = String(document.getElementById('familyFileCatInp')?.value || '').trim().replace(/\s+/g, ' ').slice(0, 20);
+  if (!category) {
+    alert('请填写分类名称');
+    return;
+  }
+  try {
+    await applyFileCategory(category);
+  } catch (err) {
+    alert(err.message || '分类保存失败');
+  }
+}
+
+export async function clearSelectedFamilyFileCat() {
+  try {
+    await applyFileCategory('');
+  } catch (err) {
+    alert(err.message || '分类保存失败');
+  }
+}
+
+function normalizeFileNote(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+}
+
+function currentEditorEvent() {
+  return events.find(e => e.id === editingId) || null;
+}
+
+function beginNoteEdit(target) {
+  fileNoteEdit = target;
+  const modalOpen = !document.getElementById('moFamily')?.classList.contains('hide');
+  if (modalOpen) renderFileEditors(currentEditorEvent());
+  if (target.name) renderFamilyPage();
+  if (!modalOpen) focusFileNoteInput();
+}
+
+async function patchEventImage(eventId, name, patch) {
+  const ev = events.find(e => e.id === eventId);
+  if (!ev) return;
+  const images = (ev.images || []).map(img => ({
+    name: img.name,
+    category: img.category || '',
+    note: img.name === name && Object.prototype.hasOwnProperty.call(patch, 'note') ? patch.note : (img.note || ''),
+    starred: img.name === name && Object.prototype.hasOwnProperty.call(patch, 'starred') ? !!patch.starred : !!img.starred,
+    fileName: img.fileName || '',
+  }));
+  const updated = await updateFamilyEvent(eventId, { images });
+  const modalOpen = editingId === eventId && !document.getElementById('moFamily')?.classList.contains('hide');
+  if (modalOpen) {
+    await refreshAfterMutation(updated);
+    return;
+  }
+  const idx = events.findIndex(e => e.id === updated.id);
+  if (idx >= 0) events[idx] = updated;
+  syncEvents(events);
+  renderFamilyPage();
+}
+
+async function saveOpenFileNote() {
+  const note = normalizeFileNote(document.querySelector('[data-file-note-input]')?.value);
+  const edit = fileNoteEdit;
+  fileNoteEdit = null;
+  if (!edit) return;
+  if (edit.pendingIndex != null) {
+    const item = pendingFiles[edit.pendingIndex];
+    if (item) item.note = note;
+    renderFileEditors(currentEditorEvent());
+    return;
+  }
+  await patchEventImage(edit.eventId, edit.name, { note });
+}
+
+async function toggleFileStarByKey(key) {
+  if (key.startsWith('p:')) {
+    const item = pendingFiles[Number(key.slice(2))];
+    if (item) item.starred = !item.starred;
+    renderFileEditors(currentEditorEvent());
+    return;
+  }
+  const name = key.slice(2);
+  const img = currentEditorEvent()?.images?.find(item => item.name === name);
+  if (!img || !editingId) return;
+  await patchEventImage(editingId, name, { starred: !img.starred });
+}
+
+function bindFamilyFeedFileActions() {
+  const listEl = document.getElementById('familyList');
+  if (!listEl || listEl.dataset.fileBound) return;
+  listEl.dataset.fileBound = '1';
+  listEl.addEventListener('click', (e) => {
+    const star = e.target.closest('[data-feed-star]');
+    const pencil = e.target.closest('[data-feed-note]');
+    const save = e.target.closest('[data-file-note-save]');
+    const field = e.target.closest('.family-file-note-edit');
+    if (!star && !pencil && !save && !field) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (star) {
+      const eventId = Number(star.dataset.eventId);
+      const name = star.dataset.feedStar;
+      const img = events.find(ev => ev.id === eventId)?.images?.find(item => item.name === name);
+      if (!img) return;
+      patchEventImage(eventId, name, { starred: !img.starred }).catch(err => alert(err.message || '星标保存失败'));
+      return;
+    }
+    if (pencil) {
+      const eventId = Number(pencil.dataset.eventId);
+      const name = pencil.dataset.feedNote;
+      const img = events.find(ev => ev.id === eventId)?.images?.find(item => item.name === name);
+      beginNoteEdit({ eventId, name, draft: img?.note || '' });
+      return;
+    }
+    if (save) saveOpenFileNote().catch(err => alert(err.message || '备注保存失败'));
+  }, true);
+  listEl.addEventListener('keydown', (e) => {
+    if (!e.target?.matches?.('[data-file-note-input]')) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      saveOpenFileNote().catch(err => alert(err.message || '备注保存失败'));
+    } else if (e.key === 'Escape') {
+      fileNoteEdit = null;
+      renderFamilyPage();
+    }
+  }, true);
 }
 
 export function triggerFamilyUpload() {
@@ -706,7 +1232,7 @@ async function refreshAfterMutation(ev) {
   events.sort((a, b) => String(b.eventDate).localeCompare(String(a.eventDate)) || b.id - a.id);
   syncEvents(events);
   renderFamilyPage();
-  fillForm(ev);
+  fillForm(ev, { resetPending: false });
   editingId = ev.id;
   await refreshFamilyStorage();
 }
@@ -733,8 +1259,8 @@ export async function saveFamilyEdit() {
       ev = await createFamilyEvent(payload);
     }
 
-    for (const file of pendingFiles) {
-      ev = await uploadFamilyEventImage(ev.id, file);
+    for (const item of pendingFiles) {
+      ev = await uploadFamilyEventImage(ev.id, item.file, item.category || '', item.note || '', !!item.starred);
     }
     pendingFiles = [];
     await refreshAfterMutation(ev);
@@ -746,7 +1272,7 @@ export async function saveFamilyEdit() {
 
 export async function removeFamilyEvent() {
   if (!editingId) return;
-  if (!confirm('确定删除这条家庭事件？图片也会一并删除。')) return;
+  if (!confirm('确定删除这条家庭事件？附件也会一并删除。')) return;
   try {
     await deleteFamilyEvent(editingId);
     events = events.filter(e => e.id !== editingId);
@@ -760,38 +1286,118 @@ export async function removeFamilyEvent() {
 }
 
 export function setupFamilyEvents() {
+  bindFamilyFeedFileActions();
   const fileInp = document.getElementById('familyFileInp');
   if (fileInp && !fileInp.dataset.bound) {
     fileInp.dataset.bound = '1';
     fileInp.addEventListener('change', () => {
       const files = [...(fileInp.files || [])].filter(f =>
-        f.type?.startsWith('image/') || /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(f.name || '')
+        f.type?.startsWith('image/')
+        || ['application/pdf', 'text/csv', 'application/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'].includes(f.type)
+        || /\.(jpe?g|png|gif|webp|heic|heif|pdf|csv|xls|xlsx)$/i.test(f.name || '')
       );
       if (!files.length) {
         fileInp.value = '';
         return;
       }
-      pendingFiles = [...pendingFiles, ...files].slice(0, 12);
-      renderPendingPreviews();
+      const preset = modalFileCat && modalFileCat !== '__none__' ? modalFileCat : '';
+      pendingFiles = [...pendingFiles, ...files.map(file => ({ file, category: preset, note: '', starred: false }))].slice(0, 12);
+      renderFileEditors(events.find(e => e.id === editingId) || null);
       fileInp.value = '';
     });
+  }
+
+  const catInp = document.getElementById('familyFileCatInp');
+  if (catInp && !catInp.dataset.bound) {
+    catInp.dataset.bound = '1';
+    catInp.addEventListener('focus', showFileCatSuggest);
+    catInp.addEventListener('click', showFileCatSuggest);
+    catInp.addEventListener('input', showFileCatSuggest);
+    catInp.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') hideFileCatSuggest();
+    });
+    catInp.addEventListener('blur', () => {
+      setTimeout(hideFileCatSuggest, 0);
+    });
+  }
+  const catScroller = document.querySelector('#moFamily .mb');
+  if (catScroller && !catScroller.dataset.catSuggestBound) {
+    catScroller.dataset.catSuggestBound = '1';
+    catScroller.addEventListener('scroll', placeFileCatSuggest);
+  }
+  if (!setupFamilyEvents._suggestResize) {
+    setupFamilyEvents._suggestResize = true;
+    window.addEventListener('resize', placeFileCatSuggest);
   }
 
   const modal = document.getElementById('moFamily');
   if (modal && !modal.dataset.bound) {
     modal.dataset.bound = '1';
+    modal.addEventListener('mousedown', (e) => {
+      const pick = e.target.closest('[data-file-cat-pick]');
+      if (!pick) return;
+      e.preventDefault();
+      const inp = document.getElementById('familyFileCatInp');
+      if (inp) inp.value = pick.getAttribute('data-file-cat-pick') || '';
+      hideFileCatSuggest();
+    });
+    modal.addEventListener('keydown', (e) => {
+      if (!e.target?.matches?.('[data-file-note-input]')) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        saveOpenFileNote().catch(err => alert(err.message || '备注保存失败'));
+      } else if (e.key === 'Escape') {
+        fileNoteEdit = null;
+        renderFileEditors(currentEditorEvent());
+      }
+    });
     modal.addEventListener('click', async (e) => {
+      const noteSave = e.target.closest('[data-file-note-save]');
+      if (noteSave) {
+        try { await saveOpenFileNote(); } catch (err) { alert(err.message || '备注保存失败'); }
+        return;
+      }
+      const noteBtn = e.target.closest('[data-file-note]');
+      if (noteBtn) {
+        const key = noteBtn.dataset.fileNote || '';
+        if (key.startsWith('p:')) {
+          const i = Number(key.slice(2));
+          beginNoteEdit({ pendingIndex: i, draft: pendingFiles[i]?.note || '' });
+        } else if (editingId) {
+          const name = key.slice(2);
+          const img = currentEditorEvent()?.images?.find(item => item.name === name);
+          beginNoteEdit({ eventId: editingId, name, draft: img?.note || '' });
+        }
+        return;
+      }
+      const starBtn = e.target.closest('[data-file-star]');
+      if (starBtn) {
+        try { await toggleFileStarByKey(starBtn.dataset.fileStar || ''); } catch (err) { alert(err.message || '星标保存失败'); }
+        return;
+      }
       const pendingBtn = e.target.closest('[data-pending]');
       if (pendingBtn) {
         const i = Number(pendingBtn.getAttribute('data-pending'));
         pendingFiles = pendingFiles.filter((_, idx) => idx !== i);
-        renderPendingPreviews();
+        if (fileNoteEdit?.pendingIndex != null) fileNoteEdit = null;
+        [...selectedFileKeys].forEach(key => {
+          if (key.startsWith('p:')) selectedFileKeys.delete(key);
+        });
+        renderFileEditors(events.find(ev => ev.id === editingId) || null);
+        return;
+      }
+      const pickBtn = e.target.closest('[data-file-pick]');
+      if (pickBtn) {
+        const key = pickBtn.dataset.filePick;
+        if (selectedFileKeys.has(key)) selectedFileKeys.delete(key);
+        else selectedFileKeys.add(key);
+        renderFileEditors(events.find(ev => ev.id === editingId) || null);
         return;
       }
       const removeBtn = e.target.closest('[data-remove]');
       if (removeBtn && editingId) {
         const name = removeBtn.getAttribute('data-remove');
-        if (!confirm('删除这张图片？')) return;
+        if (!confirm('删除这个文件？')) return;
         try {
           const ev = await deleteFamilyEventImage(editingId, name);
           await refreshAfterMutation(ev);

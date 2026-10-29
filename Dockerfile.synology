@@ -1,0 +1,32 @@
+# 群晖专用：在 Mac 上 npm run build 后同步到 NAS，不在 NAS 上编译
+FROM node:24-bookworm-slim
+
+WORKDIR /app
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends poppler-utils \
+  && rm -rf /var/lib/apt/lists/*
+
+ENV NODE_ENV=production \
+    PORT=3080 \
+    LISTEN_HOST=0.0.0.0 \
+    DB_PATH=/data/ledger.db \
+    GEAR_IMG_DIR=/data/gear-images \
+    TRAVEL_IMG_DIR=/data/travel-images \
+    TRAVEL_FILE_DIR=/data/travel-files \
+    INVOICE_DIR=/data/invoices \
+    FAMILY_EVENT_DIR=/data/family-events \
+    TESSERACT_CACHE=/data/tesseract-cache
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY server ./server
+COPY src/import-manager.js ./src/import-manager.js
+COPY dist ./dist
+COPY public ./public
+
+VOLUME /data
+EXPOSE 3080
+
+CMD ["node", "server/index.js"]

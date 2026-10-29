@@ -141,8 +141,8 @@ function pinScreenVisible() {
 }
 
 function focusPinInput() {
-  const inp = getPinInput();
-  if (inp && pinScreenVisible()) inp.focus({ preventScroll: true });
+  // 不聚焦隐藏输入框，避免手机弹出系统数字键盘；实体键盘由 document keydown 处理
+  getPinInput()?.blur();
 }
 
 function handlePinKeydown(e) {
@@ -227,10 +227,10 @@ export function setupLoginForm(onSuccess) {
     if (key === 'clear') resetPinInput();
     else if (key === 'back') backspacePin();
     else if (/^\d$/.test(key)) appendPinDigit(key);
-    focusPinInput();
   });
 
-  document.getElementById('pinDots')?.addEventListener('click', () => focusPinInput());
+  // 点击圆点不再聚焦输入框，避免弹出系统键盘
+  document.getElementById('pinDots')?.addEventListener('click', e => e.preventDefault());
   document.addEventListener('keydown', handlePinKeydown);
 
   getPinInput()?.addEventListener('input', e => {

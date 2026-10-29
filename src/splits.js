@@ -1,6 +1,7 @@
 // ── 账目拆分 ─────────────────────────────────────────────────────────────────
 import { catCellInnerHtml } from './cat-picker.js';
 import { SUBCAT_UNSET_LABEL, subCatSelectHtml } from './subcat-ui.js';
+import { rowTagNames } from './event-tags.js';
 
 let getCats = () => [];
 let getSubcatsFor = () => [];
@@ -47,7 +48,7 @@ export function rowMatchesCat(row, cat) {
 export function rowSearchHaystack(row) {
   const base = [
     row['交易对方'], row['商品说明'], row['产品名称'], row['分类'], row['子分类'],
-    row['来源'], row['备注'], row['支付方式']
+    row['来源'], row['备注'], row['支付方式'], ...rowTagNames(row)
   ];
   if (hasSplits(row)) {
     row.splits.forEach(sp => {
@@ -288,10 +289,12 @@ function splitSubRowCells(row, sp, idx, gridCls) {
   const srcEmpty = '<div class="td split-empty"></div>';
   const typeEmpty = '<div class="td type-cell split-empty"></div>';
   const actionsEmpty = '<div class="td td-actions split-empty"></div>';
+  const tagEmpty = '<div class="td event-tag-cell split-empty"></div>';
   const cells = gridCls === 'COL-NODATE'
     ? [
       '<div class="td td-check"><span class="split-tree-line"></span></div>',
       peerCell,
+      tagEmpty,
       amtCell,
       catCell,
       typeEmpty,
@@ -308,7 +311,11 @@ function splitSubRowCells(row, sp, idx, gridCls) {
       srcEmpty,
       actionsEmpty,
     ];
-  return `<div class="tr ${gridCls} ledger-split-row" data-parent-id="${row.id}">
+  const subUnset = (() => {
+    const subs = getSubcatsFor(sp.category);
+    return subs.length && !(sp.subcategory || '').trim();
+  })();
+  return `<div class="tr ${gridCls} ledger-split-row${subUnset ? ' sub-unset' : ''}" data-parent-id="${row.id}">
     ${cells.join('')}
   </div>`;
 }

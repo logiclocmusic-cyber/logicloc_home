@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, unlinkSync, existsSync } from 'fs';
-import { join, extname, dirname } from 'path';
+import { join, extname, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { db } from './db.js';
 
@@ -31,6 +31,7 @@ db.exec(`
 `);
 
 try { db.exec('ALTER TABLE company_invoices ADD COLUMN printed INTEGER DEFAULT 0'); } catch { /* exists */ }
+try { db.exec('ALTER TABLE company_invoices ADD COLUMN linked_txn_id INTEGER'); } catch { /* exists */ }
 
 export function normalizeInvoiceNo(value) {
   return String(value || '').replace(/\s+/g, '').trim();
@@ -86,6 +87,7 @@ function rowToInvoice(row) {
     notes: row.notes || '',
     status: row.status || 'confirmed',
     printed: !!row.printed,
+    linkedTxnId: row.linked_txn_id == null ? null : Number(row.linked_txn_id),
     fileUrl: row.file_path ? `/invoice-files/${row.file_path}` : null,
     fileName: row.file_name || '',
     mimeType: row.mime_type || '',
@@ -102,6 +104,47 @@ export function listInvoices() {
 export function getInvoice(id) {
   const row = db.prepare('SELECT * FROM company_invoices WHERE id = ?').get(id);
   return rowToInvoice(row);
+}
+
+function safeArchivePart(value) {
+  return String(value || '')
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+}
+
+export function getInvoiceArchiveFiles(ids) {
+  const uniqueIds = [...new Set((Array.isArray(ids) ? ids : [])
+    .map(Number)
+    .filter(id => Number.isInteger(id) && id > 0))].slice(0, 500);
+  const usedNames = new Set();
+  const files = [];
+
+  for (const id of uniqueIds) {
+    const row = db.prepare(`
+      SELECT id, vendor, buyer, invoice_no, invoice_date, file_path, file_name
+      FROM company_invoices WHERE id = ?
+    `).get(id);
+    if (!row?.file_path) continue;
+    const storedName = basename(row.file_path);
+    const path = join(INVOICE_DIR, storedName);
+    if (!existsSync(path)) continue;
+
+    const parts = [row.invoice_date, row.invoice_no, row.vendor].map(safeArchivePart).filter(Boolean);
+    const companyFolder = safeArchivePart(row.buyer) || '未识别公司';
+    let name = `${parts.join('_') || `发票-${id}`}${extname(storedName)}`;
+    let archivePath = `${companyFolder}/${name}`;
+    if (usedNames.has(archivePath)) {
+      const ext = extname(name);
+      const stem = ext ? name.slice(0, -ext.length) : name;
+      name = `${stem}-${id}${ext}`;
+      archivePath = `${companyFolder}/${name}`;
+    }
+    usedNames.add(archivePath);
+    files.push({ path, name: archivePath });
+  }
+  return files;
 }
 
 function extFromMime(mime) {
@@ -127,8 +170,8 @@ export function createInvoice(data) {
   const stmt = db.prepare(`
     INSERT INTO company_invoices (
       vendor, buyer, invoice_no, invoice_date, amount, tax_amount, total,
-      category, items, notes, status, file_path, file_name, mime_type, raw_ai
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      category, items, notes, status, linked_txn_id, file_path, file_name, mime_type, raw_ai
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const info = stmt.run(
     data.vendor || null,
@@ -142,6 +185,7 @@ export function createInvoice(data) {
     JSON.stringify(data.items || []),
     data.notes || null,
     data.status || 'confirmed',
+    Number.isInteger(Number(data.linkedTxnId)) && Number(data.linkedTxnId) > 0 ? Number(data.linkedTxnId) : null,
     data.filePath || null,
     data.fileName || null,
     data.mimeType || null,
@@ -159,7 +203,7 @@ export function updateInvoice(id, data) {
     UPDATE company_invoices SET
       vendor = ?, buyer = ?, invoice_no = ?, invoice_date = ?,
       amount = ?, tax_amount = ?, total = ?, category = ?,
-      items = ?, notes = ?, status = ?, printed = ?, file_path = ?, file_name = ?, mime_type = ?,
+      items = ?, notes = ?, status = ?, printed = ?, linked_txn_id = ?, file_path = ?, file_name = ?, mime_type = ?,
       updated_at = datetime('now')
     WHERE id = ?
   `).run(
@@ -175,6 +219,9 @@ export function updateInvoice(id, data) {
     'notes' in data ? data.notes : existing.notes,
     'status' in data ? data.status : existing.status,
     'printed' in data ? (data.printed ? 1 : 0) : (existing.printed ? 1 : 0),
+    'linkedTxnId' in data
+      ? (Number.isInteger(Number(data.linkedTxnId)) && Number(data.linkedTxnId) > 0 ? Number(data.linkedTxnId) : null)
+      : existing.linkedTxnId,
     'filePath' in data ? data.filePath : existingFilePath,
     'fileName' in data ? data.fileName : existing.fileName,
     'mimeType' in data ? data.mimeType : existing.mimeType,

@@ -58,13 +58,83 @@ function normalizeLinkedTxnIds(ids) {
   return out.slice(0, 50);
 }
 
+function normalizeImageCategory(raw) {
+  return String(raw || '').trim().replace(/\s+/g, ' ').slice(0, 20);
+}
+
+function normalizeImageNote(raw) {
+  return String(raw || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+}
+
+function normalizeImageStarred(raw) {
+  return raw === true || raw === 1 || raw === '1' || raw === 'true';
+}
+
+function normalizeFamilyFileName(raw) {
+  let base = String(raw || '').split(/[/\\]/).pop() || '';
+  base = base.replace(/[\u0000-\u001f]/g, '').replace(/[\\/:*?"<>|]/g, '').trim();
+  if (!base) return '';
+  if (!/\.(pdf|csv|xls|xlsx)$/i.test(base)) return '';
+  return base.slice(0, 120);
+}
+
+function familyStoredFileKind(name) {
+  if (/\.pdf$/i.test(name)) return 'pdf';
+  if (/\.(csv|xls|xlsx)$/i.test(name)) return 'spreadsheet';
+  return 'image';
+}
+
+function normalizeImageRecord(raw) {
+  if (typeof raw === 'string') {
+    const name = raw.trim();
+    return name ? { name, category: '', note: '', starred: false, fileName: '' } : null;
+  }
+  if (!raw || typeof raw !== 'object') return null;
+  const name = String(raw.name || '').trim();
+  if (!name) return null;
+  return {
+    name,
+    category: normalizeImageCategory(raw.category),
+    note: normalizeImageNote(raw.note),
+    starred: normalizeImageStarred(raw.starred),
+    fileName: familyStoredFileKind(name) !== 'image' ? normalizeFamilyFileName(raw.fileName) : '',
+  };
+}
+
+function imageMeta(img) {
+  return {
+    name: img.name,
+    category: img.category || '',
+    note: img.note || '',
+    starred: !!img.starred,
+    fileName: img.fileName || '',
+  };
+}
+
 function parseImages(raw) {
   try {
     const list = JSON.parse(raw || '[]');
-    return Array.isArray(list) ? list.filter(Boolean).map(String) : [];
+    if (!Array.isArray(list)) return [];
+    return list.map(normalizeImageRecord).filter(Boolean);
   } catch {
     return [];
   }
+}
+
+function serializeImages(images) {
+  return JSON.stringify((images || []).map(img => {
+    const category = img.category || '';
+    const note = img.note || '';
+    const starred = !!img.starred;
+    const fileName = img.fileName || '';
+    if (!category && !note && !starred && !fileName) return img.name;
+    const rec = { name: img.name };
+    if (category) rec.category = category;
+    if (note) rec.note = note;
+    if (starred) rec.starred = true;
+    if (fileName) rec.fileName = fileName;
+    return rec;
+  }));
 }
 
 function rowToEvent(row) {
@@ -75,9 +145,14 @@ function rowToEvent(row) {
     title: row.title || '',
     eventDate: row.event_date || '',
     notes: row.notes || '',
-    images: images.map(name => ({
-      name,
-      url: `/family-event-files/${name}`,
+    images: images.map(img => ({
+      name: img.name,
+      kind: familyStoredFileKind(img.name),
+      category: img.category || '',
+      note: img.note || '',
+      starred: !!img.starred,
+      fileName: img.fileName || '',
+      url: `/family-event-files/${img.name}${img.fileName ? `?name=${encodeURIComponent(img.fileName)}` : ''}`,
     })),
     linkedTxnIds: parseLinkedTxnIds(row.linked_txn_ids),
     createdAt: row.created_at,
@@ -85,15 +160,19 @@ function rowToEvent(row) {
   };
 }
 
-function imageExt(mime = '', fileName = '') {
+function familyFileExt(mime = '', fileName = '') {
   const m = String(mime || '').toLowerCase();
-  if (m.includes('png')) return 'png';
-  if (m.includes('webp')) return 'webp';
-  if (m.includes('gif')) return 'gif';
-  if (m.includes('heic') || m.includes('heif')) return 'heic';
-  const fromName = String(fileName || '').match(/\.([a-z0-9]+)$/i)?.[1];
-  if (fromName) return fromName.toLowerCase();
-  return 'jpg';
+  const fromName = String(fileName || '').match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase() || '';
+  if (m === 'application/pdf' || fromName === 'pdf') return 'pdf';
+  if (m === 'text/csv' || m === 'application/csv' || fromName === 'csv') return 'csv';
+  if (m === 'application/vnd.ms-excel' || fromName === 'xls') return 'xls';
+  if (m === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || fromName === 'xlsx') return 'xlsx';
+  if (m.includes('png') || fromName === 'png') return 'png';
+  if (m.includes('webp') || fromName === 'webp') return 'webp';
+  if (m.includes('gif') || fromName === 'gif') return 'gif';
+  if (m.includes('heic') || m.includes('heif') || fromName === 'heic' || fromName === 'heif') return 'heic';
+  if (m.startsWith('image/') || fromName === 'jpg' || fromName === 'jpeg') return 'jpg';
+  return '';
 }
 
 function unlinkImage(name) {
@@ -185,9 +264,20 @@ export function updateFamilyEvent(id, data = {}) {
     throw err;
   }
 
-  let imageNames = existing.images.map(img => img.name);
+  let images = existing.images.map(imageMeta);
   if ('images' in data && Array.isArray(data.images)) {
-    imageNames = data.images.map(x => (typeof x === 'string' ? x : x?.name)).filter(Boolean);
+    const prev = new Map(images.map(img => [img.name, img]));
+    images = data.images.map(raw => {
+      const rec = normalizeImageRecord(raw);
+      if (!rec) return null;
+      const old = prev.get(rec.name);
+      const explicit = (key) => raw && typeof raw === 'object' && Object.prototype.hasOwnProperty.call(raw, key);
+      if (old && !explicit('category')) rec.category = old.category || '';
+      if (old && !explicit('note')) rec.note = old.note || '';
+      if (old && !explicit('starred')) rec.starred = !!old.starred;
+      if (old && !explicit('fileName')) rec.fileName = old.fileName || '';
+      return rec;
+    }).filter(Boolean);
   }
 
   let linkedTxnIds = existing.linkedTxnIds;
@@ -199,7 +289,7 @@ export function updateFamilyEvent(id, data = {}) {
     UPDATE family_events
     SET title = ?, event_date = ?, notes = ?, images = ?, linked_txn_ids = ?, updated_at = datetime('now')
     WHERE id = ?
-  `).run(title, eventDate, notes, JSON.stringify(imageNames), JSON.stringify(linkedTxnIds), id);
+  `).run(title, eventDate, notes, serializeImages(images), JSON.stringify(linkedTxnIds), id);
 
   return getFamilyEvent(id);
 }
@@ -218,7 +308,7 @@ export function deleteFamilyEvent(id) {
   return true;
 }
 
-export function saveFamilyEventImage(eventId, buf, mime = '', fileName = '') {
+export function saveFamilyEventImage(eventId, buf, mime = '', fileName = '', category = '', note = '', starred = false) {
   const existing = getFamilyEvent(eventId);
   if (!existing) {
     const err = new Error('事件不存在');
@@ -226,31 +316,45 @@ export function saveFamilyEventImage(eventId, buf, mime = '', fileName = '') {
     throw err;
   }
   if (!Buffer.isBuffer(buf) || !buf.length) {
-    const err = new Error('无效图片');
+    const err = new Error('无效文件');
     err.status = 400;
     throw err;
   }
   if (buf.length > 8 * 1024 * 1024) {
-    const err = new Error('单张图片不能超过 8MB');
+    const err = new Error('单个文件不能超过 8MB');
     err.status = 400;
     throw err;
   }
   if (existing.images.length >= 12) {
-    const err = new Error('每个事件最多 12 张图片');
+    const err = new Error('每个事件最多 12 个文件');
     err.status = 400;
     throw err;
   }
 
-  const ext = imageExt(mime, fileName);
+  const ext = familyFileExt(mime, fileName);
+  if (!ext) {
+    const err = new Error('仅支持图片、PDF、CSV 或 Excel 文件');
+    err.status = 400;
+    throw err;
+  }
   const name = `${eventId}-${Date.now()}-${randomBytes(3).toString('hex')}.${ext}`;
   writeFileSync(join(FAMILY_EVENT_DIR, name), buf);
 
-  const names = [...existing.images.map(img => img.name), name];
+  const images = [
+    ...existing.images.map(imageMeta),
+    {
+      name,
+      category: normalizeImageCategory(category),
+      note: normalizeImageNote(note),
+      starred: normalizeImageStarred(starred),
+      fileName: ['pdf', 'csv', 'xls', 'xlsx'].includes(ext) ? normalizeFamilyFileName(fileName) : '',
+    },
+  ];
   db.prepare(`
     UPDATE family_events
     SET images = ?, updated_at = datetime('now')
     WHERE id = ?
-  `).run(JSON.stringify(names), eventId);
+  `).run(serializeImages(images), eventId);
 
   return getFamilyEvent(eventId);
 }
@@ -270,11 +374,13 @@ export function removeFamilyEventImage(eventId, imageName) {
     throw err;
   }
   unlinkImage(name);
-  const names = existing.images.map(img => img.name).filter(n => n !== name);
+  const images = existing.images
+    .filter(img => img.name !== name)
+    .map(imageMeta);
   db.prepare(`
     UPDATE family_events
     SET images = ?, updated_at = datetime('now')
     WHERE id = ?
-  `).run(JSON.stringify(names), eventId);
+  `).run(serializeImages(images), eventId);
   return getFamilyEvent(eventId);
 }

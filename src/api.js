@@ -1,9 +1,27 @@
 import { API } from './apiBase.js';
 
-function authHeaders(extra = {}) {
+export function ledgerClientId() {
+  try {
+    if (typeof sessionStorage === 'undefined') return '';
+    const key = 'ledger_client_id';
+    let id = sessionStorage.getItem(key);
+    if (!id) {
+      id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+      sessionStorage.setItem(key, id);
+    }
+    return id;
+  } catch {
+    return '';
+  }
+}
+
+export function authHeaders(extra = {}) {
   const token = sessionStorage.getItem('ledger_session_token');
   const headers = { ...extra };
   if (token) headers.Authorization = `Bearer ${token}`;
+  const clientId = ledgerClientId();
+  if (clientId) headers['X-Ledger-Client'] = clientId;
+  headers['X-Ledger-Sync'] = '1';
   return headers;
 }
 
@@ -38,6 +56,18 @@ async function fetchWithRetry(url, options, { retries = 2, timeoutMs = 60000, re
     }
   }
   throw lastErr;
+}
+
+export async function reportPresence(editing, page) {
+  try {
+    await fetch(`${API}/state/presence`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ editing: !!editing, page: page || '' })
+    });
+  } catch {
+    /* 在线状态失败不影响记账 */
+  }
 }
 
 export async function fetchState() {
@@ -79,6 +109,75 @@ export async function uploadGearImageFromUrl(gearId, imageUrl) {
   const timer = setTimeout(() => controller.abort(), 28000);
   try {
     const res = await fetch(`${API}/gear/${gearId}/image-from-url`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ url: imageUrl }),
+      signal: controller.signal,
+    });
+    if (res.status === 401) throw new Error('登录已过期，请重新登录');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `获取失败 (${res.status})`);
+    }
+    return res.json();
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('请求超时，图片可能过大或网络较慢，请稍后重试');
+    if (err.message === 'Failed to fetch') throw new Error('网络连接失败，请检查网络后重试');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function uploadTravelFile(itemId, file) {
+  const data = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('读取文件失败'));
+    reader.readAsDataURL(file);
+  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+  try {
+    const res = await fetch(`${API}/travel/${encodeURIComponent(itemId)}/file`, {
+      method: 'POST',
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ data, fileName: file.name }),
+      signal: controller.signal,
+    });
+    if (res.status === 401) throw new Error('登录已过期，请重新登录');
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `上传失败 (${res.status})`);
+    }
+    return res.json();
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('上传超时，请稍后重试');
+    if (err.message === 'Failed to fetch') throw new Error('网络连接失败，请检查网络后重试');
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function deleteTravelFile(itemId, name) {
+  const res = await fetch(`${API}/travel/${encodeURIComponent(itemId)}/file/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `删除失败 (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function uploadTravelImageFromUrl(itemId, imageUrl) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 28000);
+  try {
+    const res = await fetch(`${API}/travel/${encodeURIComponent(itemId)}/image-from-url`, {
       method: 'POST',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ url: imageUrl }),
@@ -184,6 +283,20 @@ export async function fetchInvoices() {
   if (res.status === 401) throw new Error('登录已过期，请重新登录');
   if (!res.ok) throw new Error(`加载失败 (${res.status})`);
   return res.json();
+}
+
+export async function downloadInvoiceArchive(ids, archiveName) {
+  const res = await fetch(`${API}/invoices/archive`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ ids, archiveName })
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `下载失败 (${res.status})`);
+  }
+  return res.blob();
 }
 
 export async function scanInvoice(dataUrl, mime, fileName) {
@@ -296,7 +409,7 @@ export async function deleteFamilyEvent(id) {
   return res.json();
 }
 
-export async function uploadFamilyEventImage(id, file) {
+export async function uploadFamilyEventImage(id, file, category = '', note = '', starred = false) {
   const data = await new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
@@ -306,7 +419,7 @@ export async function uploadFamilyEventImage(id, file) {
   const res = await fetch(`${API}/family-events/${id}/images`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ data, mime: file.type, fileName: file.name })
+    body: JSON.stringify({ data, mime: file.type, fileName: file.name, category, note, starred: !!starred })
   });
   if (res.status === 401) throw new Error('登录已过期，请重新登录');
   if (!res.ok) {
@@ -325,6 +438,56 @@ export async function deleteFamilyEventImage(id, imageName) {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `删除图片失败 (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function geocodeTravelPlaces(places) {
+  const res = await fetch(`${API}/travel/geocode`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ places }),
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || '地点定位失败');
+  }
+  return res.json();
+}
+
+export async function resolveTravelMaps(urls) {
+  const res = await fetch(`${API}/travel/resolve-maps`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ urls }),
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || '地图链接无法解析');
+  }
+  const data = await res.json();
+  return data.urls || {};
+}
+
+export async function fetchTravel() {
+  const res = await fetch(`${API}/travel`, { headers: authHeaders() });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) throw new Error(`加载行程失败 (${res.status})`);
+  return res.json();
+}
+
+export async function saveTravel(itinerary) {
+  const res = await fetch(`${API}/travel`, {
+    method: 'PUT',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(itinerary)
+  });
+  if (res.status === 401) throw new Error('登录已过期，请重新登录');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `保存行程失败 (${res.status})`);
   }
   return res.json();
 }

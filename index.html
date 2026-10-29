@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
 <meta name="theme-color" content="#0b0b0f">
 <script>
 (function () {
@@ -26,16 +26,19 @@
 <div id="loginScreen" class="login-screen">
   <div class="login-card">
     <div class="login-logo">
-      <div class="logo-mark" aria-hidden="true"><img class="logo-mark-img" src="/logo.png" alt=""></div>
+      <div class="logo-mark" aria-hidden="true">
+        <img class="logo-mark-img logo-mark-img--dark" src="/logo-dark.png" alt="">
+        <img class="logo-mark-img logo-mark-img--light" src="/logo-light.png" alt="">
+      </div>
       <h1>Loc's Home</h1>
       <p>本地账本 · 输入密码进入</p>
     </div>
     <form id="loginForm" class="login-form">
-      <p class="login-pin-label">输入 4 位密码（可用键盘或下方按键）</p>
+      <p class="login-pin-label">输入 4 位密码</p>
       <div class="pin-dots" id="pinDots" aria-hidden="true">
         <span></span><span></span><span></span><span></span>
       </div>
-      <input id="loginPin" class="pin-hidden-input" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" aria-label="4位密码">
+      <input id="loginPin" class="pin-hidden-input" type="password" inputmode="none" readonly maxlength="4" autocomplete="off" tabindex="-1" aria-hidden="true" aria-label="4位密码">
       <div class="pin-pad" id="pinPad">
         <button type="button" class="pin-key" data-key="1">1</button>
         <button type="button" class="pin-key" data-key="2">2</button>
@@ -57,27 +60,49 @@
   </div>
 </div>
 <div class="app locked">
-<aside class="sb" id="sidebar">
+<div class="sb-backdrop" id="sbBackdrop" aria-hidden="true"></div>
+<header class="chrome" id="appChrome">
+<aside class="sb top-nav" id="sidebar" aria-label="主导航">
   <div class="sb-head">
     <div class="sb-logo">
       <div class="logo-mark logo-mark--avatar" title="Loc's Home" aria-label="Loc's Home">
-        <img class="logo-mark-img" src="/avatar.png" alt="Loc's Home">
+        <img class="logo-mark-img logo-mark-img--dark" src="/logo-dark.png" alt="Loc's Home">
+        <img class="logo-mark-img logo-mark-img--light" src="/logo-light.png" alt="">
       </div>
     </div>
+    <button type="button" class="sb-drawer-close" id="sbDrawerClose" onclick="closeMobileSidebar()" title="关闭菜单" aria-label="关闭菜单"><i class="ti ti-x"></i></button>
   </div>
   <nav class="nav">
     <button class="ni on" onclick="sw('home',this)" title="首页"><span class="ni-icon"><i class="ti ti-home"></i></span><span class="ni-label">首页</span></button>
-    <button class="ni" onclick="sw('ledger',this)" title="明细列表"><span class="ni-icon"><i class="ti ti-list-details"></i></span><span class="ni-label">明细</span></button>
-    <button class="ni" id="nav-trades" onclick="sw('trades',this)" title="关联交易事件"><span class="ni-icon"><i class="ti ti-calendar-event"></i></span><span class="ni-label">事件</span></button>
-    <button class="ni" onclick="sw('catbrowse',this)" title="分类检索"><span class="ni-icon"><i class="ti ti-category"></i></span><span class="ni-label">检索</span></button>
-    <button class="ni" onclick="sw('gear',this)" title="装备库"><span class="ni-icon"><i class="ti ti-baby-carriage"></i></span><span class="ni-label">装备</span></button>
-    <button class="ni" onclick="sw('family',this)" title="家庭事件"><span class="ni-icon"><i class="ti ti-home-heart"></i></span><span class="ni-label">家庭</span></button>
-    <button class="ni" onclick="sw('catreport',this)" title="分类报表"><span class="ni-icon"><i class="ti ti-chart-bar"></i></span><span class="ni-label">报表</span></button>
-    <button class="ni" onclick="sw('renqing',this)" title="人情往来"><span class="ni-icon"><i class="ti ti-heart-handshake"></i></span><span class="ni-label">人情</span></button>
-    <button class="ni" onclick="sw('accounts',this)" title="信用账户"><span class="ni-icon"><i class="ti ti-credit-card"></i></span><span class="ni-label">账户</span></button>
-    <button class="ni" onclick="sw('report',this)" title="收支报告"><span class="ni-icon"><i class="ti ti-report-analytics"></i></span><span class="ni-label">报告</span></button>
-    <button class="ni" onclick="sw('income',this)" title="收入数据"><span class="ni-icon"><i class="ti ti-coin"></i></span><span class="ni-label">收入</span></button>
-    <button class="ni" onclick="sw('company',this)" title="公司成本"><span class="ni-icon"><i class="ti ti-receipt"></i></span><span class="ni-label">公司</span></button>
+    <div class="nav-dd" id="navTxnGroup" data-pages="ledger,trades,catbrowse,catreport,renqing,report,income">
+      <button type="button" class="ni nav-dd-trigger" id="nav-ledger" onclick="onTxnNavTriggerClick(event,this)" title="交易明细" aria-haspopup="true" aria-expanded="false" aria-controls="navTxnMenu">
+        <span class="ni-icon"><i class="ti ti-list-details"></i></span>
+        <span class="ni-label">交易明细</span>
+        <i class="ti ti-chevron-down nav-dd-chevron" aria-hidden="true"></i>
+      </button>
+      <div class="nav-dd-menu" id="navTxnMenu" role="menu">
+        <button type="button" class="ni nav-dd-item" role="menuitem" id="nav-trades" onclick="sw('trades',this)" title="事件标签"><span class="ni-icon"><i class="ti ti-calendar-event"></i></span><span class="ni-label">事件</span></button>
+        <button type="button" class="ni nav-dd-item" role="menuitem" onclick="sw('catbrowse',this)" title="分类检索"><span class="ni-icon"><i class="ti ti-category"></i></span><span class="ni-label">检索</span></button>
+        <button type="button" class="ni nav-dd-item" role="menuitem" onclick="sw('catreport',this)" title="分类报表"><span class="ni-icon"><i class="ti ti-chart-bar"></i></span><span class="ni-label">报表</span></button>
+        <button type="button" class="ni nav-dd-item" role="menuitem" onclick="sw('renqing',this)" title="人情往来"><span class="ni-icon"><i class="ti ti-heart-handshake"></i></span><span class="ni-label">人情</span></button>
+        <button type="button" class="ni nav-dd-item" role="menuitem" onclick="sw('report',this)" title="收支报告"><span class="ni-icon"><i class="ti ti-report-analytics"></i></span><span class="ni-label">报告</span></button>
+        <button type="button" class="ni nav-dd-item" role="menuitem" onclick="sw('income',this)" title="收入数据"><span class="ni-icon"><i class="ti ti-coin"></i></span><span class="ni-label">收入</span></button>
+      </div>
+    </div>
+    <div class="nav-dd" id="navFamilyGroup" data-pages="family,travel,accounts,reminders,gear">
+      <button type="button" class="ni nav-dd-trigger" id="nav-family" onclick="onFamilyNavTriggerClick(event,this)" title="家庭记事" aria-haspopup="true" aria-expanded="false" aria-controls="navFamilyMenu">
+        <span class="ni-icon"><i class="ti ti-home-heart"></i></span>
+        <span class="ni-label">家庭记事</span>
+        <i class="ti ti-chevron-down nav-dd-chevron" aria-hidden="true"></i>
+      </button>
+      <div class="nav-dd-menu" id="navFamilyMenu" role="menu">
+        <button type="button" class="ni nav-dd-item" role="menuitem" onclick="sw('travel',this)" title="香港旅行"><span class="ni-icon"><i class="ti ti-plane-departure"></i></span><span class="ni-label">旅行</span></button>
+        <button type="button" class="ni nav-dd-item" role="menuitem" onclick="sw('accounts',this)" title="信用账户"><span class="ni-icon"><i class="ti ti-credit-card"></i></span><span class="ni-label">账户</span></button>
+        <button type="button" class="ni nav-dd-item" role="menuitem" onclick="sw('reminders',this)" title="提醒事项"><span class="ni-icon"><i class="ti ti-bell-ringing"></i></span><span class="ni-label">提醒</span></button>
+        <button type="button" class="ni nav-dd-item" role="menuitem" onclick="sw('gear',this)" title="装备库"><span class="ni-icon"><i class="ti ti-baby-carriage"></i></span><span class="ni-label">装备</span></button>
+      </div>
+    </div>
+    <button class="ni" onclick="sw('company',this)" title="公司管理"><span class="ni-icon"><i class="ti ti-receipt"></i></span><span class="ni-label">公司管理</span></button>
     <button class="ni" id="nav-import" onclick="sw('import',this)" title="导入预览"><span class="ni-icon"><i class="ti ti-file-import"></i></span><span class="ni-label">导入</span></button>
     <div class="nav-sp"></div>
     <button class="ni" onclick="openAdd()" title="手动新增"><span class="ni-icon"><i class="ti ti-plus"></i></span><span class="ni-label">新增</span></button>
@@ -91,30 +116,37 @@
     </button>
   </div>
 </aside>
-
-<div class="main">
   <div class="topbar">
+    <button type="button" class="sb-menu-btn" id="sbMenuBtn" title="打开导航菜单" aria-label="打开导航菜单" aria-expanded="false" aria-controls="sidebar">
+      <i class="ti ti-menu-2"></i>
+    </button>
     <div class="search-wrap">
       <i class="ti ti-search"></i>
-      <input id="topSearch" placeholder="搜索对方、说明、分类…" oninput="syncSearch(this.value)">
+      <input id="topSearch" placeholder="搜索对方、说明、分类、事件标签…" oninput="syncSearch(this.value)">
     </div>
     <div class="topbar-reminder" id="topbarReminder"></div>
-    <button class="btn-cta" onclick="openImport()"><i class="ti ti-plus"></i> 导入账单</button>
+    <div class="sync-status is-wait" id="syncStatus" role="status" aria-live="polite">正在连接</div>
     <div class="topbar-actions">
       <div class="sv" id="sv"><i class="ti ti-check"></i> 已保存</div>
       <button type="button" class="theme-toggle" id="themeToggleBtn" onclick="toggleAppTheme()" title="切换浅色模式" aria-label="切换浅色模式" aria-pressed="false">
         <i class="ti ti-sun"></i>
       </button>
       <div class="user-pill" id="userPill" title="点击退出登录">
-        <div class="avatar" id="userAvatar"><img src="/avatar.png" alt=""></div>
+        <div class="avatar" id="userAvatar">
+          <img class="logo-mark-img--dark" src="/logo-dark.png" alt="">
+          <img class="logo-mark-img--light" src="/logo-light.png" alt="">
+        </div>
         <span id="userDisplayName">Logic Loc</span>
         <button type="button" class="logout-btn" id="logoutBtn" title="退出登录"><i class="ti ti-logout"></i></button>
       </div>
     </div>
     <h2 id="vt">明细列表</h2>
   </div>
+</header>
 
+<div class="main">
   <div class="page view on" id="view-home">
+    <div class="home-summary home-summary-cost" id="homeCostSummary"></div>
     <div class="home-head">
       <div class="home-head-row">
         <div class="home-month-drop" id="homeMonthDrop">
@@ -127,6 +159,7 @@
       </div>
       <p class="home-sub">收支概览 · 按分类统计</p>
     </div>
+    <div class="home-mobile-insights" id="homeMobileInsights" aria-label="提醒与刷卡提示"></div>
     <div class="home-summary" id="homeSummary"></div>
     <div class="home-charts">
       <div class="home-chart-card">
@@ -181,11 +214,9 @@
         <span class="bulk-lbl">子分类：</span>
         <select id="bulkSubCatSel" class="btn bulk-sub-sel" disabled title="选中项需属于同一分类"></select>
         <button class="btn btn-p bulk-apply" id="bulkSubCatBtn" onclick="applyBulkSubCat()" disabled><i class="ti ti-check"></i> 应用</button>
+        <button class="btn btn-a bulk-apply" id="bulkEventTagBtn" onclick="applyBulkEventTag()" title="给选中的账目贴上同一个事件标签"><i class="ti ti-tag"></i> 事件标签</button>
       </div>
       <div class="bulk-bar-row bulk-bar-row--actions">
-        <button class="btn btn-a bulk-action" id="bulkLinkBtn" onclick="linkLedgerGroup()" disabled title="将多笔借还/付款账目关联并命名"><i class="ti ti-link"></i> 关联</button>
-        <button class="btn bulk-action" id="bulkUnlinkBtn" onclick="unlinkLedgerGroup()" disabled title="取消已有关联"><i class="ti ti-unlink"></i> 取消关联</button>
-        <div class="bulk-sep"></div>
         <button class="btn btn-a bulk-action" id="bulkMergeBtn" onclick="openTxnMergeModal()" disabled title="将选中账目按净额计入一个分类统计"><i class="ti ti-arrows-join"></i> 合并统计</button>
         <button class="btn bulk-action" id="bulkUnmergeBtn" onclick="unmergeLedgerGroup()" disabled title="取消合并统计"><i class="ti ti-arrows-split"></i> 取消合并</button>
         <div class="bulk-sep"></div>
@@ -197,7 +228,7 @@
     <div class="fb">
       <div class="fb-group fb-search">
         <i class="ti ti-search fb-search-icon"></i>
-        <input id="qi" type="search" placeholder="搜索对方、说明、分类…" oninput="syncSearch(this.value)" aria-label="搜索">
+        <input id="qi" type="search" placeholder="搜索对方、说明、分类、事件标签…" oninput="syncSearch(this.value)" aria-label="搜索">
         <button type="button" class="fb-search-clear hide" id="searchClear" onclick="clearSearch()" title="清除搜索"><i class="ti ti-x"></i></button>
       </div>
       <div class="fb-sep" aria-hidden="true"></div>
@@ -218,6 +249,9 @@
         <select id="subf" class="fb-sub-filter" onchange="onSubFilterChange(this.value)" disabled title="子分类筛选" aria-label="子分类筛选">
           <option value="">全部子分类</option>
         </select>
+        <select id="eventTagFilter" class="fb-sub-filter" onchange="onEventTagFilterChange(this.value)" title="事件标签" aria-label="事件标签">
+          <option value="">全部事件</option>
+        </select>
         <div class="fb-seg" id="tfSeg" role="group" aria-label="收支">
           <input type="hidden" id="tf" value="">
           <button type="button" class="fb-seg-btn" data-val="支出" onclick="setTypeFilter('支出')">支</button>
@@ -235,6 +269,7 @@
         <input type="hidden" id="sf" value="d-">
         <button type="button" class="btn btn-sm fb-date-sort on" id="dateSortBtn" onclick="toggleDateSort()" title="当前：日期从新到旧，点击改为从旧到新"><i class="ti ti-sort-descending"></i> 日期</button>
         <button type="button" class="btn btn-sm" onclick="resetF()"><i class="ti ti-refresh"></i> 重置</button>
+        <button type="button" class="btn btn-sm btn-p ledger-add-btn" onclick="openAdd()" title="添加一笔账目"><i class="ti ti-plus"></i> 添加账目</button>
       </div>
     </div>
     <div class="chips chips-src" id="srcChips"></div>
@@ -254,6 +289,7 @@
             <div class="th-row COL COL-NODATE" id="ledgerHead">
               <div class="th"></div>
               <button type="button" class="th th-sort" data-sort="p" onclick="toggleSortCol('p')">交易信息<span class="th-sort-icon"></span></button>
+              <div class="th">事件标签</div>
               <button type="button" class="th th-sort" data-sort="a" onclick="toggleSortCol('a')">金额<span class="th-sort-icon"></span></button>
               <button type="button" class="th th-sort" data-sort="c" onclick="toggleSortCol('c')">分类<span class="th-sort-icon"></span></button>
               <button type="button" class="th th-sort" data-sort="t" onclick="toggleSortCol('t')">收支<span class="th-sort-icon"></span></button>
@@ -273,12 +309,20 @@
   <div class="page view" id="view-trades">
     <div class="trades-head">
       <div class="trades-head-main">
-        <h2 class="trades-title">关联交易事件</h2>
-        <p class="trades-sub">借还、买卖等组合账目 · 自动核对收支盈亏</p>
+        <h2 class="trades-title">事件</h2>
+        <p class="trades-sub">每个事件标签的收入与支出。可以添加分组，把事件拖进去。</p>
       </div>
-      <div class="trades-total" id="tradesTotal" hidden></div>
+      <div class="trades-head-actions">
+        <label class="fb-switch trades-hidden-toggle" title="勾选后隐藏已标记为隐藏的事件">
+          <span class="fb-switch-label">不显示隐藏事件</span>
+          <input type="checkbox" id="tradesHideHidden" onchange="toggleTradesHidden(this.checked)" aria-label="不显示隐藏事件" checked>
+          <span class="fb-switch-ui"></span>
+        </label>
+        <button type="button" class="btn" onclick="createTradeGroup()"><i class="ti ti-folder-plus"></i> 添加事件分组</button>
+        <button type="button" class="btn btn-p" onclick="createTradeEvent()"><i class="ti ti-plus"></i> 新建事件</button>
+      </div>
     </div>
-    <div class="trades-cat-chips hide" id="tradesCatChips"></div>
+    <div class="trades-total" id="tradesTotal" hidden></div>
     <div class="trades-list" id="tradesList"></div>
   </div>
 
@@ -369,7 +413,7 @@
       </div>
       <div class="family-storage" id="familyStorage" hidden>
         <div class="family-storage-head">
-          <span class="family-storage-label"><i class="ti ti-database" aria-hidden="true"></i> 图片存储</span>
+          <span class="family-storage-label"><i class="ti ti-database" aria-hidden="true"></i> 附件存储</span>
           <span class="family-storage-meta" id="familyStorageMeta"></span>
         </div>
         <div class="family-storage-bar" id="familyStorageBar" role="progressbar" aria-valuemin="0" aria-valuemax="100">
@@ -382,8 +426,55 @@
         <input id="familySearchInp" type="search" placeholder="搜索标题、备注、日期…" oninput="onFamilySearch(this.value)" aria-label="搜索家庭事件">
         <button type="button" class="family-search-clear hide" id="familySearchClear" onclick="clearFamilySearch()" title="清除搜索" aria-label="清除搜索"><i class="ti ti-x"></i></button>
       </label>
+      <div class="family-file-cats" id="familyPageFileCats" hidden></div>
     </div>
     <div class="family-list" id="familyList"></div>
+  </div>
+
+  <div class="page view is-list" id="view-travel">
+    <div class="travel-plans" id="travelPlans"></div>
+    <div class="travel-head">
+      <div class="travel-head-copy">
+        <p class="travel-kicker" id="travelKicker"></p>
+      </div>
+      <div class="travel-head-actions">
+        <button type="button" class="btn travel-export-pdf" id="travelExportPdf" title="导出正式行程报告 PDF">
+          <i class="ti ti-file-type-pdf" aria-hidden="true"></i>
+          <span>导出 PDF</span>
+        </button>
+        <div class="travel-total">
+          <span>费用总计（人民币）</span>
+          <strong id="travelTotal"></strong>
+        </div>
+        <button type="button" class="travel-fx" id="travelFx" title="双击或点击修改港币汇率">
+          <span>港币汇率</span>
+          <strong id="travelFxRate"></strong>
+        </button>
+        <div class="travel-saved" id="travelSaved" hidden>
+          <span>节省费用（人民币）</span>
+          <strong id="travelSavedAmount"></strong>
+        </div>
+      </div>
+    </div>
+    <div class="travel-panes" id="travelPanes" role="tablist" aria-label="旅行内容">
+      <button type="button" class="travel-pane on" data-travel-pane="list" role="tab" aria-selected="true">日期列表</button>
+      <button type="button" class="travel-pane" data-travel-pane="map" role="tab" aria-selected="false">线路地图</button>
+      <button type="button" class="travel-pane" data-travel-pane="pack" role="tab" aria-selected="false">行李清单</button>
+    </div>
+
+    <section class="travel-pack" id="travelPack">
+      <div class="travel-pack-grid" id="travelPackGrid"></div>
+    </section>
+
+    <section class="travel-route" id="travelRoute">
+      <div class="travel-route-head">
+        <div class="travel-route-legend" id="travelRouteLegend"></div>
+        <a class="travel-route-google" id="travelRouteGoogle" href="#" target="_blank" rel="noopener noreferrer" hidden>在 Google 地图打开</a>
+      </div>
+      <div class="travel-route-map is-empty" id="travelRouteMap" role="img" aria-label="旅行线路地图"></div>
+      <p class="travel-route-note" id="travelRouteNote">在位置里填写地点或地图链接后，会按日期画在地图上。</p>
+    </section>
+    <div class="travel-board" id="travelBoard"></div>
   </div>
 
   <div class="page view" id="view-renqing">
@@ -406,9 +497,14 @@
     </div>
   </div>
 
+  <div class="page view" id="view-reminders">
+    <p class="report-intro">未完成在左，已完成在右。超过 6 个月的事项列在下方长期提醒。</p>
+    <div id="accountsReminderSection"></div>
+  </div>
+
   <div class="page view" id="view-accounts">
     <div class="accounts-page-head">
-      <p class="report-intro">管理信用卡额度、账单日与还款日，查看免息期时间轴；登记现金账户余额、生活缴费户号、支出预算、长期提醒事项与网站账号。可绑定同银行共享额度。</p>
+      <p class="report-intro">管理信用卡额度、账单日与还款日，查看免息期时间轴；登记现金账户余额、生活缴费户号、支出预算与网站账号。可绑定同银行共享额度。</p>
       <button type="button" class="accounts-settings-btn" onclick="openAccountsMgr()" title="账户管理" aria-label="账户管理"><i class="ti ti-settings"></i></button>
     </div>
     <div id="accountsStatusSection"></div>
@@ -419,7 +515,6 @@
         <div id="accountsCashSection" class="accounts-tab-panel" data-tab="cash"></div>
         <div id="accountsLifeSection" class="accounts-tab-panel" data-tab="life"></div>
         <div id="accountsBudgetSection" class="accounts-tab-panel" data-tab="budget"></div>
-        <div id="accountsReminderSection" class="accounts-tab-panel" data-tab="reminder"></div>
         <div id="accountsWebSection" class="accounts-tab-panel" data-tab="web"></div>
       </div>
     </div>
@@ -522,7 +617,12 @@
               <option value="unprinted">未打印</option>
             </select>
           </div>
-          <div class="inv-toolbar-stats" id="invSummary">共 0 张</div>
+          <div class="inv-toolbar-right">
+            <div class="inv-toolbar-stats" id="invSummary">共 0 张</div>
+            <button type="button" class="btn btn-sm inv-batch-download" id="invBatchDownload" onclick="downloadFilteredInvoices()" disabled>
+              <i class="ti ti-file-zip"></i> 批量下载
+            </button>
+          </div>
         </div>
 
         <div class="inv-table-wrap">
@@ -648,11 +748,23 @@
         <div class="fg"><label>子分类</label><select id="f-sub"><option value="">无</option></select></div>
         <div class="fg"><label>交易对方</label><input type="text" id="f-peer"></div>
         <div class="fg"><label>支付方式</label><input type="text" id="f-pay"></div>
+        <div class="fg span2"><label>事件标签</label><input type="text" id="f-event-tags" placeholder="输入事件标签，多个标签用逗号分隔"></div>
         <div class="fg span2"><label>商品说明</label><textarea id="f-desc"></textarea></div>
         <div class="fg span2"><label>备注</label><input type="text" id="f-note"></div>
       </div>
     </div>
     <div class="mf"><button class="btn" onclick="closeAdd()">取消</button><button class="btn btn-p" onclick="saveAdd()">保存</button></div>
+  </div>
+</div>
+
+<div class="mo hide" id="moTradeMove">
+  <div class="mbox">
+    <div class="mh"><h3><i class="ti ti-folder-share" style="color:var(--primary);margin-right:6px"></i>移动事件</h3><button class="mclose" onclick="closeTradeMoveModal()"><i class="ti ti-x"></i></button></div>
+    <div class="mb">
+      <p class="batch-src-file" id="tradeMoveEventName"></p>
+      <div class="fg"><label>移动到</label><select id="tradeMoveGroupSel"></select></div>
+    </div>
+    <div class="mf"><button class="btn" onclick="closeTradeMoveModal()">取消</button><button class="btn btn-p" onclick="confirmTradeMove()"><i class="ti ti-check"></i> 确认移动</button></div>
   </div>
 </div>
 
@@ -682,7 +794,7 @@
   <div class="mbox wide">
     <div class="mh"><h3>编辑分类</h3><button class="mclose" onclick="closeCat()"><i class="ti ti-x"></i></button></div>
     <div class="mb">
-      <p class="cat-edit-hint">左侧 ⋮⋮ 可拖动调整顺序；点击圆形图标可自定义 emoji，左侧箭头展开子分类。勾选「收入类」的分类会出现在首页收入卡片；「对冲」分类收支相抵只计净额，可与收入类组合使用（如探店置换、代拍代购）。修改名称并保存后，该分类下全部账目会同步到新名称。</p>
+      <p class="cat-edit-hint">左侧 ⋮⋮ 可拖动调整顺序；点击圆形图标可自定义 emoji，左侧箭头展开子分类。勾选「收入类」的分类会出现在首页收入卡片；「对冲」分类收支相抵只计净额，可与收入类组合使用（如探店置换、代拍代购）。修改分类或子分类名称并保存后，相关账目会同步到新名称。</p>
       <div class="cl" id="catList"></div>
       <div class="arow cat-add-row">
         <button type="button" class="cat-emoji-btn" id="nnEmoji" data-emoji="icon:1F4CC" title="新分类图标" onclick="pickNewCatEmoji(event)"></button>
@@ -720,7 +832,7 @@
         <button class="btn btn-sm" onclick="detBulkToggleRefund(false)">撤销退款</button>
         <button class="btn btn-sm" onclick="clearDetSelection()" style="margin-left:auto">✕ 取消</button>
       </div>
-      <div id="detBody" style="max-height:50vh;overflow-y:auto"></div>
+      <div id="detBody"></div>
     </div>
   </div>
 </div>
@@ -753,9 +865,28 @@
   </div>
 </div>
 
+<div class="mo hide" id="moHomeCost">
+  <div class="mbox">
+    <div class="mh"><h3 id="homeCostSettingsTitle">成本计入分类</h3><button class="mclose" onclick="closeHomeCostSettings()"><i class="ti ti-x"></i></button></div>
+    <div class="mb">
+      <p class="cat-edit-hint" id="homeCostSettingsHint">勾选要计入的分类；可进一步勾选子分类。全部子分类勾选等同于整类计入。</p>
+      <div id="homeCostSettingsList" class="home-cost-settings"></div>
+      <div class="home-cost-add" id="homeCostAddWrap">
+        <select id="homeCostAddCat" class="home-cost-add-sel" aria-label="添加分类"></select>
+        <button type="button" class="btn btn-sm" onclick="addHomeCostCat()">添加</button>
+      </div>
+    </div>
+    <div class="mf">
+      <button class="btn" onclick="resetHomeCostSettings()">恢复默认</button>
+      <button class="btn" onclick="closeHomeCostSettings()">取消</button>
+      <button class="btn btn-p" onclick="saveHomeCostSettings()">确定</button>
+    </div>
+  </div>
+</div>
+
 <div class="mo hide" id="moTradeAdd">
   <div class="mbox wide">
-    <div class="mh"><h3><i class="ti ti-plus" style="color:var(--primary);margin-right:6px"></i>加入交易账目</h3><button class="mclose" onclick="closeTradeAddModal()"><i class="ti ti-x"></i></button></div>
+    <div class="mh"><h3><i class="ti ti-plus" style="color:var(--primary);margin-right:6px"></i>加入账目</h3><button class="mclose" onclick="closeTradeAddModal()"><i class="ti ti-x"></i></button></div>
     <div class="mb trade-add-body">
       <p class="trade-add-event" id="tradeAddEventName"></p>
       <div class="form-grid trade-add-filters">
@@ -962,6 +1093,21 @@
 </div>
 <input type="file" id="invFileInp" accept="image/*,.pdf" style="display:none">
 
+<div class="mo hide" id="moInvoiceMatch">
+  <div class="mbox wide">
+    <div class="mh"><h3><i class="ti ti-link" style="color:var(--primary);margin-right:6px"></i>匹配账目</h3><button class="mclose" onclick="closeInvoiceMatch()"><i class="ti ti-x"></i></button></div>
+    <div class="mb inv-match-body">
+      <p class="inv-match-current" id="invMatchCurrent"></p>
+      <label class="inv-match-search" for="invMatchSearch">
+        <i class="ti ti-search"></i>
+        <input type="search" id="invMatchSearch" placeholder="搜索日期、交易对方、来源、金额或说明" autocomplete="off" oninput="searchInvoiceMatch(this.value)">
+      </label>
+      <div class="inv-match-results" id="invMatchResults"></div>
+    </div>
+    <div class="mf"><button class="btn inv-match-clear" onclick="selectInvoiceMatch(0)">取消当前匹配</button><button class="btn" onclick="closeInvoiceMatch()">关闭</button></div>
+  </div>
+</div>
+
 <div class="mo hide" id="moFamily">
   <div class="mbox wide">
     <div class="mh"><h3><i class="ti ti-home-heart" style="color:var(--primary);margin-right:6px"></i>新增家庭事件</h3><button class="mclose" onclick="closeFamilyEdit()"><i class="ti ti-x"></i></button></div>
@@ -970,13 +1116,22 @@
       <div class="fg"><label>日期</label><input type="date" id="familyDateInp"></div>
       <div class="fg"><label>备注</label><textarea id="familyNotesInp" rows="3" placeholder="可选，记录当时的细节…"></textarea></div>
       <div class="fg">
-        <label>图片</label>
+        <label>附件</label>
         <div class="family-img-actions">
-          <button type="button" class="btn btn-sm" onclick="triggerFamilyUpload()"><i class="ti ti-photo-plus"></i> 上传图片</button>
-          <span class="family-img-hint">最多 12 张，单张不超过 8MB</span>
+          <button type="button" class="btn btn-sm" onclick="triggerFamilyUpload()"><i class="ti ti-paperclip"></i> 上传文件</button>
+          <span class="family-img-hint">支持图片、PDF、CSV 和 Excel，最多 12 个，单个不超过 8MB。勾选后可编入分类。</span>
         </div>
-        <div class="family-img-grid" id="familySavedImgs" hidden></div>
-        <div class="family-img-grid" id="familyPendingImgs" hidden></div>
+        <div class="family-file-cats" id="familyModalFileCats" hidden></div>
+        <div class="family-file-assign">
+          <div class="family-file-cat-field">
+            <input type="text" id="familyFileCatInp" maxlength="20" placeholder="分类名称，如：证件、旅行" autocomplete="off">
+            <div class="family-file-cat-suggest" id="familyFileCatSuggest" hidden></div>
+          </div>
+          <button type="button" class="btn btn-sm btn-p" onclick="assignSelectedFamilyFiles()">编入分类</button>
+          <button type="button" class="btn btn-sm" onclick="clearSelectedFamilyFileCat()">移出分类</button>
+        </div>
+        <div class="family-file-groups" id="familySavedImgs" hidden></div>
+        <div class="family-file-groups" id="familyPendingImgs" hidden></div>
       </div>
       <div class="fg family-txn-field">
         <div class="family-txn-head">
@@ -998,7 +1153,7 @@
     </div>
   </div>
 </div>
-<input type="file" id="familyFileInp" accept="image/*,.heic,.heif" multiple style="display:none">
+<input type="file" id="familyFileInp" accept="image/*,.heic,.heif,.pdf,application/pdf,.csv,text/csv,.xls,application/vnd.ms-excel,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple style="display:none">
 
 <div class="mo hide" id="moFamilyTxnSearch">
   <div class="mbox">

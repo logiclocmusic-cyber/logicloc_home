@@ -9,6 +9,8 @@ const LOGO_CODE_ALIAS = {
 };
 
 const BANK_RULES = [
+  { patterns: ['招商永隆', '永隆银行', 'CMB Wing Lung', 'Wing Lung'], code: 'CMBWL', colors: ['#c41230', '#8b0e22'], name: '招商永隆银行' },
+  { patterns: ['汇丰香港', '汇丰银行', '汇丰', 'HSBC'], code: 'HSBC', colors: ['#db0011', '#a5000c'], name: '汇丰银行' },
   { patterns: ['招商银行', '招行'], code: 'CMB', colors: ['#c41230', '#8b0e22'], name: '招商银行' },
   { patterns: ['浦发银行', '浦发'], code: 'SPDB', colors: ['#003b8e', '#1565c0'], name: '浦发银行' },
   { patterns: ['建设银行', '建行'], code: 'CCB', colors: ['#0066b3', '#004d8c'], name: '建设银行' },
@@ -31,6 +33,7 @@ const BANK_RULES = [
   { patterns: ['江苏银行'], code: 'JSBANK', colors: ['#1565c0', '#0d47a1'], name: '江苏银行' },
   { patterns: ['南京银行'], code: 'NJCB', colors: ['#c41230', '#8b0e22'], name: '南京银行' },
   { patterns: ['天府银行', '天府'], code: 'TFBANK', colors: ['#c41230', '#8b0e22'], name: '天府银行' },
+  { patterns: ['长城华西银行', '长城华西', 'GW BANK', 'GWBANK'], code: 'GWBANK', colors: ['#005bac', '#f5a623'], name: '长城华西银行' },
   { patterns: ['支付宝', '花呗', '余额宝'], code: 'ALIPAY', colors: ['#1677ff', '#0958d9'], name: '支付宝' },
   { patterns: ['微信', '零钱'], code: 'WECHAT', colors: ['#07c160', '#059a4c'], name: '微信支付' },
   { patterns: ['云闪付', '银联'], code: 'UPOP', colors: ['#e21836', '#b5122b'], name: '云闪付' },
@@ -76,7 +79,10 @@ export function accountGroupName(key) {
 }
 
 const CUSTOM_BANK_LOGOS = {
-  TFBANK: '/bank-logos/tfbank.png'
+  TFBANK: '/bank-logos/tfbank.png',
+  GWBANK: '/bank-logos/gwbank.png',
+  CMBWL: '/bank-logos/cmbwinglung.png',
+  HSBC: '/bank-logos/hsbc.png'
 };
 
 const NO_LOGO_FILE = new Set(['HZBANK', 'UPOP']);

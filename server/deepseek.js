@@ -1,7 +1,6 @@
 import { imageToText } from './ocr.js';
 import { pdfToText, isInvoiceTextUsable, pdfPageImageForOcr, hasPoppler } from './pdfText.js';
 import { geminiEnabled, scanInvoiceWithGemini, scanInvoiceTextWithGemini } from './gemini-invoice.js';
-import { configEnvHint } from './loadEnv.js';
 
 const API_BASE = normalizeApiBase(process.env.DEEPSEEK_API_BASE || 'https://api.deepseek.com');
 const MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat';
@@ -148,6 +147,20 @@ function normalizeInvoiceCategory(value) {
   return INVOICE_CATEGORIES.includes(s) ? s : '其他';
 }
 
+function normalizeInvoiceNo(value) {
+  const raw = String(value || '').trim();
+  const digits = raw.replace(/\D/g, '');
+  return digits.length >= 8 && digits.length <= 22 ? digits : raw;
+}
+
+function normalizeMoney(value) {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
+  const cleaned = String(value).replace(/[¥￥,\s元]/g, '').trim();
+  const number = Number(cleaned);
+  return Number.isFinite(number) ? Math.round(number * 100) / 100 : null;
+}
+
 export function normalizeInvoiceFields(parsed = {}, opts = {}) {
   const sourceText = opts.sourceText || '';
   parsed = mapChineseInvoiceFields(parsed);
@@ -166,15 +179,95 @@ export function normalizeInvoiceFields(parsed = {}, opts = {}) {
   return {
     vendor,
     buyer,
-    invoiceNo: parsed.invoiceNo || parsed.invoice_no || '',
+    invoiceNo: normalizeInvoiceNo(parsed.invoiceNo || parsed.invoice_no || ''),
     invoiceDate: normalizeInvoiceDate(parsed.invoiceDate || parsed.invoice_date || ''),
-    amount: parsed.amount ?? null,
-    taxAmount: parsed.taxAmount ?? parsed.tax_amount ?? null,
-    total: parsed.total ?? null,
+    amount: normalizeMoney(parsed.amount),
+    taxAmount: normalizeMoney(parsed.taxAmount ?? parsed.tax_amount),
+    total: normalizeMoney(parsed.total),
     category: normalizeInvoiceCategory(parsed.category),
     items: parsed.items || [],
     notes: parsed.notes || ''
   };
+}
+
+export function invoiceReviewWarnings(parsed = {}) {
+  const invoice = normalizeInvoiceFields(parsed);
+  const warnings = [];
+  const no = String(invoice.invoiceNo || '');
+  if (!/^(?:\d{8}|\d{10}|\d{12}|\d{20})$/.test(no)) {
+    warnings.push('发票号码格式异常，请核对原票');
+  }
+  if (!invoice.invoiceDate || !/^\d{4}-\d{2}-\d{2}$/.test(invoice.invoiceDate)) {
+    warnings.push('未可靠识别开票日期');
+  }
+  if (!invoice.vendor) warnings.push('未可靠识别销售方');
+  if (!COMPANY_BUYERS.some(company => company.full === invoice.buyer)) {
+    warnings.push('购买方不是已登记的公司，请核对');
+  }
+  if (
+    invoice.amount != null
+    && invoice.taxAmount != null
+    && invoice.total != null
+    && Math.abs(invoice.amount + invoice.taxAmount - invoice.total) > 0.02
+  ) {
+    warnings.push('不含税金额加税额与价税合计不一致');
+  }
+  return warnings;
+}
+
+function moneyFromText(value) {
+  return normalizeMoney(String(value || '').replace(/[^\d.,-]/g, ''));
+}
+
+function cleanPartyName(value) {
+  return String(value || '')
+    .replace(/(?:纳税人识别号|统一社会信用代码|地址、电话|开户行及账号).*$/g, '')
+    .replace(/^[：:\s]+|[：:\s]+$/g, '')
+    .trim();
+}
+
+/** 仅根据 OCR/PDF 原文做确定性提取，不调用 AI，也不猜测缺失字段。 */
+export function parseInvoiceOcrText(sourceText = '', fileName = '') {
+  const text = String(sourceText || '').replace(/\r/g, '\n');
+  const compact = text.replace(/[ \t]+/g, ' ');
+  const parsed = {};
+
+  const invoiceNo = invoiceNoFromFilename(fileName)
+    || enrichParsedFromOcrText({}, text).invoiceNo;
+  if (invoiceNo) parsed.invoiceNo = invoiceNo;
+
+  const dateMatch = compact.match(/开\s*票\s*日\s*期\s*[:：]?\s*(\d{4}\s*[年/.-]\s*\d{1,2}\s*[月/.-]\s*\d{1,2})/)
+    || compact.match(/(\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日?)/)
+    || compact.match(/(?<!\d)(\d{4}-\d{1,2}-\d{1,2})(?!\d)/);
+  if (dateMatch) parsed.invoiceDate = normalizeInvoiceDate(dateMatch[1]);
+
+  const buyers = matchCompanyBuyer(compactName(text));
+  if (buyers.length === 1) parsed.buyer = buyers[0];
+
+  const nameCandidates = [...compact.matchAll(/名\s*称\s*[:：]\s*([^\n]{2,80})/g)]
+    .map(match => cleanPartyName(match[1]))
+    .filter(name => name && !/^[\dA-Z]+$/i.test(name));
+  parsed.vendor = nameCandidates.find(name =>
+    !isCompanyBuyer(name)
+    && !/购买方|销售方|发票号码|纳税人/.test(name)
+  ) || '';
+
+  const totalMatch = compact.match(/价\s*税\s*合\s*计(?:\s*[（(]小写[）)])?[\s:：¥￥]*(\d[\d,]*\.\d{2})/);
+  if (totalMatch) parsed.total = moneyFromText(totalMatch[1]);
+
+  const lines = compact.split('\n').map(line => line.trim()).filter(Boolean);
+  const sumLine = lines.find(line => /合\s*计/.test(line) && !/价\s*税\s*合\s*计/.test(line));
+  if (sumLine) {
+    const values = [...sumLine.matchAll(/(?:¥|￥)?\s*(\d[\d,]*\.\d{2})/g)]
+      .map(match => moneyFromText(match[1]))
+      .filter(value => value != null);
+    if (values.length >= 2) {
+      parsed.amount = values[values.length - 2];
+      parsed.taxAmount = values[values.length - 1];
+    }
+  }
+
+  return normalizeInvoiceFields(parsed, { sourceText: text });
 }
 
 const BUYER_HINT = `购买方（buyer）规则（非常重要）：
@@ -190,15 +283,18 @@ const FIELDS_HINT = `字段说明：
 - buyer: 购买方名称（购方，付款收票的一方，只能是本公司的两家主体之一）
 ${BUYER_HINT}
 - invoiceNo: 发票号码
+- 发票号码必须读取“发票号码”字段；禁止把购买方或销售方的纳税人识别号、统一社会信用代码当成发票号码
 - invoiceDate: 开票日期，必须返回 YYYY-MM-DD（例如 2025-06-14）
+- 不要把打印日期、订单日期、服务期间当成开票日期
 - amount: 不含税金额（数字）
 - taxAmount: 税额（数字）
 - total: 价税合计（数字）
+- 金额必须读取发票合计栏：amount + taxAmount 应等于 total；不要使用单价、数量、税率或大写金额
 - category: 费用类型，从以下选一个：办公用品、差旅、餐饮、设备、服务、租金、其他
-- items: 明细数组，每项 { name, qty, unitPrice, amount }
+- items: 固定返回空数组 []，不要逐项抄录商品明细
 - notes: 备注摘要
 
-无法识别的字段填 null。金额字段必须是数字或 null。`;
+请逐字读取，不要猜测或补写发票上不存在的信息。无法识别的字段填 null。金额字段必须是数字或 null。`;
 
 async function chatCompletion(messages, { json = true } = {}) {
   const cfg = textAiConfig();
@@ -286,28 +382,37 @@ function extractAssistantText(message = {}) {
   return '';
 }
 
-function invoiceNoFromFilename(fileName) {
-  const m = String(fileName || '').match(/(\d{18,22})/);
-  return m ? m[1] : '';
+export function invoiceNoFromFilename(fileName) {
+  const name = String(fileName || '');
+  const digital = name.match(/(?<!\d)(\d{20})(?!\d)/);
+  if (digital) return digital[1];
+  // 旧版发票号码可能为 8/10/12 位；仅在文件名明确包含“发票”时采用，
+  // 避免把文件名中的 YYYYMMDD 日期误当成发票号。
+  if (/发票/.test(name)) {
+    const legacy = name.match(/(?<!\d)(\d{12}|\d{10}|\d{8})(?!\d)/);
+    if (legacy) return legacy[1];
+  }
+  return '';
 }
 
 function applyFilenameHints(parsed = {}, fileName = '') {
-  if (!parsed.invoiceNo) {
-    const fromName = invoiceNoFromFilename(fileName);
-    if (fromName) parsed = { ...parsed, invoiceNo: fromName };
-  }
+  const fromName = invoiceNoFromFilename(fileName);
+  if (fromName) parsed = { ...parsed, invoiceNo: fromName };
   return parsed;
 }
 
 /** 从 OCR 原文补全 AI 漏掉的号码/金额（扫描件常见） */
-function enrichParsedFromOcrText(parsed = {}, ocrText = '') {
+export function enrichParsedFromOcrText(parsed = {}, ocrText = '') {
   const t = String(ocrText || '');
   const p = { ...parsed };
   if (!p.invoiceNo) {
-    const m = t.match(/发票[号码号]*\s*[:：]?\s*(\d{18,22})/)
-      || t.match(/\b(\d{20})\b/)
-      || t.match(/(\d{18,22})/);
+    const m = t.match(/发票[号码号]*\s*[:：]?\s*(\d{20}|\d{12}|\d{10}|\d{8})(?!\d)/)
+      || t.match(/(?<!\d)(\d{20})(?!\d)/);
     if (m) p.invoiceNo = m[1] || m[0];
+  }
+  if (p.total == null) {
+    const labeled = t.match(/价\s*税\s*合\s*计(?:\s*[（(]小写[）)])?[\s:：¥￥]*(\d[\d,]*\.\d{2})/);
+    if (labeled) p.total = parseFloat(labeled[1].replace(/,/g, ''));
   }
   if (p.total == null && p.amount == null) {
     const amounts = [...t.matchAll(/[¥￥]\s*([\d,]+\.\d{2})/g)]
@@ -322,10 +427,11 @@ function mergeParseHints(parsed = {}, { fileName = '', ocrText = '' } = {}) {
   return enrichParsedFromOcrText(applyFilenameHints(parsed, fileName), ocrText);
 }
 
-function invoiceResultUsable(parsed = {}, { fileName = '', ocrText = '' } = {}) {
+export function invoiceResultUsable(parsed = {}, { fileName = '', ocrText = '' } = {}) {
   const n = normalizeInvoiceFields(mergeParseHints(parsed, { fileName, ocrText }));
   const no = String(n.invoiceNo || '').replace(/\s/g, '');
-  if (!/^\d{18,22}$/.test(no)) return false;
+  // 18 位号码通常是纳税人识别号，不应当作为发票号码通过。
+  if (!/^(?:\d{8}|\d{10}|\d{12}|\d{20})$/.test(no)) return false;
   return n.total != null || n.amount != null;
 }
 
@@ -450,9 +556,41 @@ export function getAiStatus() {
     model,
     gemini,
     deepseek: !!textCfg,
-    configHint: configured ? null : configEnvHint(),
+    configHint: configured ? null : '未配置发票 AI 密钥，可继续使用手动录入',
     visionModel: vision ? VISION_MODEL : null,
     poppler: hasPoppler(),
+  };
+}
+
+export async function scanInvoiceOcr(base64, mime = 'image/jpeg', opts = {}) {
+  const fileName = opts.fileName || '';
+  const buf = Buffer.from(base64, 'base64');
+  const isPdf = mime === 'application/pdf' || String(mime || '').includes('pdf');
+  let sourceText = '';
+
+  if (isPdf) {
+    try {
+      sourceText = await pdfToText(buf);
+    } catch (err) {
+      console.warn('[invoice-ocr] PDF text extraction failed:', err.message);
+    }
+    if (sourceText.replace(/\s/g, '').length < 20) {
+      const pageImg = await pdfPageImageForOcr(buf);
+      sourceText = await imageToText(pageImg);
+    }
+  } else {
+    sourceText = await imageToText(buf);
+  }
+
+  if (!sourceText || sourceText.replace(/\s/g, '').length < 4) {
+    throw new Error('未能识别到文字，请上传更清晰的文件，或使用“手动录入”');
+  }
+
+  return {
+    parsed: parseInvoiceOcrText(sourceText, fileName),
+    raw: sourceText,
+    ocrText: sourceText,
+    mode: 'ocr',
   };
 }
 
@@ -544,10 +682,19 @@ export async function scanInvoiceImage(base64, mime = 'image/jpeg', opts = {}) {
     );
   }
 
+  // 图片先做一次 OCR，把可复制的文字作为视觉模型的校对依据。
+  // OCR 可能不完整，因此仍以原图识别为主，不直接覆盖视觉结果。
+  let ocrText = '';
+  try {
+    ocrText = await imageToText(buf);
+  } catch (err) {
+    console.warn('[invoice-scan] image OCR hint failed:', err.message);
+  }
+
   if (gemini) {
     try {
-      const result = await scanWithGeminiMedia(buf, mime || 'image/jpeg', { fileName });
-      if (invoiceResultUsable(result.parsed, { fileName })) return finish(result);
+      const result = await scanWithGeminiMedia(buf, mime || 'image/jpeg', { fileName, ocrHint: ocrText });
+      if (invoiceResultUsable(result.parsed, { fileName, ocrText })) return finish(result, ocrText);
     } catch (err) {
       console.warn('[invoice-scan] gemini image failed, fallback OCR:', err.message);
     }
@@ -555,14 +702,17 @@ export async function scanInvoiceImage(base64, mime = 'image/jpeg', opts = {}) {
 
   if (visionEnabled()) {
     try {
-      const result = await scanWithVision(buf.toString('base64'), mime || 'image/jpeg', { fileName });
-      if (invoiceResultUsable(result.parsed, { fileName })) return finish(result);
+      const result = await scanWithVision(
+        buf.toString('base64'),
+        mime || 'image/jpeg',
+        { fileName, ocrHint: ocrText }
+      );
+      if (invoiceResultUsable(result.parsed, { fileName, ocrText })) return finish(result, ocrText);
     } catch (err) {
       console.warn('[invoice-scan] vision failed, fallback OCR:', err.message);
     }
   }
 
-  const ocrText = await imageToText(buf);
   if (!ocrText || ocrText.replace(/\s/g, '').length < 4) {
     throw new Error('未能从图片识别文字，请上传更清晰的发票照片，或手动填写');
   }
