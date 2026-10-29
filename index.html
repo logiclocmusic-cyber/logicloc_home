@@ -109,39 +109,45 @@
     <button class="ni" onclick="openSrc()" title="账单来源"><span class="ni-icon"><i class="ti ti-building-bank"></i></span><span class="ni-label">来源</span></button>
     <button class="ni" onclick="openCat()" title="编辑分类"><span class="ni-icon"><i class="ti ti-tags"></i></span><span class="ni-label">分类</span></button>
   </nav>
-  <div class="sb-footer" id="sbFooter">
-    <button type="button" class="sb-foot-btn" id="sbFooterBtn" aria-label="数据存储">
-      <i class="ti ti-database"></i>
-      <span class="sb-foot-tip" id="sbFooterTip"><strong>SQLite 数据库</strong><span id="sbFooterSub">加载中…</span></span>
-    </button>
-  </div>
 </aside>
-  <div class="topbar">
-    <button type="button" class="sb-menu-btn" id="sbMenuBtn" title="打开导航菜单" aria-label="打开导航菜单" aria-expanded="false" aria-controls="sidebar">
-      <i class="ti ti-menu-2"></i>
-    </button>
+<div class="chrome-bar">
+  <div class="chrome-tools">
+    <div class="sb-footer" id="sbFooter">
+      <button type="button" class="sb-foot-btn" id="sbFooterBtn" aria-label="数据存储">
+        <i class="ti ti-database"></i>
+        <span class="sb-foot-tip" id="sbFooterTip"><strong>SQLite 数据库</strong><span id="sbFooterSub">加载中…</span></span>
+      </button>
+    </div>
     <div class="search-wrap">
       <i class="ti ti-search"></i>
       <input id="topSearch" placeholder="搜索对方、说明、分类、事件标签…" oninput="syncSearch(this.value)">
     </div>
     <div class="topbar-reminder" id="topbarReminder"></div>
-    <div class="sync-status is-wait" id="syncStatus" role="status" aria-live="polite">正在连接</div>
-    <div class="topbar-actions">
-      <div class="sv" id="sv"><i class="ti ti-check"></i> 已保存</div>
-      <button type="button" class="theme-toggle" id="themeToggleBtn" onclick="toggleAppTheme()" title="切换浅色模式" aria-label="切换浅色模式" aria-pressed="false">
-        <i class="ti ti-sun"></i>
-      </button>
-      <div class="user-pill" id="userPill" title="点击退出登录">
-        <div class="avatar" id="userAvatar">
-          <img class="logo-mark-img--dark" src="/logo-dark.png" alt="">
-          <img class="logo-mark-img--light" src="/logo-light.png" alt="">
+  </div>
+  <div class="topbar">
+    <button type="button" class="sb-menu-btn" id="sbMenuBtn" title="打开导航菜单" aria-label="打开导航菜单" aria-expanded="false" aria-controls="sidebar">
+      <i class="ti ti-menu-2"></i>
+    </button>
+    <div class="topbar-end">
+      <div class="sync-status is-wait" id="syncStatus" role="status" aria-live="polite">正在连接</div>
+      <div class="topbar-actions">
+        <div class="sv" id="sv"><i class="ti ti-check"></i> 已保存</div>
+        <button type="button" class="theme-toggle" id="themeToggleBtn" onclick="toggleAppTheme()" title="切换浅色模式" aria-label="切换浅色模式" aria-pressed="false">
+          <i class="ti ti-sun"></i>
+        </button>
+        <div class="user-pill" id="userPill" title="点击退出登录">
+          <div class="avatar" id="userAvatar">
+            <img class="logo-mark-img--dark" src="/logo-dark.png" alt="">
+            <img class="logo-mark-img--light" src="/logo-light.png" alt="">
+          </div>
+          <span id="userDisplayName">Logic Loc</span>
+          <button type="button" class="logout-btn" id="logoutBtn" title="退出登录"><i class="ti ti-logout"></i></button>
         </div>
-        <span id="userDisplayName">Logic Loc</span>
-        <button type="button" class="logout-btn" id="logoutBtn" title="退出登录"><i class="ti ti-logout"></i></button>
       </div>
     </div>
     <h2 id="vt">明细列表</h2>
   </div>
+</div>
 </header>
 
 <div class="main">

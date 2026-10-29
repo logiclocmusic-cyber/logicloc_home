@@ -98,7 +98,7 @@ html[data-theme="light"] .avatar{
 
 /* ── Unified chrome: top-nav + tools in one row ── */
 .chrome{
-  display:flex;flex-direction:row;align-items:center;gap:6px;
+  display:flex;flex-direction:row;align-items:center;flex-wrap:wrap;gap:6px;row-gap:6px;
   flex-shrink:0;min-width:0;width:100%;
   background:var(--sb-bg);
   border:1px solid var(--sb-bdr);border-radius:16px;
@@ -109,8 +109,8 @@ html[data-theme="light"] .avatar{
 
 /* ── Top nav (was Sidebar) ── */
 .sb{
-  /* Take remaining chrome width so left Logo+menus keep room; tools sit on the right */
-  flex:1 1 0;width:auto;min-width:0;max-width:none;
+  /* Hug the menu items. Free space stays before the right-hand status cluster. */
+  flex:0 0 auto;width:auto;min-width:0;max-width:100%;
   background:transparent;
   display:flex;flex-direction:row;align-items:center;gap:8px;
   padding:0;
@@ -136,7 +136,7 @@ html[data-theme="light"] .sb .logo-mark{background:#fff}
 .sb .logo-mark--avatar{border:none}
 
 .nav{
-  padding:0;flex:1;min-width:0;display:flex;flex-direction:row;align-items:center;gap:2px;
+  padding:0;flex:0 1 auto;min-width:0;display:flex;flex-direction:row;align-items:center;gap:2px;
   overflow-x:auto;overflow-y:hidden;
   scrollbar-width:none;-ms-overflow-style:none;
   -webkit-overflow-scrolling:touch;
@@ -249,13 +249,13 @@ html[data-theme="light"] .sb .logo-mark{background:#fff}
 .sb-foot-btn{
   position:relative;display:flex;align-items:center;justify-content:center;
   width:30px;height:30px;border:none;border-radius:50%;
-  background:var(--overlay-08,rgba(255,255,255,.08));color:var(--nav-fg);font-size:14px;cursor:default;
+  background:var(--overlay-08,rgba(255,255,255,.08));color:var(--nav-fg);font-size:13px;cursor:default;
   transition:background .15s,color .15s;
   overflow:visible;
 }
 .sb-foot-btn:hover{background:rgba(255,255,255,.14);color:rgba(255,255,255,.9)}
 .sb-foot-tip{
-  position:absolute;right:0;left:auto;top:calc(100% + 8px);bottom:auto;
+  position:absolute;left:0;right:auto;top:calc(100% + 8px);bottom:auto;
   min-width:168px;max-width:240px;padding:10px 12px;
   background:var(--surf2);border:1px solid var(--bdr);border-radius:12px;
   box-shadow:var(--shadow);
@@ -280,12 +280,22 @@ html[data-theme="light"] .sb .logo-mark{background:#fff}
 .topbar{
   background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;
   padding:0;display:flex;align-items:center;gap:6px;
-  /* Hug the right edge; shrink (search first) before eating left nav space */
-  flex:0 1 auto;min-width:0;max-width:100%;
+  /* Status + theme/account only. Pinned right; width changes must not shift .chrome-tools. */
+  flex:0 0 auto;min-width:0;max-width:100%;
   margin-left:auto;position:relative;top:auto;z-index:auto;
   border:none;border-radius:0;margin-top:0;margin-bottom:0;margin-right:0;
   zoom:1;
 }
+.topbar-end{
+  display:flex;align-items:center;gap:6px;
+  flex:0 0 auto;min-width:0;max-width:100%;
+}
+.chrome-tools{
+  display:flex;align-items:center;gap:6px;
+  flex:0 0 auto;min-width:0;max-width:100%;
+}
+/* Desktop: no box, so tools and the right cluster stay direct chrome flex items. */
+.chrome-bar{display:contents}
 .search-wrap{
   /* Prefer shrink over grow so 首页/交易明细/家庭记事/公司管理 stay visible */
   flex:0 1 140px;max-width:168px;min-width:72px;display:flex;align-items:center;gap:6px;
@@ -293,7 +303,7 @@ html[data-theme="light"] .sb .logo-mark{background:#fff}
   border:1px solid var(--bdr);transition:border-color .15s,box-shadow .15s;
 }
 .search-wrap:focus-within{border-color:rgba(91,140,255,.45);box-shadow:0 0 0 2px var(--focus-ring)}
-.search-wrap i{color:var(--txt3);font-size:14px;pointer-events:none;flex-shrink:0}
+.search-wrap i{color:var(--txt3);font-size:13px;pointer-events:none;flex-shrink:0}
 .search-wrap input{
   flex:1;min-width:0;border:none;background:transparent;font-size:12px;color:var(--txt);
   outline:none;font-family:inherit;
@@ -406,7 +416,7 @@ html[data-theme="light"] .sb .logo-mark{background:#fff}
 .topbar-reminder-btn{
   position:relative;width:30px;height:30px;border:1px solid var(--bdr);border-radius:10px;
   background:var(--surf2);color:var(--txt2);cursor:pointer;
-  display:inline-flex;align-items:center;justify-content:center;font-size:15px;
+  display:inline-flex;align-items:center;justify-content:center;font-size:13px;
   transition:background .15s,color .15s,border-color .15s,box-shadow .15s;
 }
 .topbar-reminder-btn:hover,.topbar-reminder.is-open .topbar-reminder-btn{
@@ -5155,40 +5165,47 @@ html:not([data-theme="light"]) .accounts-web-entry-card-summary:hover{background
     overflow-x:hidden;overflow-y:auto;
   }
 
-  .sb-footer{margin-top:4px}
+  .sb-footer{margin:0}
   .sb-head{border-bottom:1px solid var(--hair);margin-bottom:12px;padding:4px 4px 14px}
-  .sb-foot-tip{left:0;right:auto;bottom:calc(100% + 8px);top:auto}
-
-  .chrome{
-    display:contents;
+  .sb-foot-btn{width:40px;height:40px;border-radius:12px;font-size:16px}
+  .sb-foot-tip{
+    position:fixed;left:max(12px,env(safe-area-inset-left));right:auto;
+    top:calc(env(safe-area-inset-top) + 118px);bottom:auto;
+    width:min(240px,calc(100vw - 24px));z-index:140;
   }
-  .topbar{
-    zoom:1;transform:none;width:auto;
-    flex-wrap:wrap;gap:8px;padding:8px 10px;
-    margin:8px 8px 6px;border-radius:16px;
+
+  .chrome{display:contents}
+  .chrome-bar{
+    display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+    position:sticky;top:0;z-index:10;
+    width:auto;margin:8px 8px 6px;padding:8px 10px;border-radius:16px;
     background:var(--topbar-bg);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
     border:1px solid var(--bdr);
-    flex:none;max-width:none;position:sticky;top:0;z-index:10;
+    box-shadow:none;
   }
+  .topbar{display:contents}
+  .sb-menu-btn{order:0}
+  .chrome-tools{order:1;flex:1 1 0;min-width:0;max-width:none}
+  .topbar-end{order:2;flex:1 0 100%;min-width:100%;max-width:100%}
   .search-wrap{
-    order:3;flex:1 1 calc(100% - 52px);max-width:none;min-width:0;height:38px;padding:0 12px;
+    order:0;flex:1 1 auto;max-width:none;min-width:0;height:38px;padding:0 12px;
   }
   .search-wrap i{font-size:16px}
   .search-wrap input{font-size:13px}
-  .topbar-reminder{order:2}
-  .topbar-reminder-btn{width:40px;height:40px;border-radius:12px;font-size:17px}
+  .topbar-reminder{order:0}
+  .topbar-reminder-btn{width:40px;height:40px;border-radius:12px;font-size:16px}
   .topbar-reminder-pop{
     position:fixed;
     left:max(12px,env(safe-area-inset-left));
     right:max(12px,env(safe-area-inset-right));
-    top:calc(env(safe-area-inset-top) + 62px);
+    top:calc(env(safe-area-inset-top) + 120px);
     width:auto;
     max-width:none;
     max-height:min(70vh,480px);
     z-index:130;
   }
-  .sync-status{order:4;flex:1 1 100%;max-width:none;margin-left:0;height:28px;font-size:12px}
-  .topbar-actions{order:2;gap:6px;margin-left:0}
+  .sync-status{order:0;flex:0 1 auto;width:auto;max-width:calc(100% - 108px);min-width:0;margin-left:0;height:28px;font-size:12px}
+  .topbar-actions{order:0;gap:6px;margin-left:auto;flex-shrink:0}
   .topbar .btn-cta{
     order:2;height:40px;width:40px;padding:0;justify-content:center;border-radius:12px;
   }
@@ -5244,7 +5261,7 @@ html:not([data-theme="light"]) .accounts-web-entry-card-summary:hover{background
 
 @media (max-width: 480px) {
   .accounts-status-val{font-size:18px}
-  .topbar{margin:6px 6px 4px;padding:8px}
+  .chrome-bar{margin:6px 6px 4px;padding:8px}
   .page{padding:6px 8px 20px}
   .home-sub{font-size:12px}
   .cc{padding:12px}
@@ -6181,6 +6198,8 @@ select,input[type="text"],input[type="search"],input[type="number"],input[type="
   .sb{border-radius:0;padding:0}
   .main{margin-left:0;border-radius:22px}
   .topbar{border-radius:0;gap:4px;margin-left:auto}
+  .chrome-tools{gap:4px}
+  .sb-foot-btn,.topbar-reminder-btn{width:28px;height:28px}
   .search-wrap{max-width:120px;flex:0 1 100px;flex-basis:100px;min-width:56px;height:28px;padding:0 8px}
   .sync-status{max-width:72px;padding:0 6px;font-size:10.5px}
   .btn-cta-label{display:none}
